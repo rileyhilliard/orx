@@ -1,0 +1,55 @@
+# Design
+
+orx's terminal UI. It borrows rra's rules (dark, quiet, one accent, hierarchy from brightness rather than hue) and translates them to a character grid. Colors live in `src/tui/theme.ts`, the only file under `src/tui/` allowed to hold color literals (the Grit plugin flags hex strings anywhere else). This file says what each role is for. Read it before a visual change, and load the `tui-design-slop` skill before adding a panel, border, header, badge, spinner, or empty state.
+
+## Theme
+
+The terminal's own background shows through: orx never paints a full-screen fill, so it looks right in light and dark terminal themes as far as a fixed palette can. The palette assumes a dark background, the common case; text roles are chosen to stay readable on a light one.
+
+## Color roles
+
+| Role | Token | Use for |
+| --- | --- | --- |
+| Text | `theme.text` | Assistant replies |
+| User | `theme.user` | The user's messages, prefixed `> ` |
+| Muted | `theme.muted` | The model id in the header, placeholders, the empty-state line |
+| Faint | `theme.faint` | Usage lines, key hints, the chat id: present but out of the way |
+| Accent | `theme.accent` | The `orx` wordmark and the picker's border. One job per screen |
+| Tool | `theme.tool` | Tool call lines (`→ currentTime({...})`) |
+| Error | `theme.error` | The error line under a reply, and nothing else |
+| Border | `theme.border` | The composer frame (`theme.faint` while a reply streams), and the picker's selected row |
+| Selected | `theme.selectedBg` | The picker's background, so it reads as a layer over the chat |
+
+## Layout
+
+Top to bottom: a one-row header (`orx`, the model, the short chat id right-aligned), the message list (fills the rest, sticks to the bottom while a reply streams), the composer (a bordered one-line input), and a one-row footer with key hints or a status message such as "Exported to orx-chat-0f0e0d0c.md". Every fixed row has `flexShrink={0}` so a long thread can't squeeze them.
+
+Messages are separated by one blank row. A reply is its tool lines, then its text, then an error line if it failed, then its usage line (`model · 278 in / 30 out · $0.000057`). No boxes around messages, no avatars, no timestamps.
+
+The model picker is an overlay inset from the edges, with a search input and a list of model ids. It's the only bordered panel besides the composer.
+
+## Keys
+
+| Key | Does |
+| --- | --- |
+| Enter | Send the message |
+| Esc | Stop the streaming reply (it's saved, marked interrupted), or close the picker |
+| Ctrl+P | Open the model picker (not while a reply streams) |
+| Ctrl+E | Export the chat as Markdown into the current directory |
+| Ctrl+C | Quit, stopping a reply first so it's saved; exit code 0 |
+
+The footer always lists these. A new key goes in the footer, this table, and `app.tsx`'s docblock in the same change. Don't bind keys terminals commonly swallow (Ctrl+S, Ctrl+Q, Ctrl+Z). Ctrl+E takes over the input's end-of-line shortcut; the input is one line, so End does the same job.
+
+## States
+
+- Empty chat: one muted line saying how to send and pick a model (the footer lists the rest). No banner, no ASCII art.
+- Streaming: the reply shows `…` until the first text arrives; the composer's placeholder says "Replying… Esc stops" and its border goes faint.
+- Error: the partial reply stays, with the error line under it. A retryable error says "(send again to retry)"; a non-retryable one (a rejected key) says only what happened.
+- Models list unavailable: the picker says so in the error color, and Esc closes it; chat keeps the current model.
+
+## Do and don't
+
+- Do let the terminal's background and font do the work. Don't draw full-width bars, gradients, or box-drawing frames around content.
+- Do keep one accent job per screen. Don't color labels, counts, and borders in the accent at once.
+- Do show numbers plainly (`12 in / 5 out`, `$0.000420`). Don't add spinners that move while nothing is happening; the streaming text is the progress indicator.
+- Don't write to stdout or stderr while the TUI runs: logs go to the log file only (`TerminalLogging` is off).
