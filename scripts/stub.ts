@@ -1,0 +1,95 @@
+#!/usr/bin/env bun
+// `bun run stub` / `bun run stub:stop`: a stub OpenRouter and stub GitHub releases on local
+// ports, so orx can be driven end to end with no key and no spend.
+//
+//   start  Reuse the stub already running from this checkout, or start scripts/stub-server.ts
+//          detached. Prints `export` lines on stdout, so `eval "$(bun run --silent stub)"`
+//          points this shell at it; the rest goes to stderr.
+//   stop   Stop it.
+//
+// Ports: ORX_STUB_PORT (default 5190) for OpenRouter and the next one for releases.
+import { spawn } from "node:child_process";
+import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type RunningStub, runningStub, STUB_PID_FILE, stubEnv } from "./lib/stub-pid";
+
+process.chdir(join(import.meta.dirname, ".."));
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+const announce = (stub: RunningStub) => {
+  for (const [key, value] of Object.entries(stubEnv(stub))) {
+    process.stdout.write(`export ${key}=${value}\n`);
+  }
+  process.stderr.write(
+    `Stub OpenRouter on :${stub.openRouterPort}, stub releases on :${stub.releasesPort} (pid ${stub.pid}).\n` +
+      `Point a shell at it: eval "$(bun run --silent stub)". bun run orx and tui:capture pick it up\n` +
+      "from those vars. Stop: bun run stub:stop\n",
+  );
+};
+
+const start = async () => {
+  const running = runningStub();
+  if (running) {
+    announce(running);
+    return 0;
+  }
+  const port = Number(process.env.ORX_STUB_PORT || 5190);
+  mkdirSync("logs", { recursive: true });
+  const err = openSync("logs/stub.err", "w");
+  const child = spawn(
+    process.execPath,
+    ["scripts/stub-server.ts", String(port), String(port + 1)],
+    {
+      detached: true,
+      stdio: ["ignore", "ignore", err],
+    },
+  );
+  closeSync(err);
+  child.unref();
+  for (let i = 0; i < 100; i++) {
+    const stub = runningStub();
+    if (stub) {
+      announce(stub);
+      return 0;
+    }
+    if (child.pid === undefined || !alive(child.pid)) break;
+    await sleep(50);
+  }
+  process.stderr.write(`The stub didn't start (${STUB_PID_FILE} never appeared). Its output:\n`);
+  process.stderr.write(readFileSync("logs/stub.err", "utf8"));
+  return 1;
+};
+
+const stop = async () => {
+  const running = runningStub();
+  if (!running) {
+    process.stderr.write("No stub is running from this checkout.\n");
+    return 0;
+  }
+  process.kill(running.pid, "SIGTERM");
+  for (let i = 0; i < 100 && alive(running.pid); i++) await sleep(50);
+  if (alive(running.pid)) {
+    process.stderr.write(`The stub (pid ${running.pid}) didn't exit.\n`);
+    return 1;
+  }
+  process.stderr.write(`Stopped the stub (pid ${running.pid}).\n`);
+  return 0;
+};
+
+const command = process.argv[2];
+if (command === "start") process.exitCode = await start();
+else if (command === "stop") process.exitCode = await stop();
+else {
+  process.stderr.write("usage: scripts/stub.ts start|stop\n");
+  process.exitCode = 2;
+}
