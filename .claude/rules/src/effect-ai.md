@@ -1,0 +1,40 @@
+---
+paths:
+  - "src/core/chat.ts"
+  - "src/core/chat-options.ts"
+  - "src/core/extract.ts"
+  - "src/core/upstream.ts"
+  - "src/services/Llm.ts"
+  - "src/tools/**"
+  - "src/schemas/tools.ts"
+  - "src/commands/ask.ts"
+  - "src/commands/mcp.ts"
+---
+
+# Effect AI: the turn loop, tools, structured output
+
+The model layer is Effect AI (`LanguageModel`, `Tool`, `Toolkit`, `Prompt`, `AiError` from `effect/unstable/ai`) with `@effect/ai-openrouter` as the provider. Read the installed `.d.ts` before writing against it (`node_modules/effect/dist/unstable/ai/*.d.ts`, `node_modules/@effect/ai-openrouter/dist/*.d.ts`); the `effect` skill has the verified shapes. Vercel AI SDK names (`streamText` options, `maxSteps`, `tool({ inputSchema })`, `useChat`) don't apply here.
+
+## The turn loop is ours
+
+- `LanguageModel.streamText({ prompt, toolkit })` resolves the tool calls of one model step (the stream emits `tool-call` and `tool-result` parts) and stops. It has no step loop. `runTurn` in `src/core/chat.ts` is that loop: when a step finishes with `"tool-calls"`, it appends the step's parts (`Prompt.concat(prompt, Prompt.fromResponseParts(parts))`) and prompts again, up to `MAX_TOOL_STEPS`. Usage and cost are summed across steps, from each step's `finish` part (`part.usage`, and OpenRouter's cost in `part.metadata.openrouter.usage.cost`).
+- A turn emits `TurnEvent`s (text deltas, tool calls and results, then one `finish` with the whole reply). `orx ask` renders them as text or NDJSON; the TUI bridge maps them to `UiEvent`s. Add a new kind of event there, not a side channel.
+- Retry only before the first part. A step is retried (twice, doubling from 500 ms) only when nothing has been emitted yet and `error.isRetryable`: once text reached the user, a retry would repeat it. That's a flag checked inside `Stream.catchIf`, not `Stream.retry` (which re-runs the stream from the start, duplicates output, and ignores the flag).
+- The stream-duration cap is `Stream.interruptWhen(Effect.sleep(maxStreamDuration) ...)` failing with `timedOut(...)`; a bare `Stream.timeout` would end the stream without an error.
+- `Stream.onExit` runs `finalize` exactly once however the turn ends (done, failed, interrupted by Ctrl+C, the consumer stopping early): it logs the `llm call` line and calls `onEnd`, which saves the chat with the reply as far as it got (`interrupted: true` when it didn't finish). Don't save from anywhere else. A consumer that stops early (the TUI's `iterator.return()`) ends the stream with a `Success` exit, not an interruption, so "didn't finish" can't be read from the exit tag alone; it has to come from whether the final `finish` event was produced.
+- Upstream failures are `AiError`s: map them once with `toUpstreamError` (`src/core/upstream.ts`), which decides the message and `retryable` by `error.reason._tag` (`AuthenticationError`, `ContentPolicyError`, and `InvalidRequestError` not retryable; `RateLimitError`, `QuotaExhaustedError`, and everything else retryable). Never show `error.message` from the provider raw; `detail` carries it for logs.
+
+## Tools
+
+- A tool is `Tool.make(name, { description, parameters, success, failure?, failureMode? })` with Effect Schemas from `src/schemas/tools.ts`, grouped in a `Toolkit` and implemented with `toolkit.toLayer({ name: handler })`. `ChatTools` / `ChatToolsLive` in `src/tools/index.ts` are what chat sends; `McpTools` in `src/tools/mcp.ts` is `Toolkit.merge(ChatTools, ...)` plus MCP-only tools, so a chat tool is served by `orx mcp` automatically.
+- Handlers are Effects that get services from the context (`Clock`, `ChatStore`), so tests control them (`TestClock`). A tool whose failure the model should see uses `failureMode: "return"` with a `failure` schema (`ErrorBody`); otherwise a failure fails the turn.
+- The JSON Schema a provider sees comes from `Tool.getJsonSchema(tool)`: objects are open (`additionalProperties: true`), and annotating the tool with `Tool.Strict` doesn't change that (it only sets the `strict` flag in the request OpenRouter receives); an `identifier` annotation on the parameters produces a top-level `$ref` into `$defs`; descriptions and examples come from annotations on the schema before any `.check(...)`, and a custom `Schema.makeFilter` contributes nothing. `@effect/ai-openrouter` then picks a codec transformer by model id: `openai/*` (and `gpt-`, `o1-`, `o3-`, `o4-`) and `anthropic/*` (and `claude-`) ids get the OpenAI or Anthropic rewrite, which closes objects (`additionalProperties: false`) and drops `examples`; every other model gets the open schema. So the same tool reaches different models differently: a description must carry what an example would. Print `Tool.getJsonSchema(tool)` and read it before a model sees a new tool, then pin it in a test.
+- The system prompt (`DEFAULT_SYSTEM_PROMPT` in `src/config.ts`, `SYSTEM_PROMPT` env) tells the model when to prefer a tool over guessing.
+
+## Structured output
+
+`extractContact` uses `LanguageModel.generateObject({ prompt, schema: Contact, objectName })`, then decodes `response.value` with the same schema again: model output is a trust boundary. A failed decode, `StructuredOutputError`, or `InvalidOutputError` is `InvalidModelOutput` (exit 5, retryable); other `AiError`s go through `toUpstreamError`. Non-streaming calls get `Effect.timeoutOrElse` and `Effect.retry` on retryable upstream errors only.
+
+## Tests
+
+The model is either the real provider against the stub OpenRouter (`tests/helpers/stub-openrouter.ts`, the default through `runCli` with `OPENROUTER_BASE_URL` pointed at it, and the replay fixtures) or a scripted `LanguageModel` through `Llm.layerModel`. Cover: text streaming, a tool call and its follow-up step, the step cap, retry before the first part and no retry after it, the stream timeout saving a partial reply, usage and cost summed across steps, and each `AiError` reason's exit code and `retryable`.

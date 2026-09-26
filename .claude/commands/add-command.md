@@ -1,0 +1,24 @@
+---
+description: Add a CLI command end to end (schema, program, command, output, exit codes, tests)
+argument-hint: "<what the command does>"
+---
+
+Add a command: $ARGUMENTS
+
+`orx extract` is the smallest complete slice, so use it as the template: `src/schemas/extract.ts`, `src/core/extract.ts`, `src/commands/extract.ts`, and its cases in the tests. `orx export` shows a command that reads saved state and writes a file. Read the rules for the paths you touch (`cli.md`, `effect-services.md`, `testing.md`, and `effect-ai.md` if it calls a model) and load the `effect` skill before writing Effect code.
+
+If the request is ambiguous (what goes in, what comes out on stdout and with `--json`, what counts as failure and which exit code), state your assumptions in one short list before writing code, and ask if a wrong guess would be expensive to undo. The argv shape and exit codes are an interface scripts will depend on.
+
+1. **Schema** in `src/schemas/<domain>.ts`, re-exported from `index.ts`: the decoded input and the result, each a `Schema.Struct` (or a checked primitive) with a same-named type. Decoding is where validation lives (trim, lengths, brands), with a `message` on anything a user can trip.
+2. **Program** in `src/core/<domain>.ts`: a function from decoded input to an Effect that gets services with `yield*` and loads config with `loadConfig` only if it needs settings. No argv, no printing. Expected failures are tagged errors; reuse the ones in `src/errors.ts` where they fit. A new error gets a case in `exitCodeFor` and `retryableFor` and a user-safe message. State that must persist is a service (`/add-service`).
+3. **Command** in `src/commands/<name>.ts`: `Command.make(name, { ...args, json: jsonFlag }, handler).pipe(Command.withDescription(...))`, with flags and arguments from `effect/unstable/cli` (`Flag.String`, `Flag.Boolean`, `Argument.String`, `Flag.optional`, `Argument.variadic`, `withDescription` on each). The handler decodes (`decodeInput(Schema)`, `readPipedStdin` if it takes stdin), runs the program, and renders: `out.json(result)` with `--json`, `out.line(...)` for text, `out.note(...)` for anything that isn't the result. Add it to `withSubcommands` in `src/cli.ts`. Nothing under `src/tui/` is imported statically; a TUI needs a dynamic import like `commands/chat.ts`.
+4. **Tests** through `runCli` (`tests/helpers/cli.ts`):
+   - success: stdout holds exactly the result, as text and with `--json`; exit 0
+   - each tagged error: its exit code, the message on stderr, stdout empty, and `{"error":{tag,message,retryable}}` on stderr with `--json`
+   - a usage error (missing argument, bad flag): exit 2, stdout empty
+   - the program with `it.effect` if it has time-based or retry behavior
+   - the stub OpenRouter or stub releases for any HTTP it does, so no test touches the network
+5. **Docs**: the command and its exit codes in the README Commands section, the architecture map in `AGENTS.md` if a new file or directory appeared.
+6. `/check`, then run it for real: `bun run stub`, export its env, `bun run orx -- <name> ...` with and without `--json`, and read `logs/orx.jsonl` for its `command` line. If only the compiled binary could break it, add one step to `e2e/`.
+
+Keep the command thin. Don't add flags, config, or output formats the request didn't ask for; say what you left out instead.

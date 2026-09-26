@@ -1,0 +1,40 @@
+---
+paths:
+  - "src/tui/**"
+  - "src/commands/chat.ts"
+  - "tests/tui/**"
+  - "scripts/tui-capture.ts"
+  - "DESIGN.md"
+---
+
+# TUI (OpenTUI + React)
+
+`orx chat` is OpenTUI (`@opentui/core` + `@opentui/react`, pinned exactly `0.5.12`) with React 19. Load the `opentui` skill before changing anything here, and the `tui-design-slop` skill before adding a header, status line, empty state, or panel. `DESIGN.md` has the tokens, layout, keybindings, and states.
+
+## The bridge
+
+- `src/tui/launch.tsx` is the only TUI file that imports `effect`. It captures `Effect.context()` and hands components a `ChatBridge` (`src/tui/types.ts`): plain data, promises (`listModels`, `exportMarkdown`), and an async iterable per turn (`send`, built with `Stream.toAsyncIterableWith(context)`). Errors arrive already mapped to `{ message, retryable }`, and the iterable yields an `error` event rather than throwing. Components never import `effect`, `~/core`, or `~/services` (the `guard-boundaries` hook and the Grit rule deny `effect` imports under `src/tui/` outside `launch.tsx`).
+- Something new a component needs goes on `ChatBridge` as a plain function, built in `launch.tsx` from an Effect program. Keep the types in `types.ts` free of Effect types.
+- Stopping a reply is `iterator.return()` on the turn's iterator: that stops the stream, `runTurn`'s `onExit` saves the partial reply, and the bridge reloads the saved chat. The stop arrives as a `Success` exit, not an interruption (see `effect-ai.md`), so a test should assert the saved reply is marked interrupted.
+- `commands/chat.ts` loads the bridge with a dynamic `import("../tui/launch")` so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree.
+
+## Terminal and signal ownership
+
+- Effect owns signals and the exit code; OpenTUI must not. The renderer is created with `RENDERER_OPTIONS` (`exitOnCtrlC: false`, `exitSignals: []`, `consoleMode: "disabled"`), and `tests/tui/launch.test.ts` pins them. OpenTUI's defaults would call `process.exit` on Ctrl+C and on SIGINT/SIGTERM/SIGHUP (among others), skipping the chat save and returning the wrong exit code; `exitSignals: []` is honored (an empty array, not a fallback to the defaults).
+- The renderer puts stdin in raw mode, so Ctrl+C arrives as a key, not a SIGINT. It's a `useKeyboard` binding that stops any reply, then calls `bridge.quit()`, which resolves the handler normally (exit 0). A real signal (`kill -INT`) interrupts the Effect fiber; the renderer is an `Effect.acquireRelease` resource, so `destroy()` restores the terminal either way.
+- While a renderer exists it has installed `process.on` handlers for `uncaughtException` and `unhandledRejection` (they print the error and don't exit) and replaced `globalThis.requestAnimationFrame`. A floating promise in a component won't crash the process; it prints over the screen. Handle every promise from the bridge (`.then(ok, fail)` or try/finally), as `app.tsx` does.
+- Logs: `launchChat` provides `TerminalLogging` false, so while the TUI runs only the file sink writes. Never write to stdout or stderr from a component; show state in the UI.
+- `src/bin.ts` deletes `DEV` before anything imports `@opentui/react`, which loads its devtools when `DEV=true`.
+
+## Components
+
+- Intrinsic elements are OpenTUI's (`box`, `text`, `span`, `input`, `textarea`, `select`, `scrollbox`, `markdown`, `code`), laid out with Yoga flexbox props (`flexDirection`, `flexGrow`, `padding*`, `border`). There is no DOM, no CSS, and no `onClick`.
+- Colors come from `theme` in `src/tui/theme.ts`; a hex literal anywhere else under `src/tui/` fails lint. Keys use `key.name` and modifier flags (`key.ctrl`, `key.shift`) from `useKeyboard`; a binding that should not fire while streaming or while the picker is open checks that state, as the existing ones do. New bindings go in `DESIGN.md` and the command description.
+- States to cover: empty chat, streaming, tool call shown, finished (usage line under the reply), interrupted, error (Retry offered only when `retryable`), models list unavailable (picker falls back to the default), export done and failed.
+
+## Tests
+
+- TUI tests are `bun test` only (`bun run test:tui`, or `bun test ./tests/tui/<file>`): `testRender` from `@opentui/react/test-utils` needs Bun, and vitest excludes `tests/tui/`. `tests/tui/setup.ts` (bunfig preload) isolates the env the way vitest's setup does.
+- Render with `testRender(<App bridge={fake} />, { width, height })`, drive with `mockInput` (`typeText`, `pressEnter`, `pressKey`, `pressCtrlC`), wait with `waitForFrame` / `renderOnce`, and assert on `captureCharFrame()`. A fake `ChatBridge` is plain objects and async generators; no Effect needed. The closed-loop test builds the real bridge over the stub OpenRouter.
+- Destroy the renderer after each test (`renderer.destroy()`), or its process handlers and raw-mode stdin leak into the next one.
+- To see the real screen: `bun run tui:capture -- chat --keys "hi<enter>"` runs orx in a PTY and prints the rendered screen as text.
