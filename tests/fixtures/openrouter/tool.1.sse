@@ -1,0 +1,30 @@
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"The","reasoning_details":[{"type":"reasoning.text","text":"The","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" user wants to know","reasoning_details":[{"type":"reasoning.text","text":" user wants to know","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" the current time in","reasoning_details":[{"type":"reasoning.text","text":" the current time in","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" Tokyo. I'll","reasoning_details":[{"type":"reasoning.text","text":" Tokyo. I'll","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" use","reasoning_details":[{"type":"reasoning.text","text":" use","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" the currentTime tool with","reasoning_details":[{"type":"reasoning.text","text":" the currentTime tool with","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" the Asia/Tok","reasoning_details":[{"type":"reasoning.text","text":" the Asia/Tok","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"yo time zone.","reasoning_details":[{"type":"reasoning.text","text":"yo time zone.","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"id":"call_01a0d855ced87ae080522212","type":"function","function":{"name":"currentTime","arguments":""}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":""}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"{"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"\"timeZone\":\"Asia/Tokyo\"}"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}]}
+
+data: {"id":"gen-1790335896-3QCys5GMNFW6qZzMrgla","object":"chat.completion.chunk","created":1790335896,"model":"z-ai/glm-5.3-flash","provider":"Together","system_fingerprint":"default","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}],"usage":{"prompt_tokens":276,"completion_tokens":41,"total_tokens":317,"cost":0.00003886,"is_byok":false,"prompt_tokens_details":{"cached_tokens":192,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00003886,"upstream_inference_prompt_cost":0.00001836,"upstream_inference_completions_cost":0.0000205},"completion_tokens_details":{"reasoning_tokens":26,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+

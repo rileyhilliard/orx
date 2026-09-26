@@ -1,0 +1,29 @@
+import { Schema } from "effect";
+import { ChatId, Usage } from "./chat";
+import { ErrorBody } from "./errors";
+
+/**
+ * One line of `orx ask --json` output (NDJSON on stdout), in order: text deltas and tool
+ * events as they happen, then exactly one `done` or `error`. This is a public contract for
+ * scripts and agents: add fields, don't rename or remove them.
+ */
+export const AskEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), delta: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("tool-call"), name: Schema.String, input: Schema.Unknown }),
+  Schema.Struct({
+    type: Schema.Literal("tool-result"),
+    name: Schema.String,
+    output: Schema.Unknown,
+    isFailure: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("done"),
+    chatId: ChatId,
+    model: Schema.optional(Schema.String),
+    provider: Schema.optional(Schema.String),
+    finishReason: Schema.String,
+    usage: Usage,
+  }),
+  Schema.Struct({ type: Schema.Literal("error"), error: ErrorBody }),
+]);
+export type AskEvent = typeof AskEvent.Type;

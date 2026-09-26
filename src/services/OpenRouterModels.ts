@@ -1,0 +1,100 @@
+import { Clock, Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import type { ModelInfo } from "~/schemas";
+import { AppConfig } from "../config";
+import { type InvalidConfig, UpstreamUnavailable } from "../errors";
+
+export interface OpenRouterModelsShape {
+  /** OpenRouter's models list, cached in memory with a TTL. Needs no API key. */
+  readonly list: Effect.Effect<ReadonlyArray<ModelInfo>, UpstreamUnavailable | InvalidConfig>;
+}
+
+export const MODELS_FETCH_TIMEOUT = Duration.seconds(10);
+/** Two retries, jittered exponential from 500ms. */
+export const modelsRetrySchedule = Schedule.max([
+  Schedule.exponential(Duration.millis(500)).pipe(Schedule.jittered),
+  Schedule.recurs(2),
+]);
+
+/** GET /models as OpenRouter sends it (only the fields orx uses). A trust boundary: decoded. */
+const WireModels = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      canonical_slug: Schema.optional(Schema.NullOr(Schema.String)),
+      name: Schema.String,
+      context_length: Schema.optional(Schema.NullOr(Schema.Number)),
+      pricing: Schema.Struct({ prompt: Schema.String, completion: Schema.String }),
+    }),
+  ),
+});
+const decodeWire = Schema.decodeUnknownEffect(WireModels);
+
+const toModelInfo = (model: (typeof WireModels.Type)["data"][number]): ModelInfo => ({
+  id: model.id,
+  canonicalSlug: model.canonical_slug ?? model.id,
+  name: model.name,
+  provider: model.id.split("/")[0] ?? "other",
+  contextLength: model.context_length ?? null,
+  promptPrice: Number(model.pricing.prompt) || 0,
+  completionPrice: Number(model.pricing.completion) || 0,
+});
+
+const make = Effect.gen(function* () {
+  const { load } = yield* AppConfig;
+  const http = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
+  const cache = yield* Ref.make(
+    Option.none<{ readonly at: number; readonly models: ReadonlyArray<ModelInfo> }>(),
+  );
+
+  const fetchModels = (baseUrl: string) =>
+    http
+      .execute(
+        HttpClientRequest.get(`${baseUrl}/models`, { urlParams: { output_modalities: "text" } }),
+      )
+      .pipe(
+        Effect.flatMap((response) => response.json),
+        Effect.flatMap(decodeWire),
+        Effect.map((wire) => wire.data.map(toModelInfo)),
+        Effect.tapError((cause) => Effect.logWarning("Models list fetch failed", cause)),
+        Effect.mapError(
+          () =>
+            new UpstreamUnavailable({
+              message: "Couldn't fetch the OpenRouter models list.",
+              retryable: true,
+            }),
+        ),
+        Effect.timeoutOrElse({
+          duration: MODELS_FETCH_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new UpstreamUnavailable({
+                message: "Timed out fetching the OpenRouter models list.",
+                retryable: true,
+              }),
+            ),
+        }),
+        Effect.retry(modelsRetrySchedule),
+      );
+
+  const list = Effect.gen(function* () {
+    const config = yield* load;
+    const now = yield* Clock.currentTimeMillis;
+    const cached = yield* Ref.get(cache);
+    if (Option.isSome(cached) && now - cached.value.at < Duration.toMillis(config.modelsCacheTtl)) {
+      return cached.value.models;
+    }
+    const models = yield* fetchModels(config.baseUrl);
+    yield* Ref.set(cache, Option.some({ at: yield* Clock.currentTimeMillis, models }));
+    return models;
+  });
+
+  return { list } satisfies OpenRouterModelsShape;
+});
+
+/** OpenRouter's non-streaming API (the models list), over Effect's HttpClient. */
+export class OpenRouterModels extends Context.Service<OpenRouterModels, OpenRouterModelsShape>()(
+  "orx/OpenRouterModels",
+) {
+  static readonly layer = Layer.effect(OpenRouterModels, make);
+}
