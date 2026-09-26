@@ -31,10 +31,12 @@ export const runningStub = (): RunningStub | undefined => {
 };
 
 /**
- * The env that points orx at the stub (no real key, no spend). ORX_INSTALL_DIR keeps
- * install.sh inside this checkout (.orx/bin), away from a real ~/.local/bin/orx.
+ * The env that points orx at the stub (no real key, no spend). The data and install dirs stay
+ * inside this checkout (.orx/), so `./dist/orx` and install.sh driven through the stub never
+ * touch the user's real chats or ~/.local/bin/orx.
  */
 export const stubEnv = (stub: RunningStub) => ({
+  ORX_DATA_DIR: resolve(".orx/data"),
   ORX_INSTALL_DIR: resolve(".orx/bin"),
   OPENROUTER_API_KEY: "sk-or-stub",
   OPENROUTER_BASE_URL: `http://127.0.0.1:${stub.openRouterPort}/api/v1`,

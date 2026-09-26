@@ -105,6 +105,16 @@ describe("App", () => {
     expect(calls.sent).toEqual([["hi", "acme/cheap-model"]]);
   });
 
+  it("filters the picker's list as you type", async () => {
+    const { bridge } = fakeBridge([]);
+    const { mockInput, waitForFrame } = await render(bridge);
+    mockInput.pressKey("p", { ctrl: true });
+    await waitForFrame((f) => f.includes("▶ openai/gpt-test"));
+    await mockInput.typeText("cheap");
+    const frame = await waitForFrame((f) => f.includes("▶ acme/cheap-model"));
+    expect(frame).not.toContain("  openai/gpt-test\n");
+  });
+
   it("quits on Ctrl+C", async () => {
     const { bridge, calls } = fakeBridge([]);
     const { mockInput, waitFor } = await render(bridge);
