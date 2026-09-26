@@ -1,0 +1,53 @@
+// Repo boundaries from .claude/rules/src/ that a pattern can check. Messages name the rule to read.
+// Only src/bin.ts and src/tui/** may touch Bun or OpenTUI: everything else runs under vitest on
+// Node, so it goes through Effect's FileSystem, Path, Stdio, and HttpClient instead.
+language js
+
+or {
+  or {
+    JsModuleSource() as $src,
+    `import($src)`
+  } where {
+    $filename <: r".*/src/.*",
+    or {
+      and {
+        $src <: r"[\"'](?:bun|bun:[^\"']*|@effect/platform-bun[^\"']*|@opentui/[^\"']*)[\"']",
+        $filename <: not r".*/src/(?:bin\.ts|tui/.*)",
+        register_diagnostic(span=$src, message="Bun or OpenTUI import outside src/bin.ts and src/tui/: this code runs under vitest on Node. Use Effect's FileSystem, Path, Stdio, or HttpClient. See .claude/rules/src/cli.md, Platform boundary.")
+      },
+      and {
+        $src <: r"[\"'](?:zod|zod/[^\"']*|@effect/schema[^\"']*)[\"']",
+        register_diagnostic(span=$src, message="Schemas are Effect Schema (Schema from effect). Zod and @effect/schema are not used here. See .claude/rules/src/effect.md.")
+      },
+      and {
+        $src <: r"[\"'](?:effect|effect/[^\"']*|@effect/[^\"']*)[\"']",
+        $filename <: r".*/src/tui/.*",
+        $filename <: not r".*/src/tui/launch\.tsx?",
+        register_diagnostic(span=$src, message="TUI components don't import effect: they get plain functions from the bridge in src/tui/launch.ts. See .claude/rules/src/tui.md.")
+      }
+    }
+  },
+  `console.$m($args)` as $c where {
+    $filename <: r".*/src/.*",
+    register_diagnostic(span=$c, message="No console in src/: results go through the Output service, diagnostics through Effect.log*. See .claude/rules/src/cli.md, stdout contract.")
+  },
+  `process.env` as $e where {
+    $filename <: r".*/src/.*",
+    $filename <: not r".*/src/(?:config|bin)\.ts",
+    register_diagnostic(span=$e, message="Only src/config.ts reads the environment (Effect Config). Add the variable there.")
+  },
+  `Bun.$x` as $b where {
+    $filename <: r".*/src/.*",
+    $filename <: not r".*/src/(?:bin\.ts|tui/.*)",
+    register_diagnostic(span=$b, message="The Bun global outside src/bin.ts and src/tui/: this code runs under vitest on Node. See .claude/rules/src/cli.md, Platform boundary.")
+  },
+  or {
+    JsStringLiteralExpression(),
+    JsTemplateChunkElement()
+  } as $s where {
+    $filename <: r".*/src/tui/.*",
+    $filename <: not r".*/src/tui/theme\.ts",
+    $s <: r"(?s).*#[0-9a-fA-F]{3,8}\b.*",
+    register_diagnostic(span=$s, message="Hex color in a TUI component: use a token from src/tui/theme.ts. See DESIGN.md, Color roles.")
+  }
+}

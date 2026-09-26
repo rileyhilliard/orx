@@ -1,0 +1,23 @@
+{
+  "include": ["**/*", ".claude/hooks/**/*"],
+  "exclude": ["node_modules", "dist", "coverage"],
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["bun"],
+    "target": "ES2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "paths": {
+      "~/*": ["./src/*"]
+    },
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true
+  }
+}

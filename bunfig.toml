@@ -1,0 +1,8 @@
+# bun test runs only the TUI tests (tests/tui) and the e2e suite (e2e); vitest runs the rest.
+# Always go through `bun run test:tui` / `bun run e2e`: a bare `bun test` would also pick up
+# the vitest files.
+[test]
+root = "./tests/tui"
+# Blanks the key, points every network URL at an unreachable port, and moves config, data,
+# and logs into temp dirs. bun auto-loads .env, so this must run before any test code.
+preload = ["./tests/tui/setup.ts"]

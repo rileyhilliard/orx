@@ -1,0 +1,55 @@
+{
+  "name": "orx",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "engines": {
+    "bun": ">=1.4.2",
+    "node": ">=24"
+  },
+  "scripts": {
+    "orx": "bun scripts/orx-dev.ts",
+    "stub": "bun scripts/stub.ts start",
+    "stub:stop": "bun scripts/stub.ts stop",
+    "tui:capture": "bun scripts/tui-capture.ts",
+    "build": "bun scripts/build.ts",
+    "build:all": "bun scripts/build.ts --all",
+    "typecheck": "tsc",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "bun run test:unit && bun run test:tui",
+    "test:unit": "vitest run",
+    "test:tui": "bun test ./tests/tui",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "e2e": "bun scripts/build.ts && bun test ./e2e",
+    "eval": "bun evals/run.ts",
+    "record:openrouter": "bun scripts/record-openrouter.ts",
+    "check": "bun run lint && bun run typecheck && bun run test && bun run e2e",
+    "clean": "rm -rf dist coverage logs",
+    "prepare": "bun scripts/prepare.ts"
+  },
+  "dependencies": {
+    "@effect/ai-openrouter": "4.0.0-rc.117",
+    "@effect/platform-bun": "4.0.0-rc.117",
+    "@opentui/core": "0.5.12",
+    "@opentui/react": "0.5.12",
+    "effect": "4.0.0-rc.117",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@effect/platform-node": "4.0.0-rc.117",
+    "@effect/vitest": "4.0.0-rc.117",
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.0",
+    "@vitest/coverage-v8": "^5.0.2",
+    "@xterm/headless": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-rc.117"
+  }
+}
