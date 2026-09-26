@@ -5,6 +5,7 @@ import { extractContact } from "../core/extract";
 import { decodeInput } from "../core/input";
 import { resolveModel } from "../core/models";
 import { readPipedStdin } from "../core/stdin";
+import { Llm } from "../services/Llm";
 import { Output } from "../services/Output";
 import { jsonFlag, modelFlag } from "./shared";
 
@@ -20,6 +21,7 @@ export const extract = Command.make(
   ({ words, json, model }) =>
     Effect.gen(function* () {
       const out = yield* Output;
+      yield* (yield* Llm).ready;
       const piped = yield* readPipedStdin;
       const text = yield* decodeInput(ExtractText)([words.join(" "), piped ?? ""].join("\n"));
       const modelId = yield* resolveModel(Option.getOrUndefined(model));

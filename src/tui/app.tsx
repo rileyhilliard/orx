@@ -60,6 +60,13 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
             return last ? [...ms.slice(0, -1), applyEvent(last, event)] : ms;
           });
         }
+      } catch {
+        // The bridge maps failures to error events, so this is a broken iterator: say so.
+        const error = { message: "The reply stopped unexpectedly.", retryable: true };
+        setMessages((ms) => {
+          const last = ms.at(-1);
+          return last ? [...ms.slice(0, -1), { ...last, error }] : ms;
+        });
       } finally {
         current.current = undefined;
         setStreaming(false);
@@ -70,17 +77,14 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
-      void stop().finally(bridge.quit);
+      stop().then(bridge.quit, bridge.quit);
     } else if (key.name === "escape") {
       if (picking) setPicking(false);
-      else void stop();
+      else stop().catch(() => setStatus("Couldn't stop the reply."));
     } else if (key.ctrl && key.name === "p" && !streaming) {
       setPicking(true);
     } else if (key.ctrl && key.name === "e" && !streaming) {
-      bridge.exportMarkdown().then(
-        (file) => setStatus(`Exported to ${file}`),
-        () => setStatus("Export failed; the log has the details."),
-      );
+      bridge.exportMarkdown().then(setStatus, () => setStatus("Export failed."));
     }
   });
 

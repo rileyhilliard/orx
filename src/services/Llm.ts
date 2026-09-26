@@ -8,12 +8,17 @@ import { type InvalidConfig, NotConfigured } from "../errors";
 export interface LlmShape {
   /**
    * The language model for an OpenRouter model id, with the routing settings from config.
-   * Fails with NotConfigured when there's no API key. Tests swap the whole service for a
-   * scripted model (tests/helpers/mock-model.ts).
+   * Fails with NotConfigured when there's no API key. Tests use the real service against the
+   * stub OpenRouter (tests/helpers/stub-openrouter.ts).
    */
   readonly languageModel: (
     modelId: string,
   ) => Effect.Effect<LanguageModel.LanguageModel, NotConfigured | InvalidConfig>;
+  /**
+   * Fails the way `languageModel` would without a key or with bad config, before a command
+   * does anything slow (reading piped stdin, fetching the models list).
+   */
+  readonly ready: Effect.Effect<void, NotConfigured | InvalidConfig>;
 }
 
 /**
@@ -56,6 +61,7 @@ const make = Effect.gen(function* () {
     }),
   );
   return {
+    ready: Effect.asVoid(client),
     languageModel: (modelId: string) =>
       Effect.gen(function* () {
         const config = yield* load;
@@ -70,14 +76,4 @@ const make = Effect.gen(function* () {
 
 export class Llm extends Context.Service<Llm, LlmShape>()("orx/Llm") {
   static readonly layer = Layer.effect(Llm, make);
-
-  /** Every model id resolves to the same (scripted) model. Records the ids asked for. */
-  static readonly layerModel = (model: LanguageModel.LanguageModel, requested?: string[]) =>
-    Layer.succeed(Llm, {
-      languageModel: (modelId: string) =>
-        Effect.sync(() => {
-          requested?.push(modelId);
-          return model;
-        }),
-    });
 }

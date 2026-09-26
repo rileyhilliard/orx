@@ -8,6 +8,7 @@ import { decodeInput } from "../core/input";
 import { resolveModel } from "../core/models";
 import { readPipedStdin } from "../core/stdin";
 import { errorBody } from "../errors";
+import { Llm } from "../services/Llm";
 import { Output } from "../services/Output";
 import { jsonFlag, modelFlag, newChatId } from "./shared";
 
@@ -26,6 +27,7 @@ export const ask = Command.make(
   ({ words, json, model }) =>
     Effect.gen(function* () {
       const out = yield* Output;
+      yield* (yield* Llm).ready;
       const piped = yield* readPipedStdin;
       const text = yield* decodeInput(Prompt)(
         [words.join(" "), piped].filter((part) => part && part.trim() !== "").join("\n\n"),
@@ -69,9 +71,16 @@ export const ask = Command.make(
                 );
           }
         }),
-        Effect.tapError((error) =>
-          json ? emit({ type: "error", error: errorBody(error) }) : Effect.void,
-        ),
       );
-    }),
+    }).pipe(
+      // Every failure after parsing ends --json output with one `error` event (AskEvent).
+      Effect.tapError((error) =>
+        json
+          ? Effect.gen(function* () {
+              const event: AskEvent = { type: "error", error: errorBody(error) };
+              yield* (yield* Output).json(event);
+            })
+          : Effect.void,
+      ),
+    ),
 ).pipe(Command.withDescription("Send one prompt and stream the reply (pipe-friendly)"));

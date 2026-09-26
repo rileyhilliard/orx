@@ -1,8 +1,9 @@
-import { Effect, FileSystem, Option } from "effect";
+import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChatId } from "~/schemas";
 import { loadChat } from "../core/chat";
 import { chatToMarkdown } from "../core/export";
+import { writeUserFile } from "../core/files";
 import { decodeInput } from "../core/input";
 import { Output } from "../services/Output";
 
@@ -22,8 +23,7 @@ export const exportChat = Command.make(
       const markdown = chatToMarkdown(yield* loadChat(id));
       const out = yield* Output;
       if (Option.isNone(output)) return yield* out.write(markdown);
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.writeFileString(output.value, markdown).pipe(Effect.orDie);
+      yield* writeUserFile(output.value, markdown);
       yield* out.note(`Wrote ${output.value}`);
     }),
 ).pipe(Command.withDescription("Print a saved chat as Markdown"));

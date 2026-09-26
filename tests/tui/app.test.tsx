@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { App } from "~/tui/app";
 import type { ChatBridge, UiEvent } from "~/tui/types";
+import { type RenderSetup, render as renderTui } from "./render";
 
-let setup: Awaited<ReturnType<typeof testRender>> | undefined;
+let setup: RenderSetup | undefined;
 afterEach(() => {
   setup?.renderer.destroy();
   setup = undefined;
@@ -31,7 +31,7 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
     }),
     exportMarkdown: async () => {
       calls.exported += 1;
-      return "orx-chat-0f0e0d0c.md";
+      return "Exported to orx-chat-0f0e0d0c.md";
     },
     quit: () => {
       calls.quit += 1;
@@ -42,7 +42,7 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
 };
 
 const render = async (bridge: ChatBridge) => {
-  setup = await testRender(<App bridge={bridge} />, { width: 80, height: 20 });
+  setup = await renderTui(<App bridge={bridge} />, { width: 80, height: 20 });
   await setup.renderOnce();
   return setup;
 };

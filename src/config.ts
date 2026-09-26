@@ -123,7 +123,6 @@ const csv = (name: string) =>
     ),
   );
 
-/** Every setting a command can read, from env (or the config file, which fills the same names). */
 /**
  * Where `orx update` looks for releases. Env only, and read on its own (not through
  * AppConfig), so a broken config file can't block the update that might fix it.
@@ -133,6 +132,7 @@ export const releasesConfig = Config.all({
   repo: stringOr("ORX_RELEASES_REPO", DEFAULT_RELEASES_REPO),
 });
 
+/** Every setting a command can read, from env (or the config file, which fills the same names). */
 export const appConfig: Config.Config<AppConfigShape> = Config.all({
   apiKey: Config.Redacted("OPENROUTER_API_KEY").pipe(
     Config.option,

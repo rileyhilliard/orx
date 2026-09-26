@@ -1,16 +1,16 @@
-import { Clock, Duration, Effect, type Layer, Option, Ref, Stream } from "effect";
+import { Cause, Clock, Duration, Effect, Exit, type Layer, Option, Ref, Stream } from "effect";
 import { AiError, LanguageModel, Prompt, type Response } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
 import { loadConfig } from "../config";
-import { NotFound } from "../errors";
+import { isAppError, NotFound, UpstreamUnavailable } from "../errors";
 import { ChatStore } from "../services/ChatStore";
 import { Llm } from "../services/Llm";
 import { ChatTools, type ChatToolsLive } from "../tools";
 
+import { timedOut, toUpstreamError } from "./upstream";
+
 /** What the chat tools' handlers provide (ChatToolsLive in the app, the same layer in tests). */
 type ToolHandlers = Layer.Success<typeof ChatToolsLive>;
-
-import { timedOut, toUpstreamError } from "./upstream";
 
 /**
  * What one chat turn emits, in order: text deltas and tool events as they happen, then one
@@ -28,11 +28,16 @@ export type TurnEvent =
     }
   | { readonly type: "finish"; readonly reply: AssistantMessage };
 
-/** Saved text only: tool calls stay in the stored chat for display and export, not the prompt. */
+/**
+ * Saved text only: tool calls stay in the stored chat for display and export, not the prompt.
+ * An assistant message with no text is left out: some providers reject empty assistant content.
+ */
 export const toPrompt = (systemPrompt: string, history: ReadonlyArray<ChatMessage>) =>
   Prompt.make([
     { role: "system", content: systemPrompt },
-    ...history.map((message) => ({ role: message.role, content: message.text })),
+    ...history
+      .filter((message) => message.role === "user" || message.text !== "")
+      .map((message) => ({ role: message.role, content: message.text })),
   ]);
 
 interface StepResult {
@@ -254,8 +259,13 @@ export const runTurn = (options: TurnOptions) =>
           ),
         );
 
-      const finalize = (interrupted: boolean) =>
+      const finalize = (exit: Exit.Exit<unknown, unknown>, done: boolean) =>
         Effect.gen(function* () {
+          // Anything short of `finish` is interrupted in the saved reply. In the log, `aborted`
+          // means the user (or a closed consumer) stopped it; a failure has its own fields.
+          const interrupted = !done;
+          const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
+          const error = Option.getOrUndefined(failure);
           const s = yield* Ref.get(state);
           const { finishReason } = yield* Ref.get(collected);
           const reply = toReply(s, finishReason, interrupted);
@@ -271,7 +281,10 @@ export const runTurn = (options: TurnOptions) =>
               outputTokens: s.outputTokens,
               cost: s.cost ?? null,
               tools: s.tools.length,
-              aborted: interrupted,
+              aborted: interrupted && error === undefined,
+              errorTag: isAppError(error) ? error._tag : null,
+              errorDetail:
+                error instanceof UpstreamUnavailable ? (error.detail ?? error.message) : null,
               timeToFirstTokenMs: Option.getOrNull(Option.map(ttft, (at) => at - startedAt)),
               durationMs: endedAt - startedAt,
             }),
@@ -295,9 +308,7 @@ export const runTurn = (options: TurnOptions) =>
             Effect.andThen(Effect.fail(timedOut("The model reply"))),
           ),
         ),
-        Stream.onExit((exit) =>
-          Effect.flatMap(Ref.get(finished), (done) => finalize(exit._tag === "Failure" || !done)),
-        ),
+        Stream.onExit((exit) => Effect.flatMap(Ref.get(finished), (done) => finalize(exit, done))),
       );
     }),
   );
@@ -326,7 +337,9 @@ export const loadChat = (id: ChatId) =>
 
 /**
  * Sends one user message in a chat: runs the turn and saves the chat when it ends, with the
- * reply as far as it got (so Ctrl+C keeps the partial reply, marked interrupted).
+ * reply as far as it got (so Ctrl+C keeps the partial reply, marked interrupted). A turn that
+ * ends before any text or tool call saves nothing: the chat stays as it was, and sending the
+ * message again is the retry.
  */
 export const sendMessage = (chat: StoredChat, text: string, modelId: string) =>
   Stream.unwrap(
@@ -337,7 +350,14 @@ export const sendMessage = (chat: StoredChat, text: string, modelId: string) =>
         history,
         modelId,
         onEnd: (reply) =>
-          store.save({ ...chat, model: modelId, updatedAt: now(), messages: [...history, reply] }),
+          reply.interrupted && reply.text === "" && reply.tools.length === 0
+            ? Effect.void
+            : store.save({
+                ...chat,
+                model: modelId,
+                updatedAt: now(),
+                messages: [...history, reply],
+              }),
       });
     }),
   );

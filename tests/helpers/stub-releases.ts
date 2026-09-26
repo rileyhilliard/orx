@@ -17,6 +17,8 @@ export interface StubReleases {
   /** Fail GET .../releases/latest with this status. */
   failLatest: number | undefined;
   readonly downloads: string[];
+  /** Count of GET .../releases/latest requests. */
+  latestRequests: number;
   close(): Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export const startStubReleases = async (port = 0, repo = "test/orx"): Promise<St
     release: { tag: "v0.1.0", assets: [] as StubAsset[] } as StubReleases["release"],
     failLatest: undefined as number | undefined,
     downloads: [] as string[],
+    latestRequests: 0,
   };
   const sums = () =>
     state.release.sums ??
@@ -42,6 +45,7 @@ export const startStubReleases = async (port = 0, repo = "test/orx"): Promise<St
     const { port: listening } = server.address() as AddressInfo;
     const base = `http://127.0.0.1:${listening}`;
     if (req.method === "GET" && url.pathname === `/repos/${repo}/releases/latest`) {
+      state.latestRequests += 1;
       if (state.failLatest !== undefined) {
         res.writeHead(state.failLatest, { "content-type": "application/json" });
         res.end(JSON.stringify({ message: "stub failure" }));
@@ -95,6 +99,12 @@ export const startStubReleases = async (port = 0, repo = "test/orx"): Promise<St
     },
     set failLatest(value) {
       state.failLatest = value;
+    },
+    get latestRequests() {
+      return state.latestRequests;
+    },
+    set latestRequests(value) {
+      state.latestRequests = value;
     },
     get downloads() {
       return state.downloads;

@@ -2,6 +2,7 @@
 // runs. Paths are relative to the repo root, which the scripts chdir to.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 export const STUB_PID_FILE = "logs/stub.pid";
 export const STUB_REPO = "stub/orx";
@@ -29,8 +30,12 @@ export const runningStub = (): RunningStub | undefined => {
     : undefined;
 };
 
-/** The env that points orx at the stub (no real key, no spend). */
+/**
+ * The env that points orx at the stub (no real key, no spend). ORX_INSTALL_DIR keeps
+ * install.sh inside this checkout (.orx/bin), away from a real ~/.local/bin/orx.
+ */
 export const stubEnv = (stub: RunningStub) => ({
+  ORX_INSTALL_DIR: resolve(".orx/bin"),
   OPENROUTER_API_KEY: "sk-or-stub",
   OPENROUTER_BASE_URL: `http://127.0.0.1:${stub.openRouterPort}/api/v1`,
   OPENROUTER_MODEL: "openai/gpt-test",

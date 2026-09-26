@@ -43,7 +43,10 @@ export interface ChatBridge {
     readonly models: ReadonlyArray<UiModel>;
     readonly available: boolean;
   }>;
-  /** Writes the chat as Markdown into the current directory; resolves to the file name. */
+  /**
+   * Writes the chat as Markdown into the current directory. Resolves to the status line to
+   * show ("Exported to …", "Overwrote …", or why it failed); never rejects.
+   */
   readonly exportMarkdown: () => Promise<string>;
   readonly quit: () => void;
 }

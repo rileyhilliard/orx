@@ -81,16 +81,28 @@ export const searchModels = (
 
 /**
  * The model a command runs on. No model given: OPENROUTER_MODEL. A named model must be in
- * OpenRouter's list (the default is always accepted, so orx works when the list can't be
- * fetched).
+ * OpenRouter's list, where a variant suffix (`:online`, `:nitro`, `:floor`) counts as its base
+ * id. The default is always accepted, and when the list can't be fetched a named model is
+ * passed through with a warning (OpenRouter rejects an unknown one itself).
  */
 export const resolveModel = (requested: string | undefined) =>
   Effect.gen(function* () {
     const config = yield* loadConfig;
     if (requested === undefined || requested === config.defaultModel) return config.defaultModel;
     const openRouter = yield* OpenRouterModels;
-    const models = yield* openRouter.list;
-    if (!models.some((model) => model.id === requested)) {
+    const listed = yield* openRouter.list.pipe(
+      Effect.map((models) => ({ models })),
+      Effect.catchTag("UpstreamUnavailable", (error) =>
+        Effect.as(
+          Effect.logWarning("Models list unavailable; using the model as given", error.message),
+          undefined,
+        ),
+      ),
+    );
+    if (listed === undefined) return requested;
+    const { models } = listed;
+    const base = requested.split(":", 1)[0];
+    if (!models.some((model) => model.id === requested || model.id === base)) {
       const close = closestIds(models, requested);
       return yield* new UnknownModel({
         message: `Unknown model: ${requested}.${close.length > 0 ? ` Did you mean ${close.join(", ")}?` : ""} \`orx models\` lists them.`,

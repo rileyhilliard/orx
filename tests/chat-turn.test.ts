@@ -13,8 +13,10 @@ beforeAll(async () => {
 afterAll(() => stub.close());
 beforeEach(() => {
   stub.hangAfter = undefined;
+  stub.dropAfter = undefined;
   stub.failCompletions = undefined;
   stub.chatRequests.length = 0;
+  stub.toolCalls = [];
 });
 
 describe("a chat turn", () => {
@@ -51,6 +53,30 @@ describe("a chat turn", () => {
     expect(stub.chatRequests).toHaveLength(2);
   });
 
+  it("doesn't retry once text has gone out, so nothing prints twice", async () => {
+    stub.completion = { ...stub.completion, text: "one two three four" };
+    stub.dropAfter = 2;
+    const run = await runCli(["ask", "hi", "--json"], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    stub.completion = { ...stub.completion, text: "Hello from the stub." };
+    expect(run.exitCode).toBe(4);
+    expect(stub.chatRequests).toHaveLength(1);
+    const text = ndjson(run.stdout).filter((e) => e.type === "text");
+    expect(text.map((e) => e.delta).join("")).toBe("one two ");
+  });
+
+  it("saves nothing when a turn fails before any output, and logs why", async () => {
+    stub.failCompletions = { status: 401, body: { error: { message: "No auth", code: 401 } } };
+    const run = await runCli(["ask", "hi"], { env: { OPENROUTER_BASE_URL: stub.baseUrl } });
+    expect(run.exitCode).toBe(4);
+    const chats = await runCli(["chats", "--json"], { root: run.root });
+    expect(JSON.parse(chats.stdout)).toEqual([]);
+    const call = run.logs.find((r) => r.msg === "llm call");
+    expect(call).toMatchObject({ aborted: false, errorTag: "UpstreamUnavailable" });
+    expect(String(call?.errorDetail)).toContain("401");
+  });
+
   it("stops the tool loop at MAX_TOOL_STEPS", async () => {
     stub.replay(["tool.1", "tool.1", "tool.1"]);
     const run = await runCli(["ask", "time?", "--json"], {
@@ -60,6 +86,24 @@ describe("a chat turn", () => {
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(2);
     expect(ndjson(run.stdout).at(-1)).toMatchObject({ type: "done", finishReason: "tool-calls" });
+  });
+
+  it("returns a tool's bad input to the model instead of failing the turn", async () => {
+    stub.toolCalls = [{ name: "currentTime", arguments: '{"timeZone":"Paris"}' }];
+    const run = await runCli(["ask", "time in Paris?", "--json"], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    expect(run.exitCode).toBe(0);
+    expect(stub.chatRequests).toHaveLength(2);
+    const second = stub.chatRequests[1] as { messages: Array<{ role: string; content: unknown }> };
+    const toolMessage = second.messages.find((m) => m.role === "tool");
+    expect(JSON.stringify(toolMessage?.content)).toContain("ToolParameterValidationError");
+    // Usage and cost are summed over both steps.
+    expect(ndjson(run.stdout).at(-1)).toMatchObject({
+      type: "done",
+      finishReason: "stop",
+      usage: { inputTokens: 24, outputTokens: 10, cost: 0.00084 },
+    });
   });
 
   it("logs one llm call line with tokens and cost, and no prompt text", async () => {

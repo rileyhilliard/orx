@@ -8,7 +8,7 @@
 // carries one native library, not four. build:all needs every target's package installed:
 // `bun install --os='*' --cpu='*'` (CI does this).
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BunPlugin } from "bun";
 
@@ -50,6 +50,9 @@ const build = async (target: Target, outfile: string) => {
     entrypoints: ["src/bin.ts"],
     plugins: [onlyNativeFor(target)],
     minify: true,
+    // Embedded in the binary, so defect stacks in the log point at src/ lines. Bun also writes
+    // <outfile>.map, which nothing reads; it's deleted below so releases don't ship it.
+    sourcemap: "linked",
     compile: {
       target: `bun-${target.os}-${target.arch}`,
       outfile,
@@ -62,6 +65,7 @@ const build = async (target: Target, outfile: string) => {
     for (const log of result.logs) process.stderr.write(`${String(log)}\n`);
     throw new Error(`Build failed for ${target.os}-${target.arch}`);
   }
+  rmSync(`${outfile}.map`, { force: true });
   process.stderr.write(`built ${outfile}\n`);
 };
 

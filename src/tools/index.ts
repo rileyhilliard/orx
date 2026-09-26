@@ -2,11 +2,16 @@ import { Clock, Effect } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { CurrentTimeInput, CurrentTimeOutput } from "~/schemas";
 
-/** The current time in a time zone. The clock is Effect's, so tests control it with TestClock. */
+/**
+ * The current time in a time zone. The clock is Effect's, so tests control it with TestClock.
+ * `failureMode: "return"`: input that doesn't decode (a zone like "Paris") goes back to the
+ * model as the tool's result, so it can correct itself, instead of failing the turn.
+ */
 export const CurrentTime = Tool.make("currentTime", {
   description: "Get the current date and time in an IANA time zone.",
   parameters: CurrentTimeInput,
   success: CurrentTimeOutput,
+  failureMode: "return",
 });
 
 /** The tools the chat model can call (`orx ask`, `orx chat`). `orx mcp` serves the same ones. */

@@ -1,6 +1,6 @@
 # bun test runs only the TUI tests (tests/tui) and the e2e suite (e2e); vitest runs the rest.
-# Always go through `bun run test:tui` / `bun run e2e`: a bare `bun test` would also pick up
-# the vitest files.
+# Always go through `bun run test` / `test:tui` / `e2e`: a bare `bun test` is rooted here, so
+# it passes on the TUI tests alone and silently skips every vitest test.
 [test]
 root = "./tests/tui"
 # Blanks the key, points every network URL at an unreachable port, and moves config, data,

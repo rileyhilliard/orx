@@ -55,6 +55,8 @@ export interface StubOpenRouter {
   failModels: number;
   /** Stream this many text deltas of the reply, then hang until the client disconnects. */
   hangAfter: number | undefined;
+  /** Stream this many text deltas of the reply, then drop the connection (with hangAfter unset). */
+  dropAfter: number | undefined;
   /** Answer POST /chat/completions with this error (checked before the replay queue). */
   failCompletions: CompletionFailure | undefined;
   models: StubModel[];
@@ -64,6 +66,11 @@ export interface StubOpenRouter {
    * /chat/completions gets the next one verbatim. Once the queue is empty, `completion` again.
    */
   replay(names: string[], options?: ReplayOptions): void;
+  /**
+   * Streamed tool calls, one per POST /chat/completions (after the replay queue), each ending
+   * with `finish_reason: "tool_calls"`. `arguments` is the raw JSON text the model sent.
+   */
+  toolCalls: Array<{ name: string; arguments: string }>;
   close(): Promise<void>;
 }
 
@@ -116,6 +123,7 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     modelsRequests: 0,
     failModels: 0,
     failCompletions: undefined as CompletionFailure | undefined,
+    dropAfter: undefined as number | undefined,
     hangAfter: undefined as number | undefined,
     models: [
       { id: "openai/gpt-test", name: "OpenAI: GPT Test" },
@@ -128,6 +136,7 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
       usage: { prompt_tokens: 12, completion_tokens: 5, cost: 0.00042 },
     } as StubCompletion,
     replayQueue: [] as string[],
+    toolCalls: [] as Array<{ name: string; arguments: string }>,
     replayChunkSize: undefined as number | undefined,
   };
 
@@ -217,9 +226,10 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
         );
         return;
       }
-      if (state.hangAfter !== undefined) {
+      const partial = state.hangAfter ?? state.dropAfter;
+      if (partial !== undefined) {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-        const words = text.split(/(?<= )/).slice(0, state.hangAfter);
+        const words = text.split(/(?<= )/).slice(0, partial);
         for (const word of words) {
           const chunk = {
             id: "gen-stub-1",
@@ -233,7 +243,8 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
           };
           res.write(`data: ${JSON.stringify(chunk)}\n\n`);
         }
-        // Never ends: the client has to give up (a timeout, Ctrl+C).
+        // hangAfter never ends: the client has to give up (a timeout, Ctrl+C).
+        if (state.hangAfter === undefined) setTimeout(() => res.destroy(), 10);
         return;
       }
       const base = {
@@ -243,6 +254,24 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
         model,
         provider,
       };
+      const toolCall = state.toolCalls.shift();
+      if (toolCall !== undefined) {
+        const call = {
+          index: 0,
+          id: `call_stub_${state.chatRequests.length}`,
+          type: "function",
+          function: toolCall,
+        };
+        const toolChunks = [
+          { ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [call] } }] },
+          { ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+          { ...base, choices: [], usage: usageJson },
+        ];
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+        for (const chunk of toolChunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        res.end("data: [DONE]\n\n");
+        return;
+      }
       const chunks = [
         {
           ...base,
@@ -296,6 +325,12 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     set hangAfter(value) {
       state.hangAfter = value;
     },
+    get dropAfter() {
+      return state.dropAfter;
+    },
+    set dropAfter(value) {
+      state.dropAfter = value;
+    },
     get failCompletions() {
       return state.failCompletions;
     },
@@ -313,6 +348,12 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     },
     set completion(value) {
       state.completion = value;
+    },
+    get toolCalls() {
+      return state.toolCalls;
+    },
+    set toolCalls(value) {
+      state.toolCalls = [...value];
     },
     replay: (names, options = {}) => {
       state.replayQueue = [...names];

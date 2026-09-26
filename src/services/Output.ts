@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, type PlatformError, type Sink, Stdio, Stream } from "effect";
 import { outputConfig } from "../config";
+import { BrokenPipe } from "../errors";
 
 export interface OutputShape {
   /** Writes text to stdout as is. */
@@ -22,7 +23,7 @@ export interface OutputShape {
 /**
  * The only thing in orx that writes to stdout. Results go here; logs, progress, and errors go
  * to stderr (the logger, and bin.ts for the final error), so `orx ... | jq` and `orx mcp` get
- * a clean stream. A closed pipe (`orx models | head -1`) ends the run instead of failing it.
+ * a clean stream. A closed pipe (`orx models | head -1`) ends the run quietly with exit 0.
  */
 const make = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio;
@@ -34,7 +35,7 @@ const make = Effect.gen(function* () {
       Stream.make(text).pipe(
         Stream.run(sink),
         Effect.catch((error) =>
-          String(error).includes("EPIPE") ? Effect.interrupt : Effect.die(error),
+          String(error).includes("EPIPE") ? Effect.die(new BrokenPipe()) : Effect.die(error),
         ),
       );
   const write = to(stdio.stdout({ endOnDone: false }));

@@ -54,6 +54,14 @@ export class PermissionDenied extends Schema.TaggedError<PermissionDenied>()("Pe
   message: Schema.String,
 }) {}
 
+/**
+ * The terminal UI can't start here: OpenTUI's native library didn't load (a build or platform
+ * problem `orx doctor --tui` reports). An install problem, like missing config: exit 3.
+ */
+export class TuiUnavailable extends Schema.TaggedError<TuiUnavailable>()("TuiUnavailable", {
+  message: Schema.String,
+}) {}
+
 export type AppError =
   | NotConfigured
   | InvalidConfig
@@ -63,7 +71,8 @@ export type AppError =
   | NotInteractive
   | UpstreamUnavailable
   | InvalidModelOutput
-  | PermissionDenied;
+  | PermissionDenied
+  | TuiUnavailable;
 
 const APP_ERROR_TAGS: ReadonlySet<string> = new Set<AppError["_tag"]>([
   "NotConfigured",
@@ -75,6 +84,7 @@ const APP_ERROR_TAGS: ReadonlySet<string> = new Set<AppError["_tag"]>([
   "UpstreamUnavailable",
   "InvalidModelOutput",
   "PermissionDenied",
+  "TuiUnavailable",
 ]);
 
 export const isAppError = (u: unknown): u is AppError =>
@@ -94,6 +104,7 @@ export const exitCodeFor = (error: AppError): number => {
       return 2;
     case "NotConfigured":
     case "InvalidConfig":
+    case "TuiUnavailable":
       return 3;
     case "UpstreamUnavailable":
       return 4;
@@ -114,6 +125,7 @@ export const retryableFor = (error: AppError): boolean => {
     case "UnknownModel":
     case "NotInteractive":
     case "PermissionDenied":
+    case "TuiUnavailable":
       return false;
     // The model may return valid output on another try.
     case "InvalidModelOutput":
@@ -130,6 +142,14 @@ export const errorBody = (error: AppError): ErrorBody => ({
 });
 
 /**
+ * stdout's reader went away (`orx models | head -1`). Output dies with this so the run stops
+ * writing; outcomeOf reads it as a quiet success, not a bug or a Ctrl+C.
+ */
+export class BrokenPipe extends Error {
+  override readonly name = "BrokenPipe";
+}
+
+/**
  * What a finished run means for the process: its exit code, and what to tell the user.
  * `help` is a ShowHelp without errors (`orx` with no subcommand): the help already went to
  * stdout, so there's nothing more to say. Parse errors exit 2 like BadInput; defects exit 1.
@@ -138,6 +158,7 @@ export type Outcome =
   | { readonly kind: "ok" }
   | { readonly kind: "help" }
   | { readonly kind: "interrupted" }
+  | { readonly kind: "closed" }
   | { readonly kind: "usage"; readonly body: ErrorBody }
   | { readonly kind: "failed"; readonly error: AppError; readonly body: ErrorBody }
   | { readonly kind: "defect"; readonly cause: Cause.Cause<unknown>; readonly body: ErrorBody };
@@ -152,6 +173,9 @@ export const outcomeOf = (exit: Exit.Exit<unknown, unknown>): Outcome => {
   if (Exit.isSuccess(exit)) return { kind: "ok" };
   const cause = exit.cause;
   if (Cause.hasInterruptsOnly(cause)) return { kind: "interrupted" };
+  if (cause.reasons.some((r) => Cause.isDieReason(r) && r.defect instanceof BrokenPipe)) {
+    return { kind: "closed" };
+  }
   const failure = cause.reasons.find(Cause.isFailReason)?.error;
   if (failure !== undefined && CliError.isCliError(failure)) {
     if (failure._tag === "ShowHelp") {
@@ -172,6 +196,7 @@ export const exitCodeForOutcome = (outcome: Outcome): number => {
   switch (outcome.kind) {
     case "ok":
     case "help":
+    case "closed":
       return 0;
     case "interrupted":
       return 130;

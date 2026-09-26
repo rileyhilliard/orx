@@ -1,9 +1,11 @@
-import { Effect, FileSystem, Option, Redacted, Stdio } from "effect";
+import { Effect, FileSystem, Option, Stdio } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { loadConfig, Paths } from "../config";
+import type { TuiUnavailable } from "../errors";
 import { Host } from "../services/Host";
 import { Output } from "../services/Output";
 import { VERSION } from "../version";
+import { importTui } from "./load-tui";
 import { jsonFlag } from "./shared";
 
 const tui = Flag.Boolean("tui").pipe(
@@ -12,8 +14,8 @@ const tui = Flag.Boolean("tui").pipe(
 );
 
 /**
- * Hidden: what an agent or a bug report needs to know about this install. Never fails on bad
- * config (it reports it), and never prints the key.
+ * What an agent or a bug report needs to know about this install. Never fails on bad config
+ * (it reports it), and never prints the key. With --tui, exits 3 if the TUI can't load.
  */
 export const doctor = Command.make("doctor", { tui, json: jsonFlag }, ({ tui, json }) =>
   Effect.gen(function* () {
@@ -35,30 +37,43 @@ export const doctor = Command.make("doctor", { tui, json: jsonFlag }, ({ tui, js
       configError: config._tag === "Failure" ? config.failure.message : null,
       apiKey:
         config._tag === "Success"
-          ? Option.match(config.success.apiKey, {
-              onNone: () => "unset",
-              onSome: (key) => (Redacted.value(key) === "" ? "unset" : "set"),
-            })
+          ? Option.match(config.success.apiKey, { onNone: () => "unset", onSome: () => "set" })
           : "unknown",
       defaultModel: config._tag === "Success" ? config.success.defaultModel : null,
       dataDir: paths.dataDir,
       logFile: Option.getOrNull(paths.logFile),
-      tui: null as null | { nativeLib: boolean; renderer: boolean | null },
+      tui: null as null | { nativeLib: boolean; renderer: boolean | null; error: string | null },
     };
+    let tuiFailure: TuiUnavailable | undefined;
     if (tui) {
       const stdio = yield* Stdio.Stdio;
       const interactive = (yield* stdio.stdinIsTerminal) && (yield* stdio.stdoutIsTerminal);
-      const { probeTui } = yield* Effect.promise(() => import("../tui/launch"));
-      const probe = yield* probeTui(interactive).pipe(Effect.orDie);
-      report.tui = { nativeLib: probe.nativeLib, renderer: Option.getOrNull(probe.renderer) };
-    }
-    if (json) return yield* out.json(report);
-    for (const [key, value] of Object.entries(report)) {
-      if (value === null) continue;
-      yield* out.line(
-        `${key.padEnd(17)} ${typeof value === "object" ? JSON.stringify(value) : String(value)}`,
+      const probe = yield* importTui.pipe(
+        Effect.flatMap(({ probeTui }) => probeTui(interactive)),
+        Effect.result,
       );
+      if (probe._tag === "Success") {
+        report.tui = {
+          nativeLib: probe.success.nativeLib,
+          renderer: Option.getOrNull(probe.success.renderer),
+          error: null,
+        };
+      } else {
+        // Reported, then failed below, so a bug report has both the report and exit 3.
+        report.tui = { nativeLib: false, renderer: null, error: probe.failure.message };
+        tuiFailure = probe.failure;
+      }
     }
+    if (json) yield* out.json(report);
+    else {
+      for (const [key, value] of Object.entries(report)) {
+        if (value === null) continue;
+        yield* out.line(
+          `${key.padEnd(17)} ${typeof value === "object" ? JSON.stringify(value) : String(value)}`,
+        );
+      }
+    }
+    if (tuiFailure) return yield* tuiFailure;
   }),
 ).pipe(
   Command.withDescription("Report this install's version, paths, and config (for bug reports)"),

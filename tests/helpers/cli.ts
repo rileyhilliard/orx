@@ -2,7 +2,17 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
-import { ConfigProvider, Effect, Layer, Logger, References, Sink, Stdio, Stream } from "effect";
+import {
+  ConfigProvider,
+  Effect,
+  Fiber,
+  Layer,
+  Logger,
+  References,
+  Sink,
+  Stdio,
+  Stream,
+} from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
 import { main } from "~/main";
@@ -22,6 +32,10 @@ export interface RunOptions {
   readonly host?: Partial<HostShape>;
   /** A directory for config, data, and HOME. Defaults to a fresh temp dir per run. */
   readonly root?: string;
+  /** stdout's reader has gone away: every write fails with EPIPE, as after `| head -1`. */
+  readonly stdoutClosed?: boolean;
+  /** Interrupt the run after this long, as SIGINT does; the exit code is then 130. */
+  readonly interruptAfterMs?: number;
 }
 
 export interface RunResult {
@@ -71,9 +85,11 @@ export const runCli = async (
   const stdio = Stdio.layerTest({
     args: Effect.succeed(argv),
     stdout: () =>
-      collect((t) => {
-        stdout += t;
-      }),
+      options.stdoutClosed
+        ? (Sink.fail(new Error("write EPIPE")) as unknown as ReturnType<typeof collect>)
+        : collect((t) => {
+            stdout += t;
+          }),
     stderr: () =>
       collect((t) => {
         stderr += t;
@@ -105,20 +121,31 @@ export const runCli = async (
     Layer.succeed(References.MinimumLogLevel, "Debug"),
   );
 
+  const program = main({
+    argv,
+    stdout: (t) => {
+      stdout += t;
+    },
+    stderr: (t) => {
+      stderr += t;
+    },
+  }).pipe(
+    Effect.provide(AppLayer.pipe(Layer.provideMerge(platform))),
+    Effect.provide(logger),
+    Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+  );
+  const { interruptAfterMs } = options;
+  // Interrupting stands in for SIGINT: runMain interrupts the main fiber, and bin.ts maps an
+  // interrupted run to 130.
   const exitCode = await Effect.runPromise(
-    main({
-      argv,
-      stdout: (t) => {
-        stdout += t;
-      },
-      stderr: (t) => {
-        stderr += t;
-      },
-    }).pipe(
-      Effect.provide(AppLayer.pipe(Layer.provideMerge(platform))),
-      Effect.provide(logger),
-      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-    ),
+    interruptAfterMs === undefined
+      ? program
+      : Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(program);
+          yield* Effect.sleep(interruptAfterMs);
+          yield* Fiber.interrupt(fiber);
+          return 130;
+        }),
   );
   return { exitCode, stdout, stderr, logs, root };
 };

@@ -23,9 +23,15 @@ export const main = ({ argv, stdout, stderr }: MainIO) => {
   const json = argv.includes("--json");
 
   // For the `command` log line: the subcommand and flag names, never argument or flag values.
-  const first = argv[0];
-  const command = first !== undefined && subcommands.includes(first) ? first : "orx";
-  const flags = argv.filter((arg) => arg.startsWith("-")).map((arg) => arg.split("=", 1)[0]);
+  // Only tokens before `--` that look like a flag count; a prompt word like "- a list" or "-5"
+  // doesn't. The subcommand can follow global flags (`orx --log-level info ask`).
+  const end = argv.indexOf("--");
+  const options = end === -1 ? argv : argv.slice(0, end);
+  const command = options.find((arg) => subcommands.includes(arg)) ?? "orx";
+  const flags = options.flatMap((arg) => {
+    const name = /^(--?[A-Za-z][\w-]*)(=.*)?$/.exec(arg)?.[1];
+    return name === undefined ? [] : [name];
+  });
 
   // The CLI prints help, --version, and completions through Effect's Console. Help after a
   // usage error belongs on stderr and a plain --help on stdout, which isn't known until the
@@ -53,27 +59,36 @@ export const main = ({ argv, stdout, stderr }: MainIO) => {
 
   return Effect.gen(function* () {
     const startedAt = performance.now();
+    // Logged in onExit so a run interrupted by a signal still logs its line (exit 130).
+    const logRun = (outcome: Outcome) =>
+      Effect.gen(function* () {
+        if (outcome.kind === "defect") yield* Effect.logError("defect", outcome.cause);
+        yield* Effect.logInfo("command").pipe(
+          Effect.annotateLogs({
+            command,
+            flags,
+            exitCode: exitCodeForOutcome(outcome),
+            durationMs: Math.round(performance.now() - startedAt),
+            ...(outcome.kind === "failed" || outcome.kind === "usage"
+              ? { errorTag: outcome.body.tag }
+              : {}),
+            ...(outcome.kind === "failed" && outcome.error._tag === "UpstreamUnavailable"
+              ? { errorDetail: outcome.error.detail ?? null }
+              : {}),
+          }),
+        );
+      });
     const run = Command.runWith(cli, { version: VERSION, renderErrors: false })(argv);
     const exit = yield* (
       argv.includes("--wizard")
         ? run
         : run.pipe(Effect.provideService(Console.Console, holdingConsole))
-    ).pipe(Effect.exit);
-    const outcome = outcomeOf(exit);
-    if (outcome.kind === "defect") yield* Effect.logError("defect", outcome.cause);
-    render(outcome);
-    const exitCode = exitCodeForOutcome(outcome);
-    yield* Effect.logInfo("command").pipe(
-      Effect.annotateLogs({
-        command,
-        flags,
-        exitCode,
-        durationMs: Math.round(performance.now() - startedAt),
-        ...(outcome.kind === "failed" || outcome.kind === "usage"
-          ? { errorTag: outcome.body.tag }
-          : {}),
-      }),
+    ).pipe(
+      Effect.onExit((exit) => logRun(outcomeOf(exit))),
+      Effect.exit,
     );
-    return exitCode;
+    const outcome = outcomeOf(exit);
+    render(outcome);
+    return exitCodeForOutcome(outcome);
   }).pipe(Effect.annotateLogs({ runId: crypto.randomUUID() }));
 };

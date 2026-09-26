@@ -4,9 +4,10 @@ import { Cause, Effect, FileSystem, Option, Stream } from "effect";
 import type { ChatMessage, StoredChat } from "~/schemas";
 import { loadChat, sendMessage, type TurnEvent } from "../core/chat";
 import { chatToMarkdown } from "../core/export";
+import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
 import { listModels } from "../core/models";
-import { isAppError, retryableFor } from "../errors";
+import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
 import { App } from "./app";
 import type { ChatBridge, UiError, UiEvent, UiMessage } from "./types";
@@ -60,10 +61,17 @@ const toUiError = (cause: Cause.Cause<unknown>): UiError => {
     : { message: "Something went wrong inside orx; the log has the details.", retryable: true };
 };
 
+/** Whatever failed a turn, as the log line for a defect (a tagged error is shown, not logged). */
+const logDefect = (cause: Cause.Cause<unknown>) =>
+  isAppError(cause.reasons.find(Cause.isFailReason)?.error)
+    ? Effect.void
+    : Effect.logError("chat turn failed", cause);
+
 /**
  * The ChatBridge over the real programs, bound to the current services: what the components
- * get instead of Effect. `quit` is called when the user quits. tests/tui/closed-loop.test.tsx
- * drives this with a test renderer.
+ * get instead of Effect. `quit` is called when the user quits. `stopTurns` ends any reply still
+ * streaming (saved as interrupted); launchChat calls it when its scope closes, so a signal
+ * saves the reply too. tests/tui/closed-loop.test.tsx drives this with a test renderer.
  */
 export const makeBridge = (initial: StoredChat, quit: () => void) =>
   Effect.gen(function* () {
@@ -71,6 +79,25 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
     let chat = initial;
+    // The turns' iterators run on their own fibers, outside launchChat's scope.
+    const active = new Set<AsyncIterator<UiEvent>>();
+    const tracked = (iterable: AsyncIterable<UiEvent>): AsyncIterable<UiEvent> => ({
+      [Symbol.asyncIterator]: () => {
+        const it = iterable[Symbol.asyncIterator]();
+        active.add(it);
+        const done = <T,>(result: T) => {
+          active.delete(it);
+          return result;
+        };
+        return {
+          next: () => it.next().then((r) => (r.done ? done(r) : r)),
+          return: () =>
+            (it.return?.() ?? Promise.resolve({ done: true, value: undefined })).then(done),
+        };
+      },
+    });
+    const stopTurns = () =>
+      Promise.allSettled([...active].map((it) => it.return?.())).then(() => active.clear());
     const bridge: ChatBridge = {
       chatId: chat.id,
       initialModel: chat.model,
@@ -81,7 +108,7 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
           Stream.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Stream.empty;
             const failed: UiEvent = { type: "error", error: toUiError(cause) };
-            return Stream.make(failed);
+            return Stream.unwrap(Effect.as(logDefect(cause), Stream.make(failed)));
           }),
           Stream.ensuring(
             loadChat(chat.id).pipe(
@@ -94,6 +121,7 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
             ),
           ),
           Stream.toAsyncIterableWith(context),
+          tracked,
         ),
       listModels: () =>
         run(
@@ -108,13 +136,36 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
       exportMarkdown: () => {
         const file = `orx-chat-${chat.id.slice(0, 8)}.md`;
         return run(
-          fs.writeFileString(file, chatToMarkdown(chat)).pipe(Effect.orDie, Effect.as(file)),
+          Effect.gen(function* () {
+            const existed = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false));
+            yield* writeUserFile(file, chatToMarkdown(chat));
+            return `${existed ? "Overwrote" : "Exported to"} ${file}`;
+          }).pipe(
+            Effect.catchCause((cause) => {
+              const error = cause.reasons.find(Cause.isFailReason)?.error;
+              if (isAppError(error)) return Effect.succeed(`Export failed: ${error.message}`);
+              return Effect.as(
+                Effect.logError("chat export failed", cause),
+                "Export failed; the log has the details.",
+              );
+            }),
+          ),
         );
       },
       quit,
     };
-    return bridge;
+    return { bridge, stopTurns };
   });
+
+const tuiUnavailable = (error: unknown) =>
+  new TuiUnavailable({
+    message: `The terminal UI couldn't start: ${String(error)}. \`orx doctor --tui\` checks it; \`orx ask\` works without it.`,
+  });
+
+const createRenderer = Effect.tryPromise({
+  try: () => createCliRenderer(RENDERER_OPTIONS),
+  catch: tuiUnavailable,
+});
 
 /**
  * `orx chat`: runs the TUI until the user quits. The renderer is a scoped resource, so it is
@@ -127,11 +178,12 @@ export const launchChat = (initial: StoredChat) =>
     const quitting = new Promise<void>((resolve) => {
       quit = resolve;
     });
-    const bridge = yield* makeBridge(initial, () => quit());
-    const renderer = yield* Effect.acquireRelease(
-      Effect.promise(() => createCliRenderer(RENDERER_OPTIONS)),
-      (r) => Effect.sync(() => r.destroy()),
+    const { bridge, stopTurns } = yield* makeBridge(initial, () => quit());
+    const renderer = yield* Effect.acquireRelease(createRenderer, (r) =>
+      Effect.sync(() => r.destroy()),
     );
+    // Released before the renderer: a reply still streaming is stopped and saved first.
+    yield* Effect.addFinalizer(() => Effect.promise(stopTurns));
     createRoot(renderer).render(<App bridge={bridge} />);
     yield* Effect.promise(() => quitting);
   }).pipe(Effect.scoped, Effect.provideService(TerminalLogging, false));
@@ -142,14 +194,8 @@ export const launchChat = (initial: StoredChat) =>
  */
 export const probeTui = (interactive: boolean) =>
   Effect.gen(function* () {
-    yield* Effect.try({
-      try: () => resolveRenderLib(),
-      catch: (error) => new Error(`OpenTUI's native library didn't load: ${String(error)}`),
-    });
+    yield* Effect.try({ try: () => resolveRenderLib(), catch: tuiUnavailable });
     if (!interactive) return { nativeLib: true, renderer: Option.none<boolean>() };
-    yield* Effect.acquireRelease(
-      Effect.promise(() => createCliRenderer(RENDERER_OPTIONS)),
-      (r) => Effect.sync(() => r.destroy()),
-    );
+    yield* Effect.acquireRelease(createRenderer, (r) => Effect.sync(() => r.destroy()));
     return { nativeLib: true, renderer: Option.some(true) };
   }).pipe(Effect.scoped, Effect.provideService(TerminalLogging, false));

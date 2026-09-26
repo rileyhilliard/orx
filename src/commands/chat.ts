@@ -5,6 +5,7 @@ import { loadChat, newChat } from "../core/chat";
 import { decodeInput } from "../core/input";
 import { resolveModel } from "../core/models";
 import { NotInteractive } from "../errors";
+import { importTui } from "./load-tui";
 import { modelFlag, newChatId } from "./shared";
 
 const resume = Flag.String("resume").pipe(
@@ -31,7 +32,7 @@ export const chat = Command.make("chat", { resume, model: modelFlag }, ({ resume
       requested && Option.isSome(resume)
         ? { ...initial, model: yield* resolveModel(requested) }
         : initial;
-    const { launchChat } = yield* Effect.promise(() => import("../tui/launch"));
+    const { launchChat } = yield* importTui;
     yield* launchChat(start);
   }),
 ).pipe(

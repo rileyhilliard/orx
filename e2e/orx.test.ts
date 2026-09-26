@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnPty } from "../scripts/lib/pty";
@@ -149,7 +149,7 @@ describe("orx chat (TUI)", () => {
     const pty = spawnPty([BIN, "chat"], { cols: 90, rows: 20, env: cleanEnv() });
     await pty.waitFor((s) => s.includes("Ctrl+C quit"));
     pty.write("hi");
-    await Bun.sleep(50);
+    await pty.waitFor((s) => /\bhi\b/.test(s));
     pty.write("\r");
     const screen = await pty.waitFor((s) => s.includes("12 in / 5 out"));
     expect(screen).toContain("> hi");
@@ -191,6 +191,22 @@ describe("install.sh and orx update", () => {
     });
     expect(await proc.exited).toBe(1);
     expect(existsSync(join(dir, "orx"))).toBe(false);
+  });
+
+  it("update swaps the running binary for the release's, which then runs", async () => {
+    releases.release = { tag: "v9.9.9", assets: [{ name: assetName, body: readFileSync(BIN) }] };
+    const dir = mkdtempSync(join(tmpdir(), "orx-e2e-update-"));
+    const installed = join(dir, "orx");
+    copyFileSync(BIN, installed);
+    chmodSync(installed, 0o755);
+    const before = statSync(installed).ino;
+    const proc = Bun.spawn([installed, "update"], { env: cleanEnv(), stderr: "pipe" });
+    expect(await proc.exited).toBe(0);
+    // Renamed over, not written in place: a new inode, and the new binary starts.
+    expect(statSync(installed).ino).not.toBe(before);
+    expect(statSync(installed).mode & 0o777).toBe(0o755);
+    const version = Bun.spawn([installed, "--version"], { env: cleanEnv(), stdout: "pipe" });
+    expect(await version.exited).toBe(0);
   });
 
   it("update --check sees a newer release", async () => {

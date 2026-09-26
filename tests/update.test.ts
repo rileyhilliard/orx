@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { compareVersions } from "~/core/update";
@@ -12,6 +12,7 @@ beforeAll(async () => {
 afterAll(() => releases.close());
 beforeEach(() => {
   releases.failLatest = undefined;
+  releases.latestRequests = 0;
   releases.release = { tag: "v9.0.0", assets: [{ name: "orx-linux-x64", body: "new binary" }] };
 });
 
@@ -70,6 +71,39 @@ describe("orx update", () => {
     releases.failLatest = 503;
     const run = await runCli(["update", "--check"], { env: env() });
     expect(run.exitCode).toBe(4);
+  });
+
+  it("doesn't retry a 404, and says a retry won't help", async () => {
+    releases.failLatest = 404;
+    const run = await runCli(["update", "--check", "--json"], { env: env() });
+    expect(run.exitCode).toBe(4);
+    expect(releases.latestRequests).toBe(1);
+    expect(JSON.parse(run.stderr.trim().split("\n").at(-1) ?? "")).toMatchObject({
+      error: { tag: "UpstreamUnavailable", retryable: false },
+    });
+  });
+
+  it("retries a 5xx before giving up", async () => {
+    releases.failLatest = 503;
+    await runCli(["update", "--check"], { env: env() });
+    expect(releases.latestRequests).toBe(3);
+  });
+
+  it("exits 6 when the binary's directory isn't writable, and changes nothing", async () => {
+    const { root, execPath } = installed();
+    chmodSync(join(root, "bin"), 0o555);
+    try {
+      const run = await runCli(["update"], {
+        root,
+        env: env(),
+        host: { compiled: true, execPath },
+      });
+      expect(run.exitCode).toBe(6);
+      expect(run.stderr).toContain("permission denied");
+      expect(readFileSync(execPath, "utf8")).toBe("old binary");
+    } finally {
+      chmodSync(join(root, "bin"), 0o755);
+    }
   });
 
   it("works with a broken config file", async () => {

@@ -47,8 +47,10 @@ const makeFileStore = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* fs.makeDirectory(dir, { recursive: true });
         const temp = `${fileFor(chat.id)}.${process.pid}.tmp`;
-        yield* fs.writeFileString(temp, yield* encode(chat));
-        yield* fs.rename(temp, fileFor(chat.id));
+        yield* fs.writeFileString(temp, yield* encode(chat)).pipe(
+          Effect.andThen(fs.rename(temp, fileFor(chat.id))),
+          Effect.onError(() => fs.remove(temp).pipe(Effect.ignore)),
+        );
       }).pipe(Effect.orDie),
     list: Effect.gen(function* () {
       if (!(yield* fs.exists(dir))) return [];

@@ -96,8 +96,8 @@ export const applyUpdate = (release: Release) =>
     }
     const target = host.execPath;
     const temp = join(dirname(target), `.${basename(target)}.update-${process.pid}`);
-    yield* fs.writeFile(temp, bytes).pipe(Effect.mapError(denied(target)));
-    yield* fs.chmod(temp, 0o755).pipe(
+    yield* fs.writeFile(temp, bytes).pipe(
+      Effect.andThen(fs.chmod(temp, 0o755)),
       Effect.andThen(fs.rename(temp, target)),
       Effect.mapError(denied(target)),
       Effect.onError(() => fs.remove(temp).pipe(Effect.ignore)),

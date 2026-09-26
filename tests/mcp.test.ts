@@ -1,4 +1,6 @@
+import { Effect, Sink, Stdio, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { drainingStdio } from "~/core/mcp-stdio";
 import { ndjson, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
@@ -66,5 +68,35 @@ describe("orx mcp", () => {
     const call = ndjson(run.stdout).find((f) => f.id === 4) as { result: { isError?: boolean } };
     expect(call.result.isError).toBe(true);
     expect(JSON.stringify(call.result)).toContain("NotConfigured");
+  });
+});
+
+describe("drainingStdio", () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const drain = (lines: string) =>
+    Effect.runPromise(
+      Stream.runDrain(
+        drainingStdio(
+          Stdio.make({
+            args: Effect.succeed([]),
+            stdin: Stream.make(encode(lines)),
+            stdout: () => Sink.drain,
+            stderr: () => Sink.drain,
+          }),
+        ).stdin,
+      ).pipe(Effect.timeout("2 seconds")),
+    );
+
+  it("stops waiting for a request the client cancelled", async () => {
+    await drain(
+      rpc(
+        { jsonrpc: "2.0", id: 9, method: "tools/call", params: {} },
+        { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 9 } },
+      ),
+    );
+  });
+
+  it("doesn't wait on notifications, which get no response", async () => {
+    await drain(rpc({ jsonrpc: "2.0", method: "notifications/initialized" }));
   });
 });

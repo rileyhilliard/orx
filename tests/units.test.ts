@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toPrompt } from "~/core/chat";
 import { chatToMarkdown } from "~/core/export";
 import { modelsTable, usageLine } from "~/core/format";
 import { searchModels } from "~/core/models";
@@ -50,6 +51,17 @@ const model = (id: string, name = id): ModelInfo => ({
   contextLength: 128_000,
   promptPrice: 0.000001,
   completionPrice: 0.000002,
+});
+
+describe("toPrompt", () => {
+  it("leaves out assistant messages with no text", () => {
+    const prompt = toPrompt("sys", [
+      { role: "user", text: "hi" },
+      { role: "assistant", text: "", tools: [], interrupted: true },
+      { role: "user", text: "again" },
+    ]);
+    expect(prompt.content.map((m) => m.role)).toEqual(["system", "user", "user"]);
+  });
 });
 
 describe("searchModels", () => {

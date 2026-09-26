@@ -1,5 +1,5 @@
 import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 import { releasesConfig } from "../config";
 import { InvalidConfig, UpstreamUnavailable } from "../errors";
 
@@ -15,25 +15,39 @@ export interface ReleasesShape {
   readonly download: (url: string) => Effect.Effect<Uint8Array, UpstreamUnavailable>;
 }
 
-const TIMEOUT = Duration.seconds(30);
+/** The releases API answers in well under this; a binary download gets longer (tens of MB). */
+const API_TIMEOUT = Duration.seconds(30);
+const DOWNLOAD_TIMEOUT = Duration.minutes(5);
 const retrySchedule = Schedule.max([
   Schedule.exponential(Duration.millis(500)).pipe(Schedule.jittered),
   Schedule.recurs(2),
 ]);
 
+/**
+ * Only failures another try can fix are retryable: the network, a 429, a 5xx. A 404 (no
+ * release yet, a wrong ORX_RELEASES_REPO) or a response that doesn't decode isn't.
+ */
+const isRetryable = (cause: unknown): boolean => {
+  if (HttpClientError.isHttpClientError(cause)) {
+    const status = cause.response?.status;
+    return status === undefined || status === 429 || status >= 500;
+  }
+  return false;
+};
+
 const upstream = (message: string) => (cause: unknown) =>
-  new UpstreamUnavailable({ message, retryable: true, detail: String(cause) });
+  new UpstreamUnavailable({ message, retryable: isRetryable(cause), detail: String(cause) });
 
 const make = Effect.gen(function* () {
   const http = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
-  const guard = <A, E>(effect: Effect.Effect<A, E>, message: string) =>
+  const guard = <A, E>(effect: Effect.Effect<A, E>, message: string, timeout: Duration.Duration) =>
     effect.pipe(
       Effect.mapError(upstream(message)),
       Effect.timeoutOrElse({
-        duration: TIMEOUT,
+        duration: timeout,
         orElse: () => Effect.fail(new UpstreamUnavailable({ message, retryable: true })),
       }),
-      Effect.retry(retrySchedule),
+      Effect.retry({ schedule: retrySchedule, while: (error) => error.retryable }),
     );
   return {
     latest: Effect.gen(function* () {
@@ -49,6 +63,7 @@ const make = Effect.gen(function* () {
           Effect.flatMap(Schema.decodeUnknownEffect(Release)),
         ),
         `Couldn't read the latest release of ${releases.repo}.`,
+        API_TIMEOUT,
       );
     }),
     download: (url) =>
@@ -58,6 +73,7 @@ const make = Effect.gen(function* () {
           Effect.map((buffer) => new Uint8Array(buffer)),
         ),
         `Couldn't download ${url}.`,
+        DOWNLOAD_TIMEOUT,
       ),
   } satisfies ReleasesShape;
 });

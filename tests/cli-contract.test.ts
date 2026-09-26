@@ -1,3 +1,5 @@
+import { chmodSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ndjson, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
@@ -50,6 +52,16 @@ describe("stdout contract and exit codes", () => {
     expect(run.stderr).toContain("OPENROUTER_API_KEY");
   });
 
+  it("ends --json output with one error event for any failure after parsing", async () => {
+    const unknown = await runCli(["ask", "hi", "-m", "nope/x", "--json"], withStub());
+    expect(unknown.exitCode).toBe(2);
+    expect(ndjson(unknown.stdout)).toMatchObject([
+      { type: "error", error: { tag: "UnknownModel", retryable: false } },
+    ]);
+    const empty = await runCli(["ask", "--json"], withStub());
+    expect(ndjson(empty.stdout)).toMatchObject([{ type: "error", error: { tag: "BadInput" } }]);
+  });
+
   it("exits 2 on an empty prompt", async () => {
     const run = await runCli(["ask"], withStub());
     expect(run.exitCode).toBe(2);
@@ -62,6 +74,40 @@ describe("stdout contract and exit codes", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ command: "ask", exitCode: 2, flags: ["--model", "--bogus"] });
     expect(JSON.stringify(run.logs)).not.toContain("secret/model");
+  });
+
+  it("logs no prompt text that looks like a flag, and finds the command after global flags", async () => {
+    const run = await runCli(["--log-level", "info", "ask", "- my secret list", "-5", "--", "--x"]);
+    const [line] = run.logs.filter((r) => r.msg === "command");
+    expect(line).toMatchObject({ command: "ask", flags: ["--log-level"] });
+    expect(JSON.stringify(run.logs)).not.toContain("secret");
+  });
+
+  it("still logs the command line when a signal interrupts the run", async () => {
+    stub.hangAfter = 1;
+    const run = await runCli(["ask", "hi"], { ...withStub(), interruptAfterMs: 300 });
+    stub.hangAfter = undefined;
+    expect(run.exitCode).toBe(130);
+    expect(run.logs.filter((r) => r.msg === "command")).toMatchObject([
+      { command: "ask", exitCode: 130 },
+    ]);
+  });
+});
+
+describe("choosing a model", () => {
+  it("accepts a variant suffix of a listed model", async () => {
+    const run = await runCli(["ask", "hi", "-m", "acme/cheap-model:nitro", "--json"], withStub());
+    expect(run.exitCode).toBe(0);
+    expect(stub.chatRequests.at(-1)).toMatchObject({ model: "acme/cheap-model:nitro" });
+  });
+
+  it("passes a named model through, with a warning, when the models list is down", async () => {
+    stub.failModels = 10;
+    const run = await runCli(["ask", "hi", "-m", "acme/unlisted"], withStub());
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    expect(stub.chatRequests.at(-1)).toMatchObject({ model: "acme/unlisted" });
+    expect(run.logs.some((r) => r.msg.startsWith("Models list unavailable"))).toBe(true);
   });
 });
 
@@ -140,10 +186,41 @@ describe("orx ask", () => {
     expect(exported.stdout).toContain("Hello from the stub.");
   });
 
+  it("names the path when -o can't be written: 2 for a missing directory, 6 when denied", async () => {
+    const first = await runCli(["ask", "hi", "--json"], withStub());
+    const { chatId } = ndjson(first.stdout).at(-1) as { chatId: string };
+    const missing = await runCli(["export", chatId, "-o", join(first.root, "nope", "x.md")], {
+      root: first.root,
+    });
+    expect(missing.exitCode).toBe(2);
+    expect(missing.stderr).toContain("nope");
+
+    const locked = join(first.root, "locked");
+    mkdirSync(locked, { mode: 0o555 });
+    try {
+      const denied = await runCli(["export", chatId, "-o", join(locked, "x.md")], {
+        root: first.root,
+      });
+      expect(denied.exitCode).toBe(6);
+      expect(denied.stderr).toContain("permission denied");
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  });
+
   it("exits 2 exporting a chat that doesn't exist", async () => {
     const run = await runCli(["export", "00000000-0000-4000-8000-000000000000"]);
     expect(run.exitCode).toBe(2);
     expect(run.stderr).toContain("orx chats");
+  });
+});
+
+describe("a closed stdout", () => {
+  it("ends the run quietly with exit 0, not 130 or a bug report", async () => {
+    const run = await runCli(["models", "--json"], { ...withStub(), stdoutClosed: true });
+    expect(run.exitCode).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.logs.filter((r) => r.level === "error")).toEqual([]);
   });
 });
 

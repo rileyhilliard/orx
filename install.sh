@@ -32,8 +32,12 @@ case "$(uname -m)" in
   arm64 | aarch64) arch=arm64 ;;
   *) fail "no orx build for $(uname -m)" ;;
 esac
-if [ "$os" = linux ] && ldd --version 2>&1 | grep -qi musl; then
-  fail "musl Linux (Alpine) isn't supported yet; use a glibc distro or build from source"
+# musl's ldd exits 1 for --version, so capture its output rather than piping it (pipefail).
+if [ "$os" = linux ]; then
+  ldd_out="$(ldd --version 2>&1 || true)"
+  case "$ldd_out" in
+    *musl* | *MUSL* | *Musl*) fail "musl Linux (Alpine) isn't supported yet; use a glibc distro or build from source" ;;
+  esac
 fi
 # Under Rosetta, uname says x86_64 on an Apple Silicon Mac; the native build is faster.
 if [ "$os" = darwin ] && [ "$arch" = x64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
@@ -74,9 +78,14 @@ fi
 [ "$expected" = "$actual" ] || fail "checksum mismatch for $asset (expected $expected, got $actual); nothing installed"
 
 mkdir -p "$dir"
-chmod 0755 "$tmp/$asset"
-# Moved into place in one step, so a running orx is never overwritten mid-read.
-mv -f "$tmp/$asset" "$dir/orx"
+# Staged in the install dir and renamed over orx there: a rename within one filesystem is
+# atomic, so a running orx is never overwritten mid-read and an interrupted install leaves the
+# old binary. ($tmp may be on another filesystem, where mv would copy instead.)
+staged="$dir/.orx.install.$$"
+trap 'rm -rf "$tmp" "$staged"' EXIT
+cp "$tmp/$asset" "$staged"
+chmod 0755 "$staged"
+mv -f "$staged" "$dir/orx"
 echo "Installed orx to $dir/orx"
 case ":$PATH:" in
   *":$dir:"*) ;;
