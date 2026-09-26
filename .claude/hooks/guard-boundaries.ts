@@ -8,13 +8,20 @@
 //   process.env               only in src/config.ts (Effect Config) and src/bin.ts (the DEV clear)
 //   console.*                 nowhere in src/: results go through Output, diagnostics through
 //                             Effect.log*; a stray stdout line corrupts `--json` and `orx mcp`
+//   process.stdout            only in src/bin.ts, which hands main its stdout writer
+//   process.stderr            only in src/bin.ts (main's stderr writer, the startup failure),
+//                             src/logging.ts (the terminal log sink and its one "can't write the
+//                             log file" warning, both below Effect's Stdio), and src/config.ts
+//                             (process.stderr.isTTY decides the color default)
+//   static import of src/tui/ from outside it: the TUI loads OpenTUI, so commands reach it only
+//                             through the dynamic import in src/commands/load-tui.ts
 //   zod, @effect/schema       nowhere in src/: schemas are Effect Schema
 //   effect in TUI components  only src/tui/launch.tsx imports effect; components get plain
 //                             functions from the bridge
 //
 // Checked per line on the written text (a Write's content, an Edit's new_string), with `//`
 // comments and JSDoc lines dropped first, so a comment that mentions process.env passes.
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { deny, findUp, projectRoot, readPayload, text, writtenText } from "./_lib";
 
 const SPEC = `[ \\t]*\\(?[ \\t]*["']`;
@@ -27,6 +34,11 @@ const PLATFORM_IMPORT = importOf(
 const BUN_GLOBAL = /(^|[^\w$.])Bun\.\w/;
 const PROCESS_ENV = /(^|[^\w$.])process\.env\b/;
 const CONSOLE = /(^|[^\w$.])console\.\w+[ \t]*\(/;
+const PROCESS_STDOUT = /(^|[^\w$.])process\.stdout\b/;
+const PROCESS_STDERR = /(^|[^\w$.])process\.stderr\b/;
+const STDERR_FILES = new Set(["bin.ts", "logging.ts", "config.ts"]);
+// A static import or re-export source (`from "x"`, `import "x"`), not a dynamic `import("x")`.
+const STATIC_SOURCE = /(?:(?:^|[^\w$.])from|^[ \t]*import)[ \t]*["']([^"']+)["']/g;
 const ZOD_IMPORT = importOf("zod(/[^\"']*)?|@effect/schema(/[^\"']*)?");
 const EFFECT_IMPORT = importOf("effect(/[^\"']*)?|@effect/[^\"']*");
 
@@ -49,13 +61,26 @@ function srcPath(filePath: string): string | undefined {
   return rel.startsWith("src/") ? rel.slice(4) : undefined;
 }
 
+/** Whether a static import in src/<file> resolves under src/tui/ (relative or `~/`). */
+function importsTui(file: string, lines: string[]): boolean {
+  return lines.some((line) =>
+    [...line.matchAll(STATIC_SOURCE)].some(([, spec = ""]) => {
+      let target: string;
+      if (spec.startsWith("~/")) target = `src/${spec.slice(2)}`;
+      else if (spec.startsWith(".")) target = posix.join(posix.dirname(`src/${file}`), spec);
+      else return false;
+      return target === "src/tui" || target.startsWith("src/tui/");
+    }),
+  );
+}
+
 function reasonsFor(file: string, lines: string[]): string[] {
   const has = (re: RegExp) => lines.some((line) => re.test(line));
   const bunSide = file === "bin.ts" || file.startsWith("tui/");
   const reasons: string[] = [];
   if (!bunSide && has(PLATFORM_IMPORT)) {
     reasons.push(
-      "imports Bun or OpenTUI outside src/bin.ts and src/tui/. This code runs under vitest on Node: use Effect's FileSystem, Path, Stdio, or HttpClient (BunServices is provided in src/bin.ts, NodeServices in tests). A command that needs the TUI dynamic-imports src/tui/launch.tsx (see src/commands/chat.ts).",
+      "imports Bun or OpenTUI outside src/bin.ts and src/tui/. This code runs under vitest on Node: use Effect's FileSystem, Path, Stdio, or HttpClient (BunServices is provided in src/bin.ts, NodeServices in tests). A command that needs the TUI loads it with importTui (src/commands/load-tui.ts), a dynamic import of src/tui/launch.tsx.",
     );
   }
   if (!bunSide && has(BUN_GLOBAL)) {
@@ -71,6 +96,21 @@ function reasonsFor(file: string, lines: string[]): string[] {
   if (has(CONSOLE)) {
     reasons.push(
       "calls console.*. stdout carries results only: write results through the Output service (src/services/Output.ts), notes for the person through Output.note, and diagnostics with Effect.logInfo/logWarning/logError. A stray stdout line breaks --json and corrupts orx mcp's JSON-RPC.",
+    );
+  }
+  if (file !== "bin.ts" && has(PROCESS_STDOUT)) {
+    reasons.push(
+      "uses process.stdout. Only src/bin.ts touches it (it hands main the stdout writer): write results through the Output service (src/services/Output.ts). A stray stdout write breaks --json and corrupts orx mcp's JSON-RPC.",
+    );
+  }
+  if (!STDERR_FILES.has(file) && has(PROCESS_STDERR)) {
+    reasons.push(
+      "uses process.stderr. Only src/bin.ts, src/logging.ts, and src/config.ts touch it: notes for the person go through Output.note, diagnostics through Effect.logInfo/logWarning/logError, and color on stderr comes from outputConfig in src/config.ts.",
+    );
+  }
+  if (!file.startsWith("tui/") && importsTui(file, lines)) {
+    reasons.push(
+      "statically imports src/tui/ from outside it. That loads OpenTUI on every run and in every vitest file that imports it: load it with importTui from src/commands/load-tui.ts (a dynamic import), as src/commands/chat.ts does, and put shared types outside src/tui/.",
     );
   }
   if (has(ZOD_IMPORT)) {

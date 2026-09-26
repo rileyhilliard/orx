@@ -23,9 +23,27 @@ or {
         $src <: r"[\"'](?:effect|effect/[^\"']*|@effect/[^\"']*)[\"']",
         $filename <: r".*/src/tui/.*",
         $filename <: not r".*/src/tui/launch\.tsx?",
-        register_diagnostic(span=$src, message="TUI components don't import effect: they get plain functions from the bridge in src/tui/launch.ts. See .claude/rules/src/tui.md.")
+        register_diagnostic(span=$src, message="TUI components don't import effect: they get plain functions from the bridge in src/tui/launch.tsx. See .claude/rules/src/tui.md.")
       }
     }
+  },
+  // A static import of src/tui/ from outside it loads OpenTUI on every run and in vitest. A dynamic
+  // import("../tui/launch") (importTui in src/commands/load-tui.ts) is the way in, so only
+  // JsModuleSource counts.
+  JsModuleSource() as $src where {
+    $filename <: r".*/src/.*",
+    $filename <: not r".*/src/tui/.*",
+    // Matched on where the specifier resolves: ./tui from src/, ../tui one level down, and so on.
+    or {
+      $src <: r"[\"']~/tui(?:/[^\"']*)?[\"']",
+      and { $filename <: r".*/src/[^/]+", $src <: r"[\"']\./tui(?:/[^\"']*)?[\"']" },
+      and { $filename <: r".*/src/[^/]+/[^/]+", $src <: r"[\"']\.\./tui(?:/[^\"']*)?[\"']" },
+      and {
+        $filename <: r".*/src/[^/]+/[^/]+/[^/]+",
+        $src <: r"[\"']\.\./\.\./tui(?:/[^\"']*)?[\"']"
+      }
+    },
+    register_diagnostic(span=$src, message="Static import of src/tui/ from outside it: that loads OpenTUI everywhere. Load it with importTui from src/commands/load-tui.ts, a dynamic import. See .claude/rules/src/tui.md, The bridge.")
   },
   `console.$m($args)` as $c where {
     $filename <: r".*/src/.*",
@@ -35,6 +53,18 @@ or {
     $filename <: r".*/src/.*",
     $filename <: not r".*/src/(?:config|bin)\.ts",
     register_diagnostic(span=$e, message="Only src/config.ts reads the environment (Effect Config). Add the variable there.")
+  },
+  // stdout carries results only; src/bin.ts hands main its writers. stderr is also used by
+  // src/logging.ts (the terminal sink) and src/config.ts (isTTY for the color default).
+  `process.stdout` as $o where {
+    $filename <: r".*/src/.*",
+    $filename <: not r".*/src/bin\.ts",
+    register_diagnostic(span=$o, message="process.stdout outside src/bin.ts: results go through the Output service. See .claude/rules/src/cli.md, stdout contract.")
+  },
+  `process.stderr` as $o where {
+    $filename <: r".*/src/.*",
+    $filename <: not r".*/src/(?:bin|logging|config)\.ts",
+    register_diagnostic(span=$o, message="process.stderr outside src/bin.ts, src/logging.ts, and src/config.ts: notes go through Output.note, diagnostics through Effect.log*. See .claude/rules/src/cli.md, stdout contract.")
   },
   `Bun.$x` as $b where {
     $filename <: r".*/src/.*",

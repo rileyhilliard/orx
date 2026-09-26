@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { appendFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GIT_ENV, type GitRepo, makeGitRepo, runHook } from "../helpers/hooks";
@@ -7,6 +9,8 @@ let repo: string;
 let git: GitRepo["git"];
 let put: GitRepo["put"];
 let cleanup: () => void;
+// Where the hook keeps its log offset; per test, so no state leaks between them or from the machine.
+let tmp: string;
 
 // The bun that runs the hook (the one on PATH), so a fixture can pin it or not.
 const BUN_VERSION = spawnSync("bun", ["--version"], { encoding: "utf8" }).stdout.trim();
@@ -21,7 +25,7 @@ const sessionStart = async () => {
     "SessionStart",
     "session-start",
     { session_id: "s", hook_event_name: "SessionStart", source: "startup" },
-    { env: { CLAUDE_PROJECT_DIR: repo, ...GIT_ENV } },
+    { env: { CLAUDE_PROJECT_DIR: repo, TMPDIR: tmp, ...GIT_ENV } },
   );
   expect(result.code).toBe(0);
   return result.stdout;
@@ -29,8 +33,12 @@ const sessionStart = async () => {
 
 beforeEach(() => {
   ({ dir: repo, git, put, cleanup } = makeGitRepo());
+  tmp = mkdtempSync(join(tmpdir(), "orx-hook-tmp-"));
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  rmSync(tmp, { recursive: true, force: true });
+});
 
 describe("session-start", { timeout: 30_000 }, () => {
   it("reports the branch and the number of changed files, without nudging before the first commit", async () => {
@@ -105,9 +113,63 @@ describe("session-start", { timeout: 30_000 }, () => {
         "",
       ].join("\n"),
     );
-    expect(await sessionStart()).toContain(
-      "logs/orx.jsonl has 3 warn/error line(s) from earlier runs: jq -c",
+    expect(await sessionStart()).toContain("logs/orx.jsonl has 3 warn/error line(s): jq -c");
+  });
+
+  it("counts only the lines appended since the previous session started", async () => {
+    const first = '{"time":"t","level":"error","msg":"old"}\n';
+    put("logs/orx.jsonl", first);
+    expect(await sessionStart()).toContain("logs/orx.jsonl has 1 warn/error line(s)");
+    // Nothing new: the old error was reported last time.
+    expect(await sessionStart()).not.toContain("orx.jsonl");
+
+    appendFileSync(
+      join(repo, "logs/orx.jsonl"),
+      '{"time":"t","level":"warn","msg":"new"}\n{"time":"t","level":"info","msg":"command"}\n',
     );
+    expect(await sessionStart()).toContain(
+      `logs/orx.jsonl has 1 new warn/error line(s) since the last session started: tail -c +${first.length + 1} logs/orx.jsonl | jq -c`,
+    );
+    expect(await sessionStart()).not.toContain("orx.jsonl");
+  });
+
+  it("leaves a line still being written for the next session", async () => {
+    put("logs/orx.jsonl", '{"time":"t","level":"info","msg":"command"}\n{"time":"t","level":"err');
+    expect(await sessionStart()).not.toContain("orx.jsonl");
+    appendFileSync(join(repo, "logs/orx.jsonl"), 'or","msg":"defect"}\n');
+    expect(await sessionStart()).toContain("logs/orx.jsonl has 1 new warn/error line(s)");
+  });
+
+  it("starts over when the log was rotated or truncated", async () => {
+    put("logs/orx.jsonl", '{"time":"t1","level":"error","msg":"old"}\n'.repeat(3));
+    expect(await sessionStart()).toContain("has 3 warn/error line(s)");
+
+    // Rotated (scripts/orx-dev.ts renames it to orx.prev.jsonl): a new file, even if it's longer.
+    renameSync(join(repo, "logs/orx.jsonl"), join(repo, "logs/orx.prev.jsonl"));
+    put("logs/orx.jsonl", '{"time":"t2","level":"warn","msg":"new"}\n'.repeat(4));
+    expect(await sessionStart()).toContain("logs/orx.jsonl has 4 warn/error line(s): jq -c");
+
+    // Truncated in place to something shorter.
+    put("logs/orx.jsonl", '{"time":"t3","level":"warn","msg":"new"}\n');
+    expect(await sessionStart()).toContain("logs/orx.jsonl has 1 warn/error line(s): jq -c");
+  });
+
+  it("keeps a separate offset per checkout", async () => {
+    put("logs/orx.jsonl", '{"time":"t","level":"error","msg":"x"}\n');
+    expect(await sessionStart()).toContain("has 1 warn/error line(s)");
+    const other = makeGitRepo();
+    try {
+      other.put("logs/orx.jsonl", '{"time":"t","level":"error","msg":"x"}\n');
+      const result = await runHook(
+        "SessionStart",
+        "session-start",
+        { session_id: "s", hook_event_name: "SessionStart", source: "startup" },
+        { env: { CLAUDE_PROJECT_DIR: other.dir, TMPDIR: tmp, ...GIT_ENV } },
+      );
+      expect(result.stdout).toContain("logs/orx.jsonl has 1 warn/error line(s)");
+    } finally {
+      other.cleanup();
+    }
   });
 
   it("says nothing about a clean log", async () => {

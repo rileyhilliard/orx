@@ -1,7 +1,8 @@
 // PreToolUse (Bash): deny commands that are wrong for this stack, with the fix.
 //
 //   bun test without ./tests/tui or ./e2e   bun's runner is only for the TUI tests and e2e; a bare
-//                                           run also picks up the vitest files and fails on them
+//                                           run is rooted at tests/tui (bunfig.toml), so it passes
+//                                           on the TUI tests alone and skips every vitest test
 //   vitest on tests/tui                     those tests need Bun (OpenTUI); vitest runs on Node
 //   bun run test <args>                     `test` chains test:unit and test:tui, so an argument
 //                                           lands on the wrong runner
@@ -96,7 +97,7 @@ function reasonFor(cmd: Command): string | undefined {
     const pathLike = positional.filter((a) => a.includes("/") || /\.[cm]?[jt]sx?$/.test(a));
     const scoped = pathLike.length > 0 && pathLike.every((a) => BUN_TEST_PATH.test(a));
     if (!scoped) {
-      return "bun test here runs only the TUI tests and e2e (./tests/tui, ./e2e); everything else is vitest. Use bun run test:unit [file] [-t name] for vitest, bun run test:tui or bun test ./tests/tui/<file> for the TUI, bun run e2e for the binary (it builds first), or bun run test for both runners.";
+      return "bun test here runs only the TUI tests and e2e (./tests/tui, ./e2e); everything else is vitest. A bare bun test is rooted at tests/tui by bunfig.toml, so it passes on the TUI tests alone and silently skips every vitest test. Use bun run test:unit [file] [-t name] for vitest, bun run test:tui or bun test ./tests/tui/<file> for the TUI, bun run e2e for the binary (it builds first), or bun run test for both runners.";
     }
     return undefined;
   }

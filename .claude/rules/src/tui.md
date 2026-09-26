@@ -2,6 +2,7 @@
 paths:
   - "src/tui/**"
   - "src/commands/chat.ts"
+  - "src/commands/load-tui.ts"
   - "tests/tui/**"
   - "scripts/tui-capture.ts"
   - "DESIGN.md"
@@ -16,13 +17,13 @@ paths:
 - `src/tui/launch.tsx` is the only TUI file that imports `effect`. It captures `Effect.context()` and hands components a `ChatBridge` (`src/tui/types.ts`): plain data, promises (`listModels`, `exportMarkdown`), and an async iterable per turn (`send`, built with `Stream.toAsyncIterableWith(context)`). Errors arrive already mapped to `{ message, retryable }`, and the iterable yields an `error` event rather than throwing. Components never import `effect`, `~/core`, or `~/services` (the `guard-boundaries` hook and the Grit rule deny `effect` imports under `src/tui/` outside `launch.tsx`).
 - Something new a component needs goes on `ChatBridge` as a plain function, built in `launch.tsx` from an Effect program. Keep the types in `types.ts` free of Effect types.
 - Stopping a reply is `iterator.return()` on the turn's iterator: that stops the stream, `runTurn`'s `onExit` saves the partial reply, and the bridge reloads the saved chat. The stop arrives as a `Success` exit, not an interruption (see `effect-ai.md`), so a test should assert the saved reply is marked interrupted.
-- `commands/chat.ts` loads the bridge with a dynamic `import("../tui/launch")` so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree.
+- `commands/chat.ts` and `commands/doctor.ts` (for `--tui`) load the bridge through `importTui` in `commands/load-tui.ts`, a dynamic `import("../tui/launch")` that turns a load failure into `TuiUnavailable`, so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree. The `guard-boundaries` hook and the Grit rule deny one (type-only imports included, so shared types live outside `src/tui/`).
 
 ## Terminal and signal ownership
 
 - Effect owns signals and the exit code; OpenTUI must not. The renderer is created with `RENDERER_OPTIONS` (`exitOnCtrlC: false`, `exitSignals: []`, `consoleMode: "disabled"`), and `tests/tui/launch.test.ts` pins them. OpenTUI's defaults would call `process.exit` on Ctrl+C and on SIGINT/SIGTERM/SIGHUP (among others), skipping the chat save and returning the wrong exit code; `exitSignals: []` is honored (an empty array, not a fallback to the defaults).
 - The renderer puts stdin in raw mode, so Ctrl+C arrives as a key, not a SIGINT. It's a `useKeyboard` binding that stops any reply, then calls `bridge.quit()`, which resolves the handler normally (exit 0). A real signal (`kill -INT`) interrupts the Effect fiber; the renderer is an `Effect.acquireRelease` resource, so `destroy()` restores the terminal either way.
-- While a renderer exists it has installed `process.on` handlers for `uncaughtException` and `unhandledRejection` (they print the error and don't exit) and replaced `globalThis.requestAnimationFrame`. A floating promise in a component won't crash the process; it prints over the screen. Handle every promise from the bridge (`.then(ok, fail)` or try/finally), as `app.tsx` does.
+- While a renderer exists it has installed `process.on` handlers for `uncaughtException` and `unhandledRejection` (they print the error and don't exit) and replaced `globalThis.requestAnimationFrame`. A floating promise in a component won't crash the process; its rejection prints over the screen. Every promise a component starts ends in `.catch(...)` or `.then(ok, fail)` that shows the error in the UI. `try/finally` doesn't count: `finally` runs cleanup and lets the rejection through. The bridge (`launch.tsx`) logs defects, so a component only has to show them.
 - Logs: `launchChat` provides `TerminalLogging` false, so while the TUI runs only the file sink writes. Never write to stdout or stderr from a component; show state in the UI.
 - `src/bin.ts` deletes `DEV` before anything imports `@opentui/react`, which loads its devtools when `DEV=true`.
 

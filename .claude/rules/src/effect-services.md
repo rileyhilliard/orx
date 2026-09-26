@@ -15,7 +15,7 @@ Everything outside `src/tui/` and `src/bin.ts` is plain Effect that runs on Node
 
 ## Services and layers
 
-- A service is a `Context.Service` class in `src/services/` with id `"orx/<Name>"` and its layers as statics: `static readonly layer` for the app, plus a test variant named by what differs (`ChatStore.layerMemory`, `Llm.layerModel(model)`). Add it to `AppLayer` in `src/runtime.ts`.
+- A service is a `Context.Service` class in `src/services/` with id `"orx/<Name>"` and its layers as statics: `static readonly layer` for the app, plus a test variant named by what differs (`ChatStore.layerMemory`) only where a test needs one. The model has no test layer: tests point the real `Llm.layer` at the stub OpenRouter (`testing.md`). Add it to `AppLayer` in `src/runtime.ts`.
 - `AppLayer` never builds platform services. `FileSystem`, `Path`, `Stdio`, `Terminal`, `ChildProcessSpawner`, `HttpClient`, and `Host` come from outside: `BunServices.layer` + `FetchHttpClient.layer` in `src/bin.ts`, `NodeServices.layer` + `Stdio.layerTest` in `tests/helpers/cli.ts`. A service that needs the platform yields the abstract service (`yield* FileSystem.FileSystem`), never a Bun or Node API.
 - One process, one run: there is no hot reload and no `globalThis` state. A layer is built once per invocation. Caches (the models list's `Ref`, the OpenRouter client from `Effect.cached`) live inside the layer's closure.
 - Services depend on other services through the context (`yield* OtherService`), never by providing another service's layer inside a constructor. Yield dependencies in the layer constructor, not in each method, so methods return `Effect<A, E, never>`.

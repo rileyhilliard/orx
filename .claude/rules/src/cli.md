@@ -19,7 +19,7 @@ paths:
 - Shared flags live in `src/commands/shared.ts` (`jsonFlag`, `modelFlag`). Reuse them so `--json` and `--model`/`-m` mean the same thing everywhere.
 - A command that talks to the model calls `resolveModel(requested)` (an unknown id is `UnknownModel`, exit 2; `OPENROUTER_MODEL` applies only when no model was given). Config is loaded inside the program that needs it (`loadConfig`), never at the top of `main`: `--help`, `--version`, `doctor`, and `update` must work with no key and a broken config file.
 - Piped input: `readPipedStdin` returns `undefined` at a terminal, so a command never blocks on a keyboard it didn't ask for. `orx chat` needs a TTY on stdin and stdout and fails with `NotInteractive` (exit 2) pointing at `orx ask` otherwise.
-- Interactive-only code (the TUI) is loaded with a dynamic `import("../tui/launch")` inside the handler, so vitest and every other command never load OpenTUI.
+- Interactive-only code (the TUI) is loaded through `importTui` (`src/commands/load-tui.ts`, a dynamic `import("../tui/launch")`) inside the handler, so vitest and every other command never load OpenTUI.
 
 ## Platform boundary
 
@@ -29,7 +29,7 @@ vitest runs everything except `tests/tui/` on Node, so only `src/bin.ts` and `sr
 
 stdout carries results only; `orx ... | jq` and `orx mcp` (where one stray line corrupts JSON-RPC) depend on it.
 
-- Results go through the `Output` service (`write`, `line`, `json`). Notes for the person (usage after a reply, a tool call, a hint) go through `Output.note`, which writes stderr. Logs go to stderr and the log file (`logging.ts`). No `console.*` anywhere in `src/`.
+- Results go through the `Output` service (`write`, `line`, `json`). Notes for the person (usage after a reply, a tool call, a hint) go through `Output.note`, which writes stderr. Logs go to stderr and the log file (`logging.ts`). No `console.*` anywhere in `src/`; `process.stdout` only in `bin.ts`, and `process.stderr` only in `bin.ts`, `logging.ts` (the terminal sink), and `config.ts` (the color default's TTY check). Both guards deny the rest.
 - `effect/unstable/cli` prints help, `--version`, completions, and (with `renderErrors` on) parse errors through Effect's `Console`, a `Context.Reference` whose default is the global console, so all of it lands on stdout, including the help it prints for a usage error. `main` runs `Command.runWith(cli, { version, renderErrors: false })(argv)` with a holding `Console` and flushes what it held to stdout only for `ok`/`help` outcomes; errors are rendered by `main` on stderr, as `{"error":{tag,message,retryable}}` when argv contains `--json` (parse errors happen before any handler sees its flags). `--wizard` is interactive and prints as it goes.
 - `BunRuntime.runMain(..., { disableErrorReporting: true, teardown })`: the default error reporting logs the failure through the default logger, which is `console.log`. The loggers are provided at the outermost layer so nothing Effect logs reaches stdout.
 - With `--json`: one JSON value for a result, NDJSON for a stream (`orx ask --json` emits `AskEvent`s: `text`, `tool-call`, `tool-result`, `done`, `error`). A new event shape goes in `src/schemas/events.ts`.

@@ -12,3 +12,5 @@ Run the project's gate and fix everything it reports.
 Fix the underlying problem each time. Don't skip or weaken a test, loosen a lint rule, or add a type cast to get green; if one of those is truly the right call, say so and why.
 
 Done when all four pass in one run (`bun run check` runs them in order). Report what you changed to get there.
+
+`bun run check` is close to CI but not the same. CI (`.github/workflows/ci.yml`) installs with `bun install --frozen-lockfile --os='*' --cpu='*'` (every platform's OpenTUI package), runs `bun run coverage` in place of `test:unit`, and ends with `bun run build:all`, which cross-compiles every release target. When the build script, the native-lib plugin, or dependencies changed, run those two as well (`build:all` needs that install first).
