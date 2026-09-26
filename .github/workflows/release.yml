@@ -1,0 +1,81 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching package.json's version) to publish binaries, SHA256SUMS,
+# and install.sh as a GitHub release. `orx update` and install.sh read the latest release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
+      - name: Tag matches package.json
+        run: |
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != package.json v$version"; exit 1; }
+      - run: bun run check
+      - run: bun run build:all
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/orx-*
+            dist/SHA256SUMS
+            install.sh
+          retention-days: 7
+
+  # Each binary runs on its own OS and CPU before anything is published: --version, and
+  # doctor --tui, which loads the embedded OpenTUI native library.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-latest, asset: orx-darwin-arm64 }
+          # GitHub's last Intel macOS image.
+          - { runner: macos-15-intel, asset: orx-darwin-x64 }
+          - { runner: ubuntu-latest, asset: orx-linux-x64 }
+          - { runner: ubuntu-24.04-arm, asset: orx-linux-arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+      - run: |
+          chmod +x "dist/${{ matrix.asset }}"
+          (cd dist && grep " ${{ matrix.asset }}$" SHA256SUMS | shasum -a 256 -c -)
+          "dist/${{ matrix.asset }}" --version
+          "dist/${{ matrix.asset }}" doctor --tui --json
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The only job that can write: it creates the release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/orx-* dist/SHA256SUMS install.sh
