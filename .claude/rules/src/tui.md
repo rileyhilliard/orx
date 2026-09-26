@@ -38,4 +38,4 @@ paths:
 - TUI tests are `bun test` only (`bun run test:tui`, or `bun test ./tests/tui/<file>`): `testRender` from `@opentui/react/test-utils` needs Bun, and vitest excludes `tests/tui/`. `tests/tui/setup.ts` (bunfig preload) isolates the env the way vitest's setup does.
 - Render with `testRender(<App bridge={fake} />, { width, height })`, drive with `mockInput` (`typeText`, `pressEnter`, `pressKey`, `pressCtrlC`), wait with `waitForFrame` / `renderOnce`, and assert on `captureCharFrame()`. A fake `ChatBridge` is plain objects and async generators; no Effect needed. The closed-loop test builds the real bridge over the stub OpenRouter.
 - Destroy the renderer after each test (`renderer.destroy()`), or its process handlers and raw-mode stdin leak into the next one.
-- To see the real screen: `bun run tui:capture -- chat --keys "hi<enter>"` runs orx in a PTY and prints the rendered screen as text.
+- To see the real screen: `bun run tui:capture -- chat --keys "hi<enter>"` runs orx in a PTY and prints the rendered screen as text. orx's own flags go after a second `--` (`bun run tui:capture -- --keys "hi<enter>" -- chat --resume <id>`).

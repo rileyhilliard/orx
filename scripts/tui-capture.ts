@@ -9,24 +9,39 @@
 //   --cols/--rows     terminal size (default 100x30)
 //   --bin <path>      run a binary (dist/orx) instead of src/bin.ts
 //   --no-quit         leave the app running instead of sending Ctrl+C at the end
+//
+// orx's own flags go after a second `--`, so they aren't read as these:
+// `bun run tui:capture -- --keys "hi<enter>" -- chat --resume <id>`.
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { parseKeys, spawnPty } from "./lib/pty";
 
 process.chdir(join(import.meta.dirname, ".."));
 
-const { values, positionals } = parseArgs({
-  args: process.argv.slice(2),
-  allowPositionals: true,
-  options: {
-    keys: { type: "string", default: "" },
-    "wait-for": { type: "string" },
-    cols: { type: "string", default: "100" },
-    rows: { type: "string", default: "30" },
-    bin: { type: "string" },
-    "no-quit": { type: "boolean", default: false },
-  },
-});
+const parse = () => {
+  try {
+    return parseArgs({
+      args: process.argv.slice(2),
+      allowPositionals: true,
+      options: {
+        keys: { type: "string", default: "" },
+        "wait-for": { type: "string" },
+        cols: { type: "string", default: "100" },
+        rows: { type: "string", default: "30" },
+        bin: { type: "string" },
+        "no-quit": { type: "boolean", default: false },
+      },
+    });
+  } catch (error) {
+    process.stderr.write(
+      `tui:capture: ${error instanceof Error ? error.message.split(".")[0] : error}. ` +
+        `Put orx's own flags after a second \`--\`: ` +
+        `bun run tui:capture -- --keys "..." -- chat --resume <id>\n`,
+    );
+    process.exit(2);
+  }
+};
+const { values, positionals } = parse();
 
 const command = values.bin
   ? [values.bin, ...positionals]

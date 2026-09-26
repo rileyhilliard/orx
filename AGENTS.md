@@ -15,7 +15,7 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun install` | Dependencies, then `scripts/prepare.ts` installs the git hooks (skipped when `CI` is set) |
 | `bun run orx -- <args>` | orx from source, with `LOG_LEVEL=info`, logs in `logs/orx.jsonl` and `logs/orx.log`, chats in `.orx/data` |
 | `bun run stub` / `stub:stop` | A stub OpenRouter and stub releases on local ports, detached; prints `export` lines (`eval "$(bun run --silent stub)"`) |
-| `bun run tui:capture -- chat --keys "hi<enter>"` | Runs orx in a pseudo-terminal, types the keys, prints the screen as text (`--wait-for <text>`, `--bin dist/orx`) |
+| `bun run tui:capture -- chat --keys "hi<enter>"` | Runs orx in a pseudo-terminal, types the keys, prints the screen as text (`--wait-for <text>`, `--bin dist/orx`; orx's own flags after a second `--`) |
 | `bun run lint` | `biome check .` (lint, format, import order, `biome-plugins/boundaries.grit`) |
 | `bun run format` | `biome check --write .` |
 | `bun run typecheck` | `tsc` |
