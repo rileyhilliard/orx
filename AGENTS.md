@@ -23,7 +23,7 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun run test:unit tests/cli-contract.test.ts` | One vitest file; add `-t "<name>"` for one test |
 | `bun run coverage` | vitest with a v8 coverage report in `coverage/` |
 | `bun run e2e` | Builds `dist/orx`, then `bun test ./e2e`: the binary as a process and in a PTY, against the stubs |
-| `bun run check` | The full gate, same as CI: lint, typecheck, test, e2e. Run it before calling work done |
+| `bun run check` | The full gate: lint, typecheck, test, e2e. Run it before calling work done. CI also installs every target's native package (`bun install --os='*' --cpu='*'`), runs `coverage` in place of `test:unit`, and ends with `build:all` |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `dist/SHA256SUMS` (needs `bun install --os='*' --cpu='*'`) |
 | `bun run eval --models a,b` | `evals/cases.ts` against real models through orx's own programs. Needs a key, costs money, never in CI |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams. Needs a key |
@@ -89,7 +89,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 ## Testing
 
 - vitest 5 on Node for everything except the TUI and the binary. `tests/helpers/cli.ts` `runCli(argv, { env, stdin })` runs the real `main` and `AppLayer` with `NodeServices` and a captured `Stdio`, and returns `{ exitCode, stdout, stderr, logs }`. Prefer it: it tests the contract a user sees.
-- `tests/helpers/stub-openrouter.ts` stands in for OpenRouter (`/models`, streaming and non-streaming `/chat/completions`, failures, `hangAfter`, `replay(fixtures)`); `stub-releases.ts` for GitHub releases. Point `OPENROUTER_BASE_URL` / `ORX_RELEASES_URL` at them. Nothing is module-mocked.
+- `tests/helpers/stub-openrouter.ts` stands in for OpenRouter (`/models`, streaming and non-streaming `/chat/completions`, failures, `hangAfter`, `dropAfter`, scripted `toolCalls`, `replay(fixtures)`); `stub-releases.ts` for GitHub releases. `tests/openrouter-replay.test.ts` replays the recorded bodies in `tests/fixtures/openrouter/` through the real provider and checks text, tokens, and cost against the recordings. Point `OPENROUTER_BASE_URL` / `ORX_RELEASES_URL` at them. Nothing is module-mocked.
 - `tests/isolation.ts` runs before every vitest and bun test process: no key, unreachable URLs, config, data, and HOME in a temp dir. No test can reach the network or your real files.
 - `tests/tui/` (bun test): components with `@opentui/react/test-utils` and a fake bridge, `closed-loop.test.tsx` with the real bridge and programs against the stub, and a pin on the renderer options.
 - `e2e/` (bun test) spawns `dist/orx` with an env built from scratch: exit codes and empty stdout, piped `ask --json`, `.env` ignored, the native library, `mcp`, the TUI in a PTY, install.sh, `update --check`. Keep it to what only the binary shows.
@@ -105,7 +105,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 
 - If a fix hasn't worked after two attempts with no new diagnostic step in between, stop, write down what you learned, list two or three other root-cause hypotheses, and ask which to pursue.
 - Drive the real CLI: `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask hi --json | jq`, `bun run tui:capture -- chat --keys "hi<enter>" --wait-for "in /"`. The stub needs no key and costs nothing.
-- Read the logs before guessing. `logs/orx.jsonl` has one JSON object per line: `time`, `level`, `msg`, annotations as top-level keys, `error` for defects. Every run logs one `command` line (`command`, flag names, `exitCode`, `durationMs`, `runId`, `errorTag`); every model turn one `llm call` line (requested and served model, tokens, cost, finish reason, `aborted`, time to first token) with the same `runId`. `logs/orx.log` is stderr as plain text.
+- Read the logs before guessing. `logs/orx.jsonl` has one JSON object per line: `time`, `level`, `msg`, annotations as top-level keys, `error` for defects. Every run logs one `command` line (`command`, flag names, `exitCode`, `durationMs`, `runId`, `errorTag`, and `errorDetail` with OpenRouter's or GitHub's status and reason), including a run a signal interrupted; every model turn one `llm call` line (requested and served model, tokens, cost, finish reason, `aborted` when the user stopped it, `errorTag`/`errorDetail` when it failed, time to first token) with the same `runId`. `logs/orx.log` is stderr as plain text.
 - Queries: `jq -c 'select(.level == "error" or .level == "warn")' logs/orx.jsonl`, `jq -c 'select(.msg == "command" and .exitCode != 0)' logs/orx.jsonl`.
 - `bun run orx -- doctor --json` prints the version, paths, whether the key is set, and a config error if there is one. `--log-level debug` shows debug lines for one run.
 
@@ -118,9 +118,9 @@ Things in the tree that exist to get a build through, not because they are right
 | `package.json`: `effect`, `@effect/platform-bun`, `@effect/ai-openrouter`, `@effect/platform-node`, `@effect/vitest` pinned to exactly `4.0.0-rc.117`, plus an `overrides` pin on `@effect/platform-node-shared` | RCs break APIs between releases, and every Effect package must match; bump all together, run `bun run check`, update the `effect` skill | `effect` 4.0.0 is stable; switch to `^4` ranges |
 | `scripts/build.ts` native-lib plugin | a compiled binary would embed every platform's `@opentui/core-*` package it can resolve; the plugin keeps the target's only | OpenTUI or Bun select the native package per compile target |
 | `src/bin.ts` deletes `process.env.DEV` | `@opentui/react` loads its devtools when `DEV=true`, which a user's shell may set | OpenTUI stops reading `DEV` |
-| `src/core/mcp-stdio.ts` | Effect's stdio MCP transport stops when stdin closes and drops in-flight requests; the wrapper holds stdin open until every request has a response | the transport drains pending requests on EOF |
+| `src/core/mcp-stdio.ts` | Effect's stdio MCP transport stops when stdin closes and drops in-flight requests; the wrapper holds stdin open until every request has a response (or is cancelled), for at most 30 seconds | the transport drains pending requests on EOF |
 | `src/commands/mcp.ts` runs the server in a child fiber | the stdio transport interrupts the fiber that started it on EOF, which would make every session exit 130 | the transport ends normally on EOF |
-| `provider` is always null in `llm call` lines and replies | `@effect/ai-openrouter`'s chunk schema drops OpenRouter's `provider` field; `readOpenRouter` in `core/chat.ts` reads it when present | the provider keeps `provider` (the replay test will show it) |
+| `provider` is always null in `llm call` lines and replies | `@effect/ai-openrouter`'s chunk schema drops OpenRouter's `provider` field; `readOpenRouter` in `core/chat.ts` reads it when present | the provider keeps `provider` (`tests/openrouter-replay.test.ts` can then assert it) |
 | `src/tui/app.tsx` reads the submitted value and remounts the input to clear it | `onInput` didn't fire for typed text under the test renderer, so a controlled draft stayed empty | a controlled `<input>` works in `tests/tui/app.test.tsx` |
 
 ## CI

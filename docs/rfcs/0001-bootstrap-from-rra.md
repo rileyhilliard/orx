@@ -53,7 +53,12 @@ A devil's-advocate review of the plan raised these, and the plan changed for eac
 - `@effect/ai-openrouter` drops the `provider` field from stream chunks, so the served provider is always null in `llm call` lines and evals.
 - `doctor` is a visible command, not hidden: it's the first thing to run when something is off.
 - The release smoke matrix uses `macos-15-intel` for x64 macOS (`macos-13` runners are retired). The linux binaries are checked only in CI.
+- The harness port was committed after the code, not before it as the plan ordered, and the code was written in a session rooted at rra, so rra's hooks (not orx's) guarded it. Two reviews afterwards (orx's `reviewer` checklist and a plan-conformance review) found what orx's own guards would have: a static TUI import path and stdout writes the boundary checks didn't cover, now covered.
 - OpenTUI's `onInput` doesn't fire under the test renderer, so the composer submits the value passed to `onSubmit` and remounts after each send.
+
+## Changes from the reviews
+
+Fixed after review, each with a test: a stopped or failed turn is saved as interrupted (and a failure with no output saves nothing, so an empty assistant message never goes back to the model); a tool's bad input returns to the model (`failureMode: "return"`); no retry once output started (tested with a stub stream that drops mid-reply); every `--json` failure after parsing ends with an `error` event; the `command` line can't log prompt text, names the command after global flags, and is written when a signal interrupts; a closed stdout exits 0; `export -o` and the TUI export map write errors to exit 2 or 6; a TUI that can't load is `TuiUnavailable` (exit 3) and `doctor --tui` reports it; update retries only what a retry can fix and allows 5 minutes per download; install.sh detects musl under `pipefail` and renames within the install dir; `orx mcp` stops waiting for cancelled requests and after 30 seconds. The binary embeds a sourcemap.
 
 ## Verification
 

@@ -26,7 +26,7 @@ Layers are listed earliest first. "Rule" means a file in `.claude/rules/src/` th
 | Running the wrong test runner (bare `bun test`, vitest on `tests/tui`) | `AGENTS.md`, `testing.md` rule | `guard-commands.ts` denies it with the right command | none needed: the command never runs |
 | Destroying work (`git reset --hard`, force push, `rm -rf /`) | none | `block-destructive.ts` denies it; `permissions.deny` repeats the worst shapes | `tests/hooks/` |
 | Importing `bun:*`, `@effect/platform-bun`, or `@opentui/*` outside `src/bin.ts` and `src/tui/` | `cli.md`, `tui.md` rules | `guard-boundaries.ts` denies the write; the Grit plugin flags it | vitest fails to load the module on Node, then CI |
-| Writing to stdout outside `Output` (a stray line breaks pipes and `orx mcp`) | `cli.md` rule | the Grit plugin flags `console.*` in `src/` | `tests/cli-contract.test.ts` and e2e assert stdout is empty on errors; `tests/mcp.test.ts` checks every stdout line is JSON-RPC |
+| Writing to stdout outside `Output` (a stray line breaks pipes and `orx mcp`) | `cli.md` rule | `guard-boundaries.ts` and the Grit plugin flag `console.*`, and `process.stdout`/`process.stderr` outside the few files that own them | `tests/cli-contract.test.ts` and e2e assert stdout is empty on errors; `tests/mcp.test.ts` checks every stdout line is JSON-RPC |
 | A new error without an exit code | `cli.md` rule | `tsc`: `exitCodeFor` and `retryableFor` switch exhaustively | `tests/units.test.ts` pins every code |
 | Hand-editing generated files (`dist/`, `coverage/`, `bun.lock`, recorded fixtures) | `AGENTS.md` conventions | `guard-generated.ts` denies it and names the regenerating command | regenerating overwrites a hand edit anyway |
 | Writing a secret into a file | `.env` is gitignored and `Read(./.env)` is denied; the config file schema rejects `apiKey` | `detect-secrets.ts` denies credential-shaped writes | `tests/config.test.ts` proves a key in the config file never reaches a request |
@@ -35,7 +35,7 @@ Layers are listed earliest first. "Rule" means a file in `.claude/rules/src/` th
 | The TUI and the programs disagree (event shapes, errors) | `tui.md` rule | `tests/tui/closed-loop.test.tsx` renders `App` over the real bridge against the stub | e2e drives the binary's TUI in a PTY |
 | OpenTUI taking over signals or Ctrl+C | `tui.md` rule | `tests/tui/launch.test.ts` pins the renderer options | e2e checks Ctrl+C exits 0 and leaves the alternate screen |
 | A binary that builds but can't load its native library | `distribution.md` rule | `doctor --tui` in e2e | release.yml runs it on each OS and CPU before publishing |
-| Stub drift: OpenRouter's real stream format moves away from the hand-written stub | `openrouter.md` rule | `tests/cli-contract.test.ts` replays recorded OpenRouter bodies (`tool.1`, `tool.2`) through the real provider | `bun run record:openrouter` re-records them (manual, needs a key) |
+| Stub drift: OpenRouter's real stream format moves away from the hand-written stub | `openrouter.md` rule | `tests/openrouter-replay.test.ts` replays recorded OpenRouter bodies through the real provider, whole and in 7-byte pieces, and checks text, tokens, and cost against the recordings | `bun run record:openrouter` re-records them (manual, needs a key) |
 | A model regression: a model stops calling the tool, or extracts the wrong fields | none | `bun run eval --models a,b` through orx's own programs | manual only: needs a key and costs money |
 | A convention no tool checks (thin commands, log once, decode at the boundary) | rules, `AGENTS.md` | the `reviewer` agent before a commit | `/feature` runs two code reviews before the PR |
 
@@ -55,7 +55,7 @@ sequenceDiagram
 
     U->>M: orx ask --json "time in Tokyo?"
     M->>H: Command.runWith(cli)(argv)
-    Note over H: stdin (if piped), decode Prompt (exit 2),<br/>loadConfig (exit 3), resolveModel (exit 2)
+    Note over H: key check (exit 3), stdin (if piped),<br/>decode Prompt (exit 2), resolveModel (exit 2)
     H->>C: sendMessage(chat, text, model)
     C->>O: POST /chat/completions (stream)
     O-->>C: deltas, tool call, usage + cost

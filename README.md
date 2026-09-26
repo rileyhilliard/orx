@@ -18,7 +18,7 @@ The installer picks the binary for your OS and CPU (macOS and Linux with glibc, 
 
 ```bash
 orx ask "what's a monad, in one sentence"
-git diff | orx ask "review this diff"        # stdin is appended to the prompt
+git diff | orx ask "review this diff"        # piped stdin is appended to the prompt
 orx ask --json "time in Tokyo?" | jq -c .   # NDJSON: text, tool-call, tool-result, done | error
 orx chat                                     # Ctrl+P model, Ctrl+E export, Esc stop, Ctrl+C quit
 orx chat --resume <id>                       # ids from `orx chats`
@@ -28,7 +28,7 @@ orx export <id> -o chat.md
 claude mcp add orx -- orx mcp                # currentTime and extractContact as MCP tools
 ```
 
-Every reply is saved as a chat (the id is printed after the reply, on stderr). Results go to stdout and everything else (usage lines, logs, errors) to stderr, so pipes only see the answer.
+Every reply is saved as a chat (the id is printed after the reply, on stderr). Results go to stdout and everything else (usage lines, logs, errors) to stderr, so pipes only see the answer. When stdin isn't a terminal, `ask` and `extract` read it to the end, so in a `while read` loop or under a job runner whose stdin stays open, give them `< /dev/null`.
 
 ## Configuration
 
@@ -37,15 +37,16 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 | Variable | What it does |
 |---|---|
 | `OPENROUTER_API_KEY` | Required for anything that calls a model (exit 3 without it). Set a credit limit on the key at openrouter.ai. |
-| `OPENROUTER_MODEL` | Default model (`openai/gpt-6-luna`); `--model` overrides it per run. |
+| `OPENROUTER_MODEL` | Default model (`openai/gpt-6-luna`); `--model` overrides it per run (variants like `:online` work). |
+| `OPENROUTER_BASE_URL` | OpenRouter's API base (default `https://openrouter.ai/api/v1`); the dev stub sets it. |
 | `SYSTEM_PROMPT` | Replaces the default system prompt. |
 | `OPENROUTER_FALLBACK_MODELS` | Comma-separated model ids OpenRouter tries if the main one fails. |
 | `OPENROUTER_PROVIDER_SORT` | `price`, `throughput`, or `latency`; empty lets OpenRouter choose. |
 | `OPENROUTER_ALLOW_FALLBACKS` | Whether OpenRouter may use other providers for the same model (default `true`). |
 | `OPENROUTER_DATA_COLLECTION` / `OPENROUTER_ZDR` | `deny` / `true` restrict routing to providers that don't store prompts / keep zero data. |
 | `MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS` | Reply length (1024), tool-call steps per turn (5), and wall-clock limit per reply (120). |
-| `LOG_LEVEL`, `ORX_LOG_FORMAT`, `ORX_LOG_FILE` | Log level (`warn` by default; `--log-level` per run), `pretty` or `json` on stderr, and a file to also append JSON lines to. `NO_COLOR=1` turns off color. |
-| `ORX_DATA_DIR` | Where chats are saved (default `~/.local/share/orx`). |
+| `LOG_LEVEL`, `ORX_LOG_FORMAT`, `ORX_LOG_FILE` | Log level (`warn` by default; `--log-level` per run), `pretty` or `json` on stderr, and a file to also append JSON lines to. `NO_COLOR=1` turns off color and `FORCE_COLOR=1` forces it. |
+| `ORX_DATA_DIR` | Where chats are saved (default `$XDG_DATA_HOME/orx`, else `~/.local/share/orx`). |
 | `ORX_RELEASES_REPO`, `ORX_RELEASES_URL` | Where `orx update` looks for releases (default `rileyhilliard/orx` on `https://api.github.com`). |
 
 ## Exit codes
@@ -55,7 +56,7 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 | 0 | Success, including `--help` |
 | 1 | A bug in orx (the log has details) |
 | 2 | Bad usage or input: unknown flag, empty prompt, unknown model, unknown chat id, `chat` without a terminal |
-| 3 | Not configured: no API key, or a bad env var or config file value (the message names it) |
+| 3 | Not configured: no API key, a bad env var or config file value (the message names it), or the terminal UI can't load here |
 | 4 | OpenRouter or GitHub failed or timed out; `retryable` in the `--json` error says whether trying again can help |
 | 5 | The model's structured output didn't match the schema |
 | 6 | Permission denied writing a file (`orx update` into a directory you don't own) |
@@ -77,7 +78,7 @@ bun install                       # also installs the git hooks
 eval "$(bun run --silent stub)"   # a local stub OpenRouter: no key, no cost
 bun run orx -- ask "hi"           # orx from source; logs in logs/orx.jsonl
 bun run tui:capture -- chat --keys "hi<enter>" --wait-for "in /"   # the TUI's screen as text
-bun run check                     # what CI runs
+bun run check                     # the gate (CI adds coverage and build:all)
 ```
 
 | Command | What it does |
@@ -88,7 +89,10 @@ bun run check                     # what CI runs
 | `bun run lint` / `format` / `typecheck` | Biome check / Biome fixes / tsc |
 | `bun run test` | vitest (Node) and the TUI tests (bun), no network |
 | `bun run e2e` | Builds `dist/orx` and tests the binary, including the TUI in a PTY |
-| `bun run check` | lint, typecheck, test, e2e |
+| `bun run check` | lint, typecheck, test, e2e (CI also runs `coverage` and `build:all`) |
+| `bun run coverage` | vitest with a coverage report in `coverage/` |
+| `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams (needs a key) |
+| `bun run clean` | Removes `dist/`, `coverage/`, and `logs/` (dev chats in `.orx/` stay) |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `SHA256SUMS` |
 | `bun run eval --models a,b` | Model behavior against the real API (needs a key, costs a fraction of a cent) |
 
