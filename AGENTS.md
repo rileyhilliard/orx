@@ -81,6 +81,7 @@ tests/              vitest (Node); helpers/ (cli.ts runs main, stub-openrouter.t
                     fixtures/openrouter/ recorded streams; tui/ is bun test (testRender, closed loop)
 e2e/                bun test against dist/orx
 docs/               harness.md, rfcs/
+plans/              the coding agent's roadmap: README.md (phase map), one file per phase, follow-ups.md
 ```
 
 Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs one handler. A handler decodes its input, runs one program from `core/`, and renders the result through `Output`. Config loads on first use (`loadConfig`), so `--help`, `--version`, `doctor`, and `update` work with a broken config file. For a chat turn, `core/chat.ts` streams one model step at a time through Effect AI, runs tool calls, and re-prompts until the model stops or `MAX_TOOL_STEPS`; the stream's `onExit` logs one `llm call` line and saves the chat, including a partial reply marked `interrupted`.
@@ -156,7 +157,7 @@ Things in the tree that exist to get a build through, not because they are right
 
 ## Deferred
 
-Explicitly out of scope for now, so nobody mistakes them for forgotten work.
+Explicitly out of scope for now, so nobody mistakes them for forgotten work. `plans/follow-ups.md` lists these and the agent's own deferred work, each with what would bring it in.
 
 - musl Linux (OpenTUI needs `OPENTUI_LIBC=musl` at runtime) and Windows (needs install.ps1 and a smoke job). npm distribution.
 - Code signing and notarization of the macOS binaries.
@@ -169,6 +170,7 @@ Steps only a human can do. Check here before reporting one of these as a problem
 - Put an OpenRouter key in `.env` (for `bun run orx`) or your shell (installed orx) as `OPENROUTER_API_KEY`, and set a credit limit on it at openrouter.ai. Confirm: `bun run orx -- ask hi` streams a real reply.
 - Create the GitHub repo and, if it isn't `rileyhilliard/orx`, change `DEFAULT_RELEASES_REPO` in `src/config.ts` and the URL in `install.sh` before the first tag.
 - Run `bun run record:openrouter` once: the fixtures were recorded through the AI SDK provider in rra, and re-recording through `@effect/ai-openrouter` confirms cost still arrives.
+- Run the `rename-across-files` coding eval against two or three real tool-capable models (`bun run eval --models a,b,c`) and record pass rates, steps, and cost in `plans/phase-1-edits-code.md` under "Still open". It has never run against a real model.
 
 ## Deeper context
 
@@ -178,6 +180,7 @@ Steps only a human can do. Check here before reporting one of these as a problem
 | Claude Code hooks, rules, commands, agents, settings | `.claude/README.md`, `.claude/rules/src/` |
 | Which layer catches which mistake, one `orx ask` turn as a diagram | `docs/harness.md` |
 | Why this repo is shaped the way it is | `docs/rfcs/` |
+| What the coding agent is building next, phase status, what phase 1 shipped | `plans/README.md` |
 | Effect 4 APIs (cli, ai, platform-bun), v3 names that are gone | `.agents/skills/effect/SKILL.md` |
 | OpenTUI APIs, the test renderer | `.agents/skills/opentui/SKILL.md` |
 | TUI design: tokens, layout, keys; avoiding generic TUI patterns | `DESIGN.md`, `.agents/skills/tui-design-slop/SKILL.md` |
