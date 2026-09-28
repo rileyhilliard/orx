@@ -30,7 +30,13 @@ export type ToolStep = typeof ToolStep.Type;
 
 export const UserMessage = Schema.Struct({
   role: Schema.Literal("user"),
+  /** What the user typed: what a resumed chat, an export, and `orx chats` show. */
   text: Schema.String,
+  /**
+   * The `<file>` and `<directory>` blocks for the message's `@path` mentions, as read when it
+   * was sent. The model gets them after `text`; nothing shows them to the user.
+   */
+  attachments: Schema.optional(Schema.String),
 });
 export type UserMessage = typeof UserMessage.Type;
 
@@ -63,6 +69,8 @@ export type ChatMessage = typeof ChatMessage.Type;
 /** A chat as ChatStore saves it: one JSON file per chat under the data dir. */
 export const StoredChat = Schema.Struct({
   id: ChatId,
+  /** The workspace root a coding session ran in. Missing for chats saved without one. */
+  cwd: Schema.optional(Schema.String),
   /** The model the chat last asked for. */
   model: Schema.String,
   createdAt: Schema.String,

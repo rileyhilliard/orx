@@ -7,12 +7,23 @@ import { Prompt } from "effect/unstable/ai";
 
 /** Elide once the estimated prompt passes this share of the model's context window. */
 export const ELIDE_AT = 0.6;
-/** Tool outputs up to this many characters are never elided. */
+/** Tool outputs and attachments up to this many characters are never elided. */
 export const ELIDE_MIN_CHARS = 2000;
 /** The tool results of the last this-many model steps are never elided. */
 export const PROTECTED_STEPS = 2;
 /** Tools whose results are never elided (a loaded skill is instructions, not data). */
 export const NEVER_ELIDED = new Set(["skill"]);
+
+/**
+ * The options on the text part that carries a user message's `@` attachments (`toPrompt`
+ * builds it), so eliding can tell it from what the user typed. The OpenRouter provider reads
+ * only `options.openrouter`, so this never reaches a request.
+ */
+export const ATTACHMENT_OPTIONS = { orx: { attachment: true } } as const;
+
+const isAttachment = (part: Prompt.UserMessagePart) =>
+  part.type === "text" &&
+  (part.options.orx as { attachment?: unknown } | null | undefined)?.attachment === true;
 
 const resultText = (result: unknown) =>
   typeof result === "string" ? result : (JSON.stringify(result) ?? "");
@@ -59,17 +70,31 @@ export const elidedStub = (name: string, params: unknown) => {
   return `[${name}${arg === "" ? "" : ` ${arg}`} output elided, re-run if needed]`;
 };
 
-interface Candidate {
-  readonly id: string;
-  readonly chars: number;
-}
+/** The stub for an elided attachment: the paths its blocks named. */
+export const elidedAttachmentStub = (attachments: string) => {
+  const paths = [...attachments.matchAll(/^<(?:file|directory) path="([^"]*)">$/gm)].map(
+    (match) => match[1],
+  );
+  return `[attached ${paths.length > 0 ? paths.join(", ") : "files"} elided, read again if needed]`;
+};
 
-/** Tool results that may be elided, oldest first, and each call's params by id. */
+/** Something eliding may replace: a tool result by call id, or a user message's attachments. */
+type Candidate =
+  | { readonly kind: "tool"; readonly id: string; readonly chars: number }
+  | { readonly kind: "attachment"; readonly message: number; readonly chars: number };
+
+/**
+ * What may be elided, oldest first, and each call's params by id. Spared: the last
+ * PROTECTED_STEPS steps' tool results, NEVER_ELIDED tools, and the last user message's
+ * attachments (the message the model is answering).
+ */
 const candidatesOf = (prompt: Prompt.Prompt) => {
   const params = new Map<string, unknown>();
   const steps: Array<ReadonlyArray<string>> = [];
-  for (const message of prompt.content) {
-    if (message.role !== "assistant") continue;
+  let lastUser = -1;
+  prompt.content.forEach((message, index) => {
+    if (message.role === "user") lastUser = index;
+    if (message.role !== "assistant") return;
     const ids: string[] = [];
     for (const part of message.content) {
       if (part.type !== "tool-call") continue;
@@ -77,18 +102,24 @@ const candidatesOf = (prompt: Prompt.Prompt) => {
       ids.push(part.id);
     }
     if (ids.length > 0) steps.push(ids);
-  }
+  });
   const protectedIds = new Set(steps.slice(-PROTECTED_STEPS).flat());
   const candidates: Candidate[] = [];
-  for (const message of prompt.content) {
-    if (message.role !== "tool") continue;
+  prompt.content.forEach((message, index) => {
+    if (message.role === "user" && index !== lastUser) {
+      const chars = message.content
+        .filter(isAttachment)
+        .reduce((sum, part) => sum + partChars(part), 0);
+      if (chars > ELIDE_MIN_CHARS) candidates.push({ kind: "attachment", message: index, chars });
+    }
+    if (message.role !== "tool") return;
     for (const part of message.content) {
       if (part.type !== "tool-result") continue;
       if (protectedIds.has(part.id) || NEVER_ELIDED.has(part.name)) continue;
       const chars = resultText(part.result).length;
-      if (chars > ELIDE_MIN_CHARS) candidates.push({ id: part.id, chars });
+      if (chars > ELIDE_MIN_CHARS) candidates.push({ kind: "tool", id: part.id, chars });
     }
-  }
+  });
   return { candidates, params };
 };
 
@@ -96,9 +127,10 @@ const candidatesOf = (prompt: Prompt.Prompt) => {
 export const canElide = (prompt: Prompt.Prompt) => candidatesOf(prompt).candidates.length > 0;
 
 /**
- * Replaces tool outputs over ELIDE_MIN_CHARS with a stub, oldest first, until the estimate is
- * at or under `budgetTokens` (0 elides every candidate). Never the last PROTECTED_STEPS steps'
- * results, and never NEVER_ELIDED tools'. Returns the prompt unchanged when nothing is elided.
+ * Replaces tool outputs and older messages' `@` attachments over ELIDE_MIN_CHARS with a stub,
+ * oldest first, until the estimate is at or under `budgetTokens` (0 elides every candidate).
+ * Never the last PROTECTED_STEPS steps' results, NEVER_ELIDED tools', or the last user
+ * message's attachments. Returns the prompt unchanged when nothing is elided.
  */
 export const elide = (
   prompt: Prompt.Prompt,
@@ -106,33 +138,48 @@ export const elide = (
 ): { readonly prompt: Prompt.Prompt; readonly elided: number } => {
   const { candidates, params } = candidatesOf(prompt);
   let estimate = estimateTokens(prompt);
-  const chosen = new Set<string>();
+  const tools = new Set<string>();
+  const messages = new Set<number>();
   for (const candidate of candidates) {
     if (estimate <= budgetTokens) break;
-    chosen.add(candidate.id);
+    if (candidate.kind === "tool") tools.add(candidate.id);
+    else messages.add(candidate.message);
     estimate -= Math.floor(candidate.chars / 4);
   }
-  if (chosen.size === 0) return { prompt, elided: 0 };
-  const messages = prompt.content.map((message) =>
-    message.role !== "tool"
-      ? message
-      : Prompt.makeMessage("tool", {
-          content: message.content.map((part) =>
-            part.type === "tool-result" && chosen.has(part.id)
-              ? Prompt.makePart("tool-result", {
-                  id: part.id,
-                  name: part.name,
-                  isFailure: part.isFailure,
-                  result: elidedStub(part.name, params.get(part.id)),
-                  providerExecuted: part.providerExecuted,
-                  options: part.options,
-                })
-              : part,
-          ),
-          options: message.options,
-        }),
-  );
-  return { prompt: Prompt.fromMessages(messages), elided: chosen.size };
+  const elided = tools.size + messages.size;
+  if (elided === 0) return { prompt, elided: 0 };
+  const replaced = prompt.content.map((message, index) => {
+    if (message.role === "user" && messages.has(index)) {
+      return Prompt.makeMessage("user", {
+        content: message.content.map((part) =>
+          part.type === "text" && isAttachment(part)
+            ? Prompt.makePart("text", {
+                text: elidedAttachmentStub(part.text),
+                options: part.options,
+              })
+            : part,
+        ),
+        options: message.options,
+      });
+    }
+    if (message.role !== "tool") return message;
+    return Prompt.makeMessage("tool", {
+      content: message.content.map((part) =>
+        part.type === "tool-result" && tools.has(part.id)
+          ? Prompt.makePart("tool-result", {
+              id: part.id,
+              name: part.name,
+              isFailure: part.isFailure,
+              result: elidedStub(part.name, params.get(part.id)),
+              providerExecuted: part.providerExecuted,
+              options: part.options,
+            })
+          : part,
+      ),
+      options: message.options,
+    });
+  });
+  return { prompt: Prompt.fromMessages(replaced), elided };
 };
 
 /** The token budget for a model's window, or undefined when the window isn't known. */

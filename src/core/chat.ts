@@ -8,7 +8,7 @@ import { Llm } from "../services/Llm";
 import { OpenRouterModels } from "../services/OpenRouterModels";
 import { type ApprovalEvent, Permissions } from "../services/permissions";
 import { ChatTools, type ChatToolsLive } from "../tools";
-import { budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
+import { ATTACHMENT_OPTIONS, budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
 import { isContextLengthError, timedOut, toUpstreamError } from "./upstream";
 
 /** What the chat tools' handlers need (ChatToolsLive in the app, the same layer in tests). */
@@ -92,11 +92,13 @@ const withoutReasoning = (message: Prompt.Message): Prompt.Message => {
 };
 
 /**
- * The prompt for a chat: the system prompt, then each message. A reply with `steps` replays
- * them verbatim (tool calls with their ids and results, reasoning details); a reply saved
- * before steps existed replays its text. Given the turn's `modelId`, a reply another model
- * produced replays without its reasoning (switching models mid-chat). An assistant message
- * with no text is left out: some providers reject empty assistant content.
+ * The prompt for a chat: the system prompt, then each message. A user message's `@`
+ * attachments follow its text as a second part, marked so old ones can be elided. A reply
+ * with `steps` replays them verbatim (tool calls with their ids and results, reasoning
+ * details); a reply saved before steps existed replays its text. Given the turn's `modelId`,
+ * a reply another model produced replays without its reasoning (switching models mid-chat).
+ * An assistant message with no text is left out: some providers reject empty assistant
+ * content.
  */
 export const toPrompt = (
   systemPrompt: string,
@@ -106,9 +108,12 @@ export const toPrompt = (
   const messages: Prompt.Message[] = [Prompt.makeMessage("system", { content: systemPrompt })];
   for (const message of history) {
     if (message.role === "user") {
+      const attachments = message.attachments
+        ? [Prompt.makePart("text", { text: message.attachments, options: ATTACHMENT_OPTIONS })]
+        : [];
       messages.push(
         Prompt.makeMessage("user", {
-          content: [Prompt.makePart("text", { text: message.text })],
+          content: [Prompt.makePart("text", { text: message.text }), ...attachments],
         }),
       );
     } else if (message.steps !== undefined && message.steps.length > 0) {
@@ -622,9 +627,10 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
 
 const now = () => new Date().toISOString();
 
-/** A new chat, not yet saved. */
-export const newChat = (id: ChatId, model: string): StoredChat => ({
+/** A new chat, not yet saved; `cwd` is the workspace root of a coding session. */
+export const newChat = (id: ChatId, model: string, cwd?: string): StoredChat => ({
   id,
+  ...(cwd === undefined ? {} : { cwd }),
   model,
   createdAt: now(),
   updatedAt: now(),
@@ -648,6 +654,8 @@ export interface SendOptions<R = ChatToolHandlers> {
   readonly toolkit?: TurnToolkit<R>;
   /** The system prompt. Default: SYSTEM_PROMPT from the config. */
   readonly systemPrompt?: string;
+  /** The message's `@` attachments (`mentionAttachments`), saved beside its text. */
+  readonly attachments?: string;
 }
 
 /**
@@ -665,7 +673,10 @@ export const sendMessage = <R = ChatToolHandlers>(
   Stream.unwrap(
     Effect.gen(function* () {
       const store = yield* ChatStore;
-      const history: ReadonlyArray<ChatMessage> = [...chat.messages, { role: "user", text }];
+      const message: ChatMessage = options.attachments
+        ? { role: "user", text, attachments: options.attachments }
+        : { role: "user", text };
+      const history: ReadonlyArray<ChatMessage> = [...chat.messages, message];
       return runTurn<R>({
         history,
         modelId,

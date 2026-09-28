@@ -8,6 +8,7 @@ import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
+import type { ScriptServices } from "../scripts/lib/script-layer";
 import { runScript } from "../scripts/lib/script-layer";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
@@ -64,6 +65,57 @@ describe("an agent turn with approvals", () => {
       });
       expect(types.at(-1)).toBe("finish");
     } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("doesn't carry an approval request left over from a stopped turn into the next one", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    vi.stubEnv("LOG_LEVEL", "error");
+    // Two parallel calls: the first asks, the second waits its turn to ask. Stopping the turn
+    // leaves an approval-cancelled in the Permissions queue; the next turn must not show it.
+    stub.steps = [
+      {
+        toolCalls: [
+          { name: "bash", arguments: JSON.stringify({ command: "echo one" }) },
+          { name: "bash", arguments: JSON.stringify({ command: "echo two" }) },
+        ],
+      },
+      { text: "Second turn." },
+    ];
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "orx-approval-")));
+    const session = AgentToolsLive.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(Workspace.layerTest(root), FileState.layer, Permissions.layer("default")),
+      ),
+    );
+    try {
+      const second = await runScript(
+        Effect.gen(function* () {
+          const context = yield* Effect.context<ScriptServices | Layer.Success<typeof session>>();
+          const turn = (text: string) =>
+            runTurn({
+              history: [{ role: "user", text }],
+              modelId: "openai/gpt-test",
+              toolkit: AgentTools,
+            });
+          // The user stops the first turn (Esc) while its first approval is open.
+          yield* Effect.promise(async () => {
+            for await (const event of Stream.toAsyncIterableWith(turn("run both"), context)) {
+              if (event.type === "approval-request") break;
+            }
+          });
+          const events: TurnEvent[] = [];
+          yield* turn("say something").pipe(
+            Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          );
+          return events;
+        }).pipe(Effect.provide(session)),
+      );
+      expect(second.map((e) => e.type)).toEqual(["text", "finish"]);
+    } finally {
+      stub.steps = [];
       vi.unstubAllEnvs();
     }
   });

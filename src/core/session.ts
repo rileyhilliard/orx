@@ -6,7 +6,7 @@ import { type PermissionMode, Permissions } from "../services/permissions";
 import { Workspace } from "../services/workspace";
 import { AgentTools, AgentToolsLive } from "../tools/agent";
 import { SkillTools, skillToolLayer } from "../tools/skill";
-import { attachMentions, listWorkspaceFiles } from "./mentions";
+import { listWorkspaceFiles, mentionAttachments } from "./mentions";
 import { buildSystemPrompt, gatherEnv, loadMemory } from "./prompt";
 import { loadSkills } from "./skills";
 
@@ -66,6 +66,6 @@ export const prepareSession = (
       layer,
       // The `@` file picker's list and the attachments sent with a message.
       listFiles: listWorkspaceFiles,
-      attachFiles: attachMentions,
+      attachFiles: mentionAttachments,
     } as const;
   });

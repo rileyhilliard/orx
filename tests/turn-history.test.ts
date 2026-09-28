@@ -1,9 +1,12 @@
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import { Prompt, Response } from "effect/unstable/ai";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { INTERRUPTED_RESULT, runTurn, stepPrompt, toPrompt } from "~/core/chat";
+import { INTERRUPTED_RESULT, runTurn, sendMessage, stepPrompt, toPrompt } from "~/core/chat";
 import { elide, estimateTokens } from "~/core/context";
-import { AssistantMessage, type ChatMessage } from "~/schemas";
+import { chatToMarkdown } from "~/core/export";
+import { chatsTable } from "~/core/format";
+import { AssistantMessage, type ChatId, type ChatMessage } from "~/schemas";
+import { ChatStore } from "~/services/ChatStore";
 import { runScript } from "../scripts/lib/script-layer";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
@@ -151,6 +154,47 @@ describe("turn history", () => {
     expect(text).toMatchObject({ type: "text", text: "Checking" });
   });
 
+  it("sends @ attachments to the model but saves and shows only the typed text", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    vi.stubEnv("LOG_LEVEL", "error");
+    const id = "4b9f7f55-5a0e-4a8e-9a53-2f0c7f0c1a11" as ChatId;
+    const attachments = '<file path="a.ts">\n     1\tconst secretSauce = 1;\n</file>';
+    const chat = {
+      id,
+      model: "openai/gpt-test",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messages: [],
+    };
+    let saved: ReadonlyArray<ChatMessage> = [];
+    try {
+      await runScript(
+        Effect.gen(function* () {
+          yield* Stream.runDrain(
+            sendMessage(chat, "explain @a.ts", "openai/gpt-test", { attachments }),
+          );
+          const store = yield* ChatStore;
+          const stored = Option.getOrThrow(yield* store.get(id));
+          saved = stored.messages;
+          expect(chatToMarkdown(stored)).not.toContain("secretSauce");
+          expect(chatsTable([stored])).toContain("explain @a.ts");
+        }),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(saved[0]).toEqual({ role: "user", text: "explain @a.ts", attachments });
+    const messages = (stub.chatRequests[0] as { messages: WireMessage[] }).messages;
+    expect(messages[1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "explain @a.ts" },
+        { type: "text", text: attachments },
+      ],
+    });
+  });
+
   it("replays text for a reply saved before steps existed", () => {
     const prompt = toPrompt("sys", [
       { role: "user", text: "hi" },
@@ -206,5 +250,23 @@ describe("context elision", () => {
   it("stops once the estimate fits the budget", () => {
     const { elided } = elide(prompt, estimateTokens(prompt) - 100);
     expect(elided).toBe(1);
+  });
+
+  it("elides an older message's @ attachments but never the latest message's", () => {
+    const files = (name: string) => `<file path="${name}">\n${big}\n</file>`;
+    const history: ChatMessage[] = [
+      { role: "user", text: "look at @a.ts", attachments: files("a.ts") },
+      { role: "assistant", text: "ok", tools: [] },
+      { role: "user", text: "and @b.ts", attachments: files("b.ts") },
+    ];
+    const { prompt: out, elided } = elide(toPrompt("sys", history), 0);
+    expect(elided).toBe(1);
+    const users = out.content.flatMap((m) =>
+      m.role === "user" ? [m.content.map((part) => (part.type === "text" ? part.text : ""))] : [],
+    );
+    expect(users).toEqual([
+      ["look at @a.ts", "[attached a.ts elided, read again if needed]"],
+      ["and @b.ts", files("b.ts")],
+    ]);
   });
 });

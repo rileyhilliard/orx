@@ -102,11 +102,12 @@ const attachment = ({ path, isDir }: Resolved) =>
   });
 
 /**
- * The message with a `<file>` block appended for each `@path` naming a file inside the
- * workspace, and a `<directory>` listing for each directory. Tokens that don't resolve (outside
- * the workspace, missing, or not meant as paths) are left as plain text.
+ * The attachments for a message: a `<file>` block for each `@path` naming a file inside the
+ * workspace and a `<directory>` listing for each directory, separated by blank lines, or `""`
+ * when there are none. Tokens that don't resolve (outside the workspace, missing, or not meant
+ * as paths) attach nothing. The message text itself is kept apart (`UserMessage.attachments`).
  */
-export const attachMentions = (text: string) =>
+export const mentionAttachments = (text: string) =>
   Effect.gen(function* () {
     const seen = new Set<string>();
     const blocks: Array<string> = [];
@@ -116,5 +117,5 @@ export const attachMentions = (text: string) =>
       seen.add(resolved.value.path);
       blocks.push(yield* attachment(resolved.value));
     }
-    return blocks.length === 0 ? text : `${text}\n\n${blocks.join("\n\n")}`;
+    return blocks.join("\n\n");
   });

@@ -44,6 +44,7 @@ export interface SessionOptions<R, M = never> {
   readonly toolkit: TurnToolkit<R>;
   readonly systemPrompt: string;
   readonly listFiles: Effect.Effect<ReadonlyArray<string>, never, M>;
+  /** The `@path` attachments for a message (`mentionAttachments`), `""` for none. */
   readonly attachFiles: (text: string) => Effect.Effect<string, never, M>;
 }
 
@@ -174,6 +175,17 @@ export const makeBridge = <R = never, M = never>(
             ),
           )
         : Promise.resolve([]);
+    // A message's `@path` attachments; a failure to read them sends the message without them.
+    const attach = (text: string) =>
+      session
+        ? session
+            .attachFiles(text)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.as(Effect.logError("attaching @ files failed", cause), ""),
+              ),
+            )
+        : Effect.succeed("");
     // The turns' iterators run on their own fibers, outside launchChat's scope.
     const active = new Set<AsyncIterator<UiEvent>>();
     const tracked = (iterable: AsyncIterable<UiEvent>): AsyncIterable<UiEvent> => ({
@@ -197,9 +209,16 @@ export const makeBridge = <R = never, M = never>(
       chatId: chat.id,
       initialModel: chat.model,
       history: chat.messages.map(toUiMessage),
+      // The chat keeps what was typed; the model also gets the `@path` files' contents,
+      // saved beside the text as the message's attachments.
       send: (text, model) =>
-        Stream.suspend(() =>
-          sendMessage<ChatToolHandlers | R>(chat, text, model, turnOptions),
+        Stream.unwrap(
+          Effect.map(attach(text), (attachments) =>
+            sendMessage<ChatToolHandlers | R>(chat, text, model, {
+              ...turnOptions,
+              ...(attachments === "" ? {} : { attachments }),
+            }),
+          ),
         ).pipe(
           Stream.flatMap((event) => Stream.fromIterable(toUiEvent(event))),
           Stream.catchCause((cause) => {
@@ -280,18 +299,8 @@ export const makeBridge = <R = never, M = never>(
         files = next;
         return last ?? next;
       },
-      attachFiles: (text) =>
-        session
-          ? run(
-              session
-                .attachFiles(text)
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.as(Effect.logError("attaching @ files failed", cause), text),
-                  ),
-                ),
-            )
-          : Promise.resolve(text),
+      // Attaching happens in `send`, so the saved message keeps only the typed text.
+      attachFiles: (text) => Promise.resolve(text),
       answer: (id, decision) =>
         Option.isSome(permissions)
           ? run(permissions.value.answer(id, decision))
@@ -310,7 +319,7 @@ export const makeBridge = <R = never, M = never>(
       newChat: () =>
         run(
           Effect.sync(() => {
-            chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model);
+            chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model, chat.cwd);
             return chat.id;
           }),
         ),

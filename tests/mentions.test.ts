@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import { attachMentions, listWorkspaceFiles, mentionTokens } from "~/core/mentions";
+import { listWorkspaceFiles, mentionAttachments, mentionTokens } from "~/core/mentions";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
@@ -39,28 +39,28 @@ describe("mentionTokens", () => {
   });
 });
 
-describe("attachMentions", () => {
-  it("appends numbered file blocks and records the read in FileState", async () => {
+describe("mentionAttachments", () => {
+  it("returns numbered file blocks, without the message, and records the read in FileState", async () => {
     const root = tempDir();
     writeFileSync(join(root, "a.ts"), "one\ntwo\n");
     const { text, fresh } = await run(
       root,
       Effect.gen(function* () {
-        const text = yield* attachMentions("look at @a.ts.");
+        const text = yield* mentionAttachments("look at @a.ts.");
         const fresh = yield* (yield* FileState).checkFresh(join(root, "a.ts"));
         return { text, fresh };
       }),
     );
-    expect(text).toBe('look at @a.ts.\n\n<file path="a.ts">\n     1\tone\n     2\ttwo\n</file>');
+    expect(text).toBe('<file path="a.ts">\n     1\tone\n     2\ttwo\n</file>');
     expect(fresh).toBe("ok");
   });
 
-  it("leaves text alone when tokens are outside the workspace or missing", async () => {
+  it("attaches nothing for tokens outside the workspace or missing", async () => {
     const root = tempDir();
     const outside = tempDir();
     writeFileSync(join(outside, "x.txt"), "secret");
     const text = `see @../${outside.split("/").at(-1)}/x.txt @${join(outside, "x.txt")} @missing.ts @`;
-    expect(await run(root, attachMentions(text))).toBe(text);
+    expect(await run(root, mentionAttachments(text))).toBe("");
   });
 
   it("attaches the first 2000 lines of a long file with a note", async () => {
@@ -69,7 +69,7 @@ describe("attachMentions", () => {
       join(root, "long.txt"),
       Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`).join("\n"),
     );
-    const text = await run(root, attachMentions("@long.txt"));
+    const text = await run(root, mentionAttachments("@long.txt"));
     expect(text).toContain("  2000\tline 2000");
     expect(text).not.toContain("line 2001");
     expect(text).toContain("showing lines 1-2000 of 2500");
@@ -81,8 +81,8 @@ describe("attachMentions", () => {
     writeFileSync(join(root, "src", "a.ts"), "a");
     writeFileSync(join(root, "src", "deep", "b.ts"), "b");
     writeFileSync(join(root, "top.ts"), "t");
-    const text = await run(root, attachMentions("@src/"));
-    expect(text).toBe('@src/\n\n<directory path="src/">\nsrc/a.ts\nsrc/deep/b.ts\n</directory>');
+    const text = await run(root, mentionAttachments("@src/"));
+    expect(text).toBe('<directory path="src/">\nsrc/a.ts\nsrc/deep/b.ts\n</directory>');
   });
 
   it("skips secret-shaped files with a note instead of their content", async () => {
@@ -91,7 +91,7 @@ describe("attachMentions", () => {
     const { text, stamp } = await run(
       root,
       Effect.gen(function* () {
-        const text = yield* attachMentions("@.env");
+        const text = yield* mentionAttachments("@.env");
         const stamp = yield* (yield* FileState).get(join(root, ".env"));
         return { text, stamp };
       }),

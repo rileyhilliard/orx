@@ -1,11 +1,11 @@
 import { Effect, Option, Stdio } from "effect";
 import { Flag } from "effect/unstable/cli";
-import { ChatId } from "~/schemas";
+import { ChatId, type StoredChat } from "~/schemas";
 import { loadChat, newChat } from "../core/chat";
 import { decodeInput } from "../core/input";
 import { resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
-import { NotInteractive } from "../errors";
+import { BadInput, NotInteractive } from "../errors";
 import { importTui } from "./load-tui";
 import { cwdFlag, modelFlag, newChatId } from "./shared";
 
@@ -61,10 +61,20 @@ export const runSession = ({
     const initial = Option.isSome(resume)
       ? yield* decodeInput(ChatId)(resume.value).pipe(Effect.flatMap(loadChat))
       : newChat(yield* newChatId, yield* resolveToolModel(requested));
-    const start =
-      requested && Option.isSome(resume)
-        ? { ...initial, model: yield* resolveToolModel(requested) }
-        : initial;
+    // A chat's history names files in the workspace it ran in; continuing it elsewhere would
+    // point the model at paths that aren't there, or are different files. Refused rather than
+    // noted: the TUI takes over the screen at once, so a note would go unread. An explicit
+    // --cwd is the user choosing the workspace, so it is honored.
+    if (Option.isNone(cwd) && initial.cwd !== undefined && initial.cwd !== session.root) {
+      return yield* new BadInput({
+        message: `Chat ${initial.id} ran in ${initial.cwd}, not here (${session.root}). Run orx there, or pass --cwd to choose the workspace (--cwd . continues it here).`,
+      });
+    }
+    const start: StoredChat = {
+      ...initial,
+      cwd: session.root,
+      ...(requested && Option.isSome(resume) ? { model: yield* resolveToolModel(requested) } : {}),
+    };
     const { launchChat } = yield* importTui;
     yield* launchChat(start, session).pipe(Effect.provide(session.layer));
   });

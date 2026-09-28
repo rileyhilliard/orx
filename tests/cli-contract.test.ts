@@ -1,7 +1,8 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ndjson, runCli } from "./helpers/cli";
+import { ndjson, runCli, tempRoot } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -245,6 +246,37 @@ describe("orx (the session)", () => {
     const run = await runCli([], { ...withStub(), stdin: "" });
     expect(run.exitCode).toBe(2);
     expect(run.stderr).toContain("orx ask");
+  });
+
+  it("refuses to resume a chat from another workspace unless --cwd picks one", async () => {
+    const root = tempRoot();
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "orx-elsewhere-")));
+    const id = "0f8c2d4e-3b1a-4c5d-8e9f-1a2b3c4d5e6f";
+    mkdirSync(join(root, "data", "chats"), { recursive: true });
+    writeFileSync(
+      join(root, "data", "chats", `${id}.json`),
+      JSON.stringify({
+        id,
+        cwd: elsewhere,
+        model: "openai/gpt-test",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        messages: [{ role: "user", text: "hi" }],
+      }),
+    );
+    const here = await runCli(["--resume", id], { ...withStub(), root, stdoutIsTerminal: true });
+    expect(here.exitCode).toBe(2);
+    expect(here.stdout).toBe("");
+    expect(here.stderr).toContain(`ran in ${elsewhere}`);
+    expect(here.stderr).toContain("--cwd");
+    // With --cwd the check passes; the run then stops at the TUI, which vitest can't start.
+    const chosen = await runCli(["--resume", id, "--cwd", elsewhere], {
+      ...withStub(),
+      root,
+      stdoutIsTerminal: true,
+    });
+    expect(chosen.stderr).not.toContain("ran in");
+    expect(chosen.exitCode).not.toBe(2);
   });
 });
 
