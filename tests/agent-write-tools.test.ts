@@ -1,5 +1,7 @@
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -345,6 +347,38 @@ describe("write", () => {
     );
     expect(result.failure).toContain("new.txt");
     expect(existsSync(join(outside, "new.txt"))).toBe(false);
+  });
+
+  it("reports a directory it can't look into instead of treating the file as new", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, "locked"));
+    chmodSync(join(root, "locked"), 0o000);
+    try {
+      // Headless default mode would deny a create; the stat failure comes first.
+      const result = await run(root, writeFile({ path: "locked/x.txt", content: "x" }), "default");
+      expect(result.failure).toBe(
+        "locked/x.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "locked"), 0o755);
+    }
+  });
+
+  it("doesn't call a file new-since-you-started when its directory became unreadable", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, "dir"));
+    try {
+      const result = await approveAfter(
+        root,
+        writeFile({ path: "dir/x.txt", content: "x\n" }),
+        () => chmodSync(join(root, "dir"), 0o000),
+      );
+      expect(result.failure).toBe(
+        "dir/x.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "dir"), 0o755);
+    }
   });
 
   it("stays inside the workspace", async () => {

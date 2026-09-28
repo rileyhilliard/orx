@@ -3,7 +3,7 @@ import { Tool } from "effect/unstable/ai";
 import { EditInput, ToolFailure } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
-import { ensureResolvesTo, freshnessFailure, permit, readUtf8 } from "./permit";
+import { ensureResolvesTo, freshnessFailure, permit, platformFailure, readUtf8 } from "./permit";
 import { unifiedDiff } from "./write";
 
 export const Edit = Tool.make("edit", {
@@ -132,7 +132,7 @@ export const editFile = (input: EditInput) =>
           if (freshness !== "ok") return yield* freshnessFailure(shown, freshness);
         });
         yield* ensureFresh;
-        const raw = yield* readUtf8(path, failed);
+        const raw = yield* readUtf8(path, shown);
         const crlf = raw.includes("\r\n") && !/(^|[^\r])\n/.test(raw);
         const before = crlf ? raw.replace(/\r\n/g, "\n") : raw;
         const lf = (text: string) => text.replace(/\r\n/g, "\n");
@@ -156,8 +156,10 @@ export const editFile = (input: EditInput) =>
         const bytes = new TextEncoder().encode(
           crlf ? replaced.text.replace(/\n/g, "\r\n") : replaced.text,
         );
-        yield* fs.writeFile(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));
-        yield* fileState.record(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));
+        yield* fs.writeFile(path, bytes).pipe(Effect.mapError((e) => platformFailure(shown, e)));
+        yield* fileState
+          .record(path, bytes)
+          .pipe(Effect.mapError((e) => platformFailure(shown, e)));
         return diff;
       }),
     );

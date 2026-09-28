@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -107,6 +108,19 @@ describe("read", () => {
     expect((await run(root, readFile({ path: "huge.log" }))).failure).toMatch(
       /^huge\.log: is \d+ bytes, more than read takes .*use grep/,
     );
+  });
+
+  it("says why a file can't be read and whether retrying can help", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "locked.txt"), "x\n");
+    chmodSync(join(root, "locked.txt"), 0o000);
+    try {
+      expect((await run(root, readFile({ path: "locked.txt" }))).failure).toBe(
+        "locked.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "locked.txt"), 0o644);
+    }
   });
 
   it("fails for a missing file, a directory, a secret-shaped path, and a path outside", async () => {

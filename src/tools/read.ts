@@ -9,7 +9,7 @@ import {
   READ_MAX_FILE_BYTES,
   READ_MAX_LINE_CHARS,
 } from "./limits";
-import { permit } from "./permit";
+import { permit, platformFailure } from "./permit";
 
 export const Read = Tool.make("read", {
   description: [
@@ -53,7 +53,7 @@ export const readFile = ({ path: input, offset = 1, limit = READ_DEFAULT_LINES }
       .stat(path)
       .pipe(
         Effect.mapError((error) =>
-          failed(error.reason._tag === "NotFound" ? "no such file" : error.reason._tag),
+          error.reason._tag === "NotFound" ? failed("no such file") : platformFailure(shown, error),
         ),
       );
     if (info.type === "Directory") return yield* failed("is a directory; use glob to list it");
@@ -62,9 +62,9 @@ export const readFile = ({ path: input, offset = 1, limit = READ_DEFAULT_LINES }
         `is ${Number(info.size)} bytes, more than read takes (${READ_MAX_FILE_BYTES}); use grep to find the lines you need`,
       );
     }
-    const bytes = yield* fs.readFile(path).pipe(Effect.mapError((e) => failed(e.reason._tag)));
+    const bytes = yield* fs.readFile(path).pipe(Effect.mapError((e) => platformFailure(shown, e)));
     if (isBinary(bytes)) return `(${shown} is a binary file, ${bytes.length} bytes; not shown)`;
-    yield* fileState.record(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));
+    yield* fileState.record(path, bytes).pipe(Effect.mapError((e) => platformFailure(shown, e)));
     if (bytes.length === 0) return `(${shown} is empty)`;
 
     const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
