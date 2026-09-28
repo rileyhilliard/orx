@@ -1,4 +1,5 @@
 import { testRender } from "@opentui/react/test-utils";
+import { APPROVAL_ARM_MS } from "~/tui/app";
 
 /**
  * testRender with React's act checks off. The app's state changes arrive from streams and
@@ -34,5 +35,20 @@ export const waitForScreen = async (
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+
+/**
+ * Types `key` until `done`: the approval panel ignores y / a / n for its first APPROVAL_ARM_MS,
+ * so a press lands once it's armed. Checks between presses so no extra key reaches the composer.
+ */
+export const pressWhenArmed = async (setup: RenderSetup, key: string, done: () => boolean) => {
+  const deadline = Date.now() + APPROVAL_ARM_MS + 3000;
+  for (;;) {
+    await setup.renderOnce();
+    if (done()) return;
+    if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
+    await setup.mockInput.typeText(key);
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };

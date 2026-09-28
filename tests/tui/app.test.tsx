@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { APPROVAL_ARM_MS, App } from "~/tui/app";
+import { App } from "~/tui/app";
 import { wrap } from "~/tui/approval-panel";
 import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMode } from "~/tui/types";
-import { type RenderSetup, render as renderTui, waitForScreen } from "./render";
+import { pressWhenArmed, type RenderSetup, render as renderTui, waitForScreen } from "./render";
 
 let setup: RenderSetup | undefined;
 afterEach(() => {
@@ -526,21 +526,6 @@ describe("the @ file picker", () => {
 describe("the approval panel", () => {
   const screen = (setup: RenderSetup, predicate: (frame: string) => boolean) =>
     waitForScreen(setup, predicate, 2000);
-
-  /**
-   * Types `key` until `done`: the panel ignores y / a / n for its first APPROVAL_ARM_MS, so a
-   * press lands once it's armed. Checks between presses so no extra key reaches the composer.
-   */
-  const pressWhenArmed = async (setup: RenderSetup, key: string, done: () => boolean) => {
-    const deadline = Date.now() + APPROVAL_ARM_MS + 2000;
-    for (;;) {
-      await setup.renderOnce();
-      if (done()) return;
-      if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
-      await setup.mockInput.typeText(key);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  };
 
   const bashApproval: UiApproval = {
     id: "approval-1",

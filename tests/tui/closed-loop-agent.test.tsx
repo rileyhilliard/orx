@@ -11,10 +11,10 @@ import { AppLayer } from "~/runtime";
 import type { ChatId } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { Host } from "~/services/Host";
-import { APPROVAL_ARM_MS, App } from "~/tui/app";
+import { App } from "~/tui/app";
 import { makeBridge } from "~/tui/launch";
 import { type StubOpenRouter, startStubOpenRouter } from "../helpers/stub-openrouter";
-import { type RenderSetup, render, waitForScreen } from "./render";
+import { pressWhenArmed, type RenderSetup, render, waitForScreen } from "./render";
 
 // The coding session end to end below the terminal: App + makeBridge + prepareSession's tools
 // and Permissions + AppLayer, OpenRouter replaced by the stub. The model reads and edits a file
@@ -96,21 +96,6 @@ const readThenEdit = () => [
   },
   { text: "Done editing." },
 ];
-
-/**
- * Types `key` until `done`: the panel ignores y / a / n for its first APPROVAL_ARM_MS, so a
- * press lands once it's armed. Checks between presses so no extra key reaches the composer.
- */
-const pressWhenArmed = async (screen: RenderSetup, key: string, done: () => boolean) => {
-  const deadline = Date.now() + APPROVAL_ARM_MS + 3000;
-  for (;;) {
-    await screen.renderOnce();
-    if (done()) return;
-    if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
-    await screen.mockInput.typeText(key);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /**
  * Starts a session in `work`, sends a message, waits for the edit's approval panel, answers
