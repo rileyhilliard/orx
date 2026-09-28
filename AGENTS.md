@@ -28,6 +28,7 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun run eval --models a,b` | `evals/cases.ts` against real models through orx's own programs. Needs a key, costs money, never in CI |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams. Needs a key |
 | `bun run clean` | Remove `dist/`, `coverage/`, `logs/` |
+| `bun run vanilla -- --name <name>` | On a new branch (`--branch`, default `vanilla`), strip orx down to a blank-slate CLI: deletes the product (chat, models, extract, chats, export, mcp, tools, evals, fixtures), copies `template/vanilla/` over what referenced it, with `--name` renames orx to `<name>`, runs `bun run check` (`--no-check` skips it), commits. Needs a clean tree; ignored files stay out of it. `--verify` does it to HEAD in a throwaway worktree |
 | `rr check` / `rr test` / `rr unit -- <file> -t "<name>"` / `rr tui -- ./tests/tui/<file>` | The same scripts on a remote Mac (`.rr.yaml`: m4-mini, m1-mini), synced with rsync; see Remote runs below |
 
 Remote runs: `rr <task>` syncs the tree you run it from (in a worktree, its root) and runs the task on the first free host; each task checks bun >= 1.4.2 and runs `bun install --frozen-lockfile` first. `rr run "<one quoted command>"` runs anything else, e.g. `rr run 'eval "$(bun run --silent stub)" && bun run orx -- ask hi --json; bun run stub:stop'` (stop the stub in the same run). The remote has no `.git`, `.env`, or key. Pull files into a gitignored dir: `rr pull logs/orx.jsonl --dest logs/remote/` (without `--dest` they land in the repo root and sync back). Read the result event's `log_file` instead of rerunning, and don't pipe rr through `tail`.
@@ -58,7 +59,9 @@ src/
   tui/              Bun-only: launch.tsx (renderer + makeBridge: the only TUI file importing effect),
                     app.tsx, message-list, model-picker, types.ts (the bridge), theme.ts
 scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-server.ts, tui-capture.ts,
-                    record-openrouter.ts, prepare.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts, recording.ts)
+                    record-openrouter.ts, prepare.ts, vanilla.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
+                    recording.ts)
+template/vanilla/   the files bun run vanilla writes over the tree (biome and tsc skip it)
 install.sh          curl | bash installer: OS/arch, SHA256SUMS check, ~/.local/bin
 evals/              bun run eval: cases.ts, run.ts, score.ts (pure, unit-tested)
 tests/              vitest (Node); helpers/ (cli.ts runs main, stub-openrouter.ts, stub-releases.ts);
@@ -129,6 +132,7 @@ Things in the tree that exist to get a build through, not because they are right
 ## CI
 
 - `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), setup-node (`.node-version`), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage, test:tui, e2e, build:all. No `OPENROUTER_API_KEY`: tests never touch the network.
+- `.github/workflows/vanilla.yml` runs `bun run vanilla -- --verify --name demo` on the same triggers. `template/vanilla/` holds rewritten copies of files main also has (`src/cli.ts`, `src/config.ts`, `AGENTS.md`, ...); when a change to one of those should reach the vanilla result, make it in the template copy too. Biome, tsc, and the hooks skip `template/`, so the workflow (or a local `bun run vanilla -- --verify`) is what checks it: it fails when the template no longer builds against main.
 - `.github/workflows/release.yml` on a `v*` tag: checks the tag matches `package.json`, runs the gate and `build:all`, smoke-tests each binary on its own OS and CPU (`--version`, `doctor --tui`), then publishes binaries, `SHA256SUMS`, and `install.sh` (`contents: write` in that job only).
 - Actions are pinned to major tags.
 

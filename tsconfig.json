@@ -1,6 +1,6 @@
 {
   "include": ["**/*", ".claude/hooks/**/*"],
-  "exclude": ["node_modules", "dist", "coverage"],
+  "exclude": ["node_modules", "dist", "coverage", "template"],
   "compilerOptions": {
     "lib": ["ES2023"],
     "types": ["bun"],

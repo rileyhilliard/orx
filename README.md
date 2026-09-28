@@ -95,6 +95,7 @@ bun run check                     # the gate (CI adds coverage and build:all)
 | `bun run clean` | Removes `dist/`, `coverage/`, and `logs/` (dev chats in `.orx/` stay) |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `SHA256SUMS` |
 | `bun run eval --models a,b` | Model behavior against the real API (needs a key, costs a fraction of a cent) |
+| `bun run vanilla -- --name <name>` | Starts a different CLI from this one: on a new branch, removes the orx product (keeping one example model command and a placeholder TUI), renames orx to `<name>` when given one, runs the gate, and commits |
 
 Use `bun run test`, not `bun test`: most tests run on vitest. `AGENTS.md` is the map of the code and conventions, for agents and people. `docs/harness.md` explains the agent harness (hooks, rules, commands, reviewers) and which layer catches which mistake. To release, bump `version` in `package.json`, commit, and push a matching `v*` tag.
 
