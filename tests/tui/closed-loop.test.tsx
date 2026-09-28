@@ -104,6 +104,27 @@ describe("TUI closed loop", () => {
     expect(frame).not.toContain("send again to retry");
   });
 
+  it("offers only tool-capable models in the model picker", async () => {
+    const models = stub.models;
+    stub.models = [
+      { id: "openai/gpt-test", name: "OpenAI: GPT Test" },
+      { id: "acme/no-tools", name: "Acme: No Tools", tools: false },
+      { id: "acme/cheap-model", name: "Acme: Cheap Model" },
+    ];
+    const root = mkdtempSync(join(tmpdir(), "orx-tui-"));
+    const program = Effect.gen(function* () {
+      const { bridge } = yield* makeBridge(newChat(chatId, "openai/gpt-test"), () => {});
+      return yield* Effect.promise(() => bridge.listModels());
+    });
+    try {
+      const list = await Effect.runPromise(program.pipe(Effect.provide(layer(root)), quiet));
+      expect(list.available).toBe(true);
+      expect(list.models.map((m) => m.id)).toEqual(["openai/gpt-test", "acme/cheap-model"]);
+    } finally {
+      stub.models = models;
+    }
+  });
+
   it("stops a streaming reply when the TUI's scope closes (a signal), and saves it", async () => {
     stub.completion = { ...stub.completion, text: "one two three four" };
     stub.hangAfter = 2;

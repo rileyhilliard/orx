@@ -17,6 +17,8 @@ export interface StubModel {
   canonical_slug?: string;
   name: string;
   context_length?: number;
+  /** Whether `supported_parameters` lists `tools` (default true). */
+  tools?: boolean;
   prompt?: string;
   completion?: string;
 }
@@ -26,6 +28,25 @@ export interface StubCompletion {
   model?: string;
   provider?: string;
   usage?: { prompt_tokens: number; completion_tokens: number; cost?: number };
+}
+
+/** A raw tool call as the model streams it: `arguments` is the JSON text the model sent. */
+export interface StubToolCall {
+  name: string;
+  arguments: string;
+}
+
+/**
+ * One scripted model step: optional text, then any number of tool calls in the same response
+ * (parallel calls), finishing with `tool_calls` when there are any and `stop` otherwise.
+ * `reasoningDetails` go out as OpenRouter's `reasoning_details` delta before the text.
+ */
+export interface StubStep {
+  text?: string;
+  toolCalls?: StubToolCall[];
+  reasoningDetails?: unknown[];
+  /** Wait this long before each chunk, with `text` sent a word per chunk (a slow model). */
+  delayMs?: number;
 }
 
 export interface ReplayOptions {
@@ -70,7 +91,12 @@ export interface StubOpenRouter {
    * Streamed tool calls, one per POST /chat/completions (after the replay queue), each ending
    * with `finish_reason: "tool_calls"`. `arguments` is the raw JSON text the model sent.
    */
-  toolCalls: Array<{ name: string; arguments: string }>;
+  toolCalls: StubToolCall[];
+  /**
+   * Scripted steps, one per POST /chat/completions, served after the replay queue and before
+   * `toolCalls`. A step can carry several tool calls and text, which `toolCalls` can't.
+   */
+  steps: StubStep[];
   close(): Promise<void>;
 }
 
@@ -95,7 +121,7 @@ const modelJson = (model: StubModel) => ({
     is_moderated: false,
   },
   per_request_limits: null,
-  supported_parameters: ["tools", "max_tokens"],
+  supported_parameters: model.tools === false ? ["max_tokens"] : ["tools", "max_tokens"],
   default_parameters: null,
   links: { details: `/api/v1/models/${model.id}/endpoints` },
   supported_voices: null,
@@ -136,7 +162,8 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
       usage: { prompt_tokens: 12, completion_tokens: 5, cost: 0.00042 },
     } as StubCompletion,
     replayQueue: [] as string[],
-    toolCalls: [] as Array<{ name: string; arguments: string }>,
+    toolCalls: [] as StubToolCall[],
+    steps: [] as StubStep[],
     replayChunkSize: undefined as number | undefined,
   };
 
@@ -254,22 +281,44 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
         model,
         provider,
       };
-      const toolCall = state.toolCalls.shift();
-      if (toolCall !== undefined) {
-        const call = {
-          index: 0,
-          id: `call_stub_${state.chatRequests.length}`,
-          type: "function",
-          function: toolCall,
-        };
-        const toolChunks = [
-          { ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [call] } }] },
-          { ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
-          { ...base, choices: [], usage: usageJson },
-        ];
+      const writeChunks = async (chunks: unknown[], delayMs = 0) => {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-        for (const chunk of toolChunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        for (const chunk of chunks) {
+          if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        }
         res.end("data: [DONE]\n\n");
+      };
+      const toolCall = state.steps.length > 0 ? undefined : state.toolCalls.shift();
+      const step: StubStep | undefined =
+        state.steps.shift() ?? (toolCall === undefined ? undefined : { toolCalls: [toolCall] });
+      if (step !== undefined) {
+        const calls = (step.toolCalls ?? []).map((call, index) => ({
+          index,
+          id: `call_stub_${state.chatRequests.length}${index === 0 ? "" : `_${index}`}`,
+          type: "function",
+          function: call,
+        }));
+        const delta = (fields: Record<string, unknown>) => ({
+          ...base,
+          choices: [{ index: 0, delta: { role: "assistant", ...fields }, finish_reason: null }],
+        });
+        const words = step.delayMs ? (step.text?.split(/(?<= )/) ?? []) : [step.text ?? ""];
+        await writeChunks(
+          [
+            ...(step.reasoningDetails ? [delta({ reasoning_details: step.reasoningDetails })] : []),
+            ...words.filter((word) => word !== "").map((word) => delta({ content: word })),
+            ...(calls.length > 0 ? [delta({ tool_calls: calls })] : []),
+            {
+              ...base,
+              choices: [
+                { index: 0, delta: {}, finish_reason: calls.length > 0 ? "tool_calls" : "stop" },
+              ],
+            },
+            { ...base, choices: [], usage: usageJson },
+          ],
+          step.delayMs,
+        );
         return;
       }
       const chunks = [
@@ -354,6 +403,12 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     },
     set toolCalls(value) {
       state.toolCalls = [...value];
+    },
+    get steps() {
+      return state.steps;
+    },
+    set steps(value) {
+      state.steps = [...value];
     },
     replay: (names, options = {}) => {
       state.replayQueue = [...names];

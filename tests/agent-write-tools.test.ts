@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { Effect, Fiber, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { agentShellEnv } from "~/config";
 import { FileState } from "~/services/file-state";
 import { type PermissionMode, Permissions } from "~/services/permissions";
@@ -12,6 +12,8 @@ import { makeOutputBuffer, runBash } from "~/tools/bash";
 import { editFile, replaceIn, stripLineNumbers } from "~/tools/edit";
 import { readFile } from "~/tools/read";
 import { writeFile } from "~/tools/write";
+import { ndjson, runCli } from "./helpers/cli";
+import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-write-tools-")));
 
@@ -319,5 +321,59 @@ describe("bash", () => {
     const buffer = makeOutputBuffer(10);
     for (const chunk of ["abc", "defgh", "ijklmnop", "qrst"]) buffer.add(chunk);
     expect(buffer.text()).toBe("abcde\n[... 10 characters cut ...]\npqrst");
+  });
+});
+
+describe("parallel edits in one step", () => {
+  let stub: StubOpenRouter;
+  beforeAll(async () => {
+    stub = await startStubOpenRouter();
+  });
+  afterAll(() => stub.close());
+
+  it("applies two edits to one file from a single response, one after the other", async () => {
+    const root = fileIn("math.js", "export const add = (a, b) => a + b;\nexport const one = 1;\n");
+    const edit = (old_string: string, new_string: string) => ({
+      name: "edit",
+      arguments: JSON.stringify({ path: "math.js", old_string, new_string }),
+    });
+    stub.steps = [
+      { toolCalls: [{ name: "read", arguments: JSON.stringify({ path: "math.js" }) }] },
+      {
+        text: "Editing both lines.",
+        toolCalls: [edit("a + b", "a + b + 0"), edit("one = 1", "one = 2")],
+      },
+      { text: "Done." },
+    ];
+    const run = await runCli(
+      ["ask", "fix it", "--agent", "--cwd", root, "--permission-mode", "acceptEdits", "--json"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    expect(run.exitCode).toBe(0);
+    // Without the lock, the second edit would see the file changed under it (stale) or write
+    // over the first one's change.
+    expect(readFileSync(join(root, "math.js"), "utf8")).toBe(
+      "export const add = (a, b) => a + b + 0;\nexport const one = 2;\n",
+    );
+    const events = ndjson(run.stdout);
+    const results = events.filter((e) => e.type === "tool-result");
+    expect(results.map((r) => [r.name, r.isFailure])).toEqual([
+      ["read", false],
+      ["edit", false],
+      ["edit", false],
+    ]);
+    // The step's text and both calls came from one request; the next request answers both ids.
+    expect(stub.chatRequests).toHaveLength(3);
+    const third = stub.chatRequests[2] as {
+      messages: Array<{ role: string; content: unknown; tool_call_id?: string }>;
+    };
+    const answered = third.messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id);
+    expect(answered).toEqual(["call_stub_1", "call_stub_2", "call_stub_2_1"]);
+    expect(
+      events
+        .filter((e) => e.type === "text")
+        .map((e) => e.delta)
+        .join(""),
+    ).toBe("Editing both lines.Done.");
   });
 });
