@@ -4,11 +4,11 @@ Instructions for coding agents working in this repository. Keep this file under 
 
 ## Overview
 
-orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), bare `orx` is the coding agent TUI (workspace tools, slash commands, skills) with a model picker, per-reply tokens and cost, and Markdown export, `orx extract` is a structured-output example, `orx mcp` serves `currentTime` and `extractContact` over MCP (never the workspace tools, which need the approval gate), and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, MCP is Effect's `McpServer`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, TUI and e2e tests), Node 24 (vitest 5), Biome 2, TypeScript 7 (`tsc`).
+orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), bare `orx` is the coding agent TUI (workspace tools, slash commands, skills) with a model picker, per-reply tokens and cost, and Markdown export, `orx extract` is a structured-output example, `orx mcp` serves `currentTime` and `extractContact` over MCP (never the workspace tools, which need the approval gate), and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, MCP is Effect's `McpServer`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, test runner), Biome 2, TypeScript 7 (`tsc`).
 
 ## Commands
 
-Run these from the repo root. They are `package.json` scripts, the only supported way to build, test, and run the project; if a command here is wrong, fix it here in the same change. Unit tests are `bun run test:unit` (vitest); `bun test` runs only with a `./tests/tui` or `./e2e` path, and a hook blocks it otherwise.
+Run these from the repo root. They are `package.json` scripts, the only supported way to build, test, and run the project; if a command here is wrong, fix it here in the same change. `bun test` is the only test runner: a bare `bun test` runs everything under `tests/`, and `bun test ./tests/<file>` one file.
 
 | Command | What it does |
 | --- | --- |
@@ -19,17 +19,17 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun run lint` | `biome check .` (lint, format, import order, `biome-plugins/boundaries.grit`) |
 | `bun run format` | `biome check --write .` |
 | `bun run typecheck` | `tsc` |
-| `bun run test` | `test:unit` (vitest on Node) then `test:tui` (`bun test ./tests/tui`) |
-| `bun run test:unit tests/cli-contract.test.ts` | One vitest file; add `-t "<name>"` for one test |
-| `bun run coverage` | vitest with a v8 coverage report in `coverage/` (a report, not a gate: no thresholds, so it fails only when a test does) |
+| `bun run test` | `bun test`: every file under `tests/`, unit and TUI, in one process (`test:tui` for `tests/tui` alone) |
+| `bun test ./tests/cli-contract.test.ts` | One file; add `-t "<name>"` for one test |
+| `bun run coverage` | `bun test --coverage`, a text and lcov report in `coverage/` (a report, not a gate: no thresholds, so it fails only when a test does) |
 | `bun run e2e` | Builds `dist/orx`, then `bun test ./e2e`: the binary as a process and in a PTY, against the stubs |
-| `bun run check` | The full gate: lint, typecheck, test, e2e. Run it before calling work done. CI also installs every target's native package (`bun install --os='*' --cpu='*'`), runs `coverage` in place of `test:unit`, and ends with `build:all` |
+| `bun run check` | The full gate: lint, typecheck, test, e2e. Run it before calling work done. CI also installs every target's native package (`bun install --os='*' --cpu='*'`), runs `coverage` in place of `test`, and ends with `build:all` |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `dist/SHA256SUMS` (needs `bun install --os='*' --cpu='*'`) |
 | `bun run eval --models a,b` | `evals/cases.ts` against real models through orx's own programs. Needs a key, costs money, never in CI |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams. Needs a key |
 | `bun run clean` | Remove `dist/`, `coverage/`, `logs/` |
 | `bun run vanilla -- --name <name>` | On a new branch (`--branch`, default `vanilla`), strip orx down to a blank-slate CLI: deletes the product (chat, models, extract, chats, export, mcp, tools, evals, fixtures), copies `template/vanilla/` over what referenced it, with `--name` renames orx to `<name>`, runs `bun run check` (`--no-check` skips it), commits. Needs a clean tree; ignored files stay out of it. `--verify` does it to HEAD in a throwaway worktree |
-| `rr check` / `rr test` / `rr unit -- <file> -t "<name>"` / `rr tui -- ./tests/tui/<file>` | The same scripts on a remote Mac (`.rr.yaml`: m4-mini, m1-mini), synced with rsync; see Remote runs below |
+| `rr check` / `rr test` / `rr test -- ./tests/<file> -t "<name>"` / `rr tui -- ./tests/tui/<file>` | The same scripts on a remote Mac (`.rr.yaml`: m4-mini, m1-mini), synced with rsync; see Remote runs below |
 
 Remote runs: `rr <task>` syncs the tree you run it from (in a worktree, its root) and runs the task on the first free host; each task checks bun >= 1.4.2 and runs `bun install --frozen-lockfile` first. `rr run "<one quoted command>"` runs anything else, e.g. `rr run 'eval "$(bun run --silent stub)" && bun run orx -- ask hi --json; bun run stub:stop'` (stop the stub in the same run). The remote has no `.git`, `.env`, or key. Pull files into a gitignored dir: `rr pull logs/orx.jsonl --dest logs/remote/` (without `--dest` they land in the repo root and sync back). Read the result event's `log_file` instead of rerunning, and don't pipe rr through `tail`.
 
@@ -41,7 +41,7 @@ In Claude Code, `/check` runs the gate and fixes what fails, `/test` runs scoped
 src/
   bin.ts            the only Bun entry: BunServices + Host, runs main, maps the exit to a code
   main.ts           one run: parse argv (Command.runWith), handler, outcome -> stderr + exit code,
-                    one `command` log line. Platform-free, so vitest runs it (tests/helpers/cli.ts)
+                    one `command` log line. Platform-free; tests run it through tests/helpers/cli.ts
   cli.ts            the command tree
   commands/         one file per command, thin: decode -> one program -> render via Output.
                     session.ts (bare `orx`), ask, models, extract, chats, export, mcp, update,
@@ -80,8 +80,9 @@ scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-ser
 template/vanilla/   the files bun run vanilla writes over the tree (biome and tsc skip it)
 install.sh          curl | bash installer: OS/arch, SHA256SUMS check, ~/.local/bin
 evals/              bun run eval: cases.ts, run.ts, score.ts (pure, unit-tested)
-tests/              vitest (Node); helpers/ (cli.ts runs main, stub-openrouter.ts, stub-releases.ts);
-                    fixtures/openrouter/ recorded streams; tui/ is bun test (testRender, closed loop)
+tests/              bun test; helpers/ (cli.ts runs main, effect.ts runTest, env.ts, wait.ts,
+                    stub-openrouter.ts, stub-releases.ts); fixtures/openrouter/ recorded streams; tui/
+                    (testRender, closed loop)
 e2e/                bun test against dist/orx
 docs/               harness.md, rfcs/
 plans/              the coding agent's roadmap: README.md (phase map), one file per phase, follow-ups.md
@@ -94,7 +95,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 - stdout carries results only, and only through `Output`. Logs, notes (`Output.note`), and errors go to stderr. `main.ts` holds the CLI's own Console output (help, `--version`) and sends it to stdout on success, stderr on a usage error. `orx mcp` depends on this: one stray stdout line corrupts JSON-RPC.
 - Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig` / `TuiUnavailable`, 4 `UpstreamUnavailable`, 5 `InvalidModelOutput`, 6 `PermissionDenied`, 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the README table.
 - `--json` makes results machine-readable (NDJSON `AskEvent`s for `ask`) and errors `{"error":{tag,message,retryable}}` on stderr.
-- Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, so vitest can run it on Node. The session (bare `orx`) and `doctor` reach the TUI only by dynamic `import("../tui/launch")`.
+- Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else is platform-free: it uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, which `bin.ts` provides (`BunServices`). The session (bare `orx`) and `doctor` reach the TUI only by dynamic `import("../tui/launch")`.
 - TUI components never import `effect`; they get a `ChatBridge` (plain promises and async iterables) from `launch.tsx`. Colors come from `tui/theme.ts` only.
 - Only `src/config.ts` reads the environment (`bin.ts` also clears `DEV`, which would load OpenTUI's devtools). Empty values count as unset. A new var goes in `config.ts`, `.env.example`, and the README table; one the config file should also set goes in `schemas/config-file.ts` and `fileToEnv`.
 - Each service is a `Context.Service` class with static layers: `X.layer`, plus `X.layerMemory` where tests need fresh state.
@@ -111,12 +112,12 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 
 ## Testing
 
-- vitest 5 on Node for everything except the TUI and the binary. `tests/helpers/cli.ts` `runCli(argv, { env, stdin })` runs the real `main` and `AppLayer` with `NodeServices` and a captured `Stdio`, and returns `{ exitCode, stdout, stderr, logs }`. Prefer it: it tests the contract a user sees. Parse `ask --json` output with `askEvents(stdout)`, which decodes each line with `AskEvent` and fails on undeclared fields.
+- `bun test` (`bun:test`) for everything; every file under `tests/` shares one process, so a test puts back what it changes (`restoreEnv`, `mock.restore()`, closed stubs). `tests/helpers/cli.ts` `runCli(argv, { env, stdin })` runs the real `main` and `AppLayer` with `BunServices` and a captured `Stdio`, and returns `{ exitCode, stdout, stderr, logs }`. Prefer it: it tests the contract a user sees. Parse `ask --json` output with `askEvents(stdout)`, which decodes each line with `AskEvent` and fails on undeclared fields.
 - `grep`'s `rg` path is tested only where `rg` (ripgrep) is on PATH: install it locally or those tests skip. In CI (`CI` set) a missing `rg` fails `tests/agent-tools.test.ts`.
 - `tests/helpers/stub-openrouter.ts` stands in for OpenRouter (`/models`, streaming and non-streaming `/chat/completions`, failures, `hangAfter`, `dropAfter`, scripted `toolCalls`, `steps` with several tool calls, text, reasoning details, slow chunks, a `finishReason`, or a mid-stream `error`, `replay(fixtures)`); `stub-releases.ts` for GitHub releases. `tests/openrouter-replay.test.ts` replays the recorded bodies in `tests/fixtures/openrouter/` through the real provider and checks text, tokens, and cost against the recordings. Point `OPENROUTER_BASE_URL` / `ORX_RELEASES_URL` at them. Nothing is module-mocked.
-- `tests/isolation.ts` runs before every vitest and bun test process: no key, unreachable URLs, config, data, and HOME in a temp dir. No test can reach the network or your real files.
-- `tests/tui/` (bun test): components with `@opentui/react/test-utils` and a fake bridge, `closed-loop.test.tsx` with the real bridge and programs against the stub, and a pin on the renderer options.
-- `e2e/` (bun test) spawns `dist/orx` with an env built from scratch: exit codes and empty stdout, piped `ask --json`, `.env` ignored, the native library, `mcp`, the TUI in a PTY, install.sh, `update --check`. Keep it to what only the binary shows.
+- `tests/isolation.ts` runs before every `bun test` run (the `bunfig.toml` preload): no key, unreachable URLs, config, data, and HOME in a temp dir. No test can reach the network or your real files.
+- `tests/tui/`: components with `@opentui/react/test-utils` and a fake bridge, `closed-loop.test.tsx` with the real bridge and programs against the stub, and a pin on the renderer options.
+- `e2e/` (outside `bunfig.toml`'s root, run by `bun run e2e`) spawns `dist/orx` with an env built from scratch: exit codes and empty stdout, piped `ask --json`, `.env` ignored, the native library, `mcp`, the TUI in a PTY, install.sh, `update --check`. Keep it to what only the binary shows.
 - A bug fix starts with a test that reproduces it. Weakening or skipping a test to get green is a failure, not a fix.
 
 ## Error handling
@@ -139,7 +140,7 @@ Things in the tree that exist to get a build through, not because they are right
 
 | Where | What and why | Remove when |
 | --- | --- | --- |
-| `package.json`: `effect`, `@effect/platform-bun`, `@effect/ai-openrouter`, `@effect/platform-node`, `@effect/vitest` pinned to exactly `4.0.0-rc.117`, plus an `overrides` pin on `@effect/platform-node-shared` | RCs break APIs between releases, and every Effect package must match; bump all together, run `bun run check`, update the `effect` skill | `effect` 4.0.0 is stable; switch to `^4` ranges |
+| `package.json`: `effect`, `@effect/platform-bun`, `@effect/ai-openrouter` pinned to exactly `4.0.0-rc.117`, plus an `overrides` pin on `@effect/platform-node-shared` (`@effect/platform-bun` depends on it with a caret range) | RCs break APIs between releases, and every Effect package must match; bump all together, run `bun run check`, update the `effect` skill | `effect` 4.0.0 is stable; switch to `^4` ranges |
 | `scripts/build.ts` native-lib plugin | a compiled binary would embed every platform's `@opentui/core-*` package it can resolve; the plugin keeps the target's only | OpenTUI or Bun select the native package per compile target |
 | `src/bin.ts` deletes `process.env.DEV` | `@opentui/react` loads its devtools when `DEV=true`, which a user's shell may set | OpenTUI stops reading `DEV` |
 | `src/core/mcp-stdio.ts` | Effect's stdio MCP transport stops when stdin closes and drops in-flight requests; the wrapper holds stdin open until every request has a response (or is cancelled), for at most 30 seconds | the transport drains pending requests on EOF |
@@ -149,7 +150,7 @@ Things in the tree that exist to get a build through, not because they are right
 
 ## CI
 
-- `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), setup-node (`.node-version`), ripgrep (apt), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage (the unit tests with a report; no thresholds), test:tui, e2e, build:all. No `OPENROUTER_API_KEY`: tests never touch the network.
+- `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), ripgrep (apt), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage (every test under `tests/`, with a report; no thresholds), e2e, build:all. No Node: `bun run` aliases `node` to bun for the `tsc` and `biome` shims when none is on PATH. No `OPENROUTER_API_KEY`: tests never touch the network.
 - `.github/workflows/vanilla.yml` runs `bun run vanilla -- --verify --name demo` on the same triggers. `template/vanilla/` holds rewritten copies of files main also has (`src/cli.ts`, `src/config.ts`, `AGENTS.md`, ...); when a change to one of those should reach the vanilla result, make it in the template copy too. Biome, tsc, and the hooks skip `template/`, so the workflow (or a local `bun run vanilla -- --verify`) is what checks it: it fails when the template no longer builds against main.
 - `.github/workflows/release.yml` on a `v*` tag: checks the tag matches `package.json`, runs the gate and `build:all`, smoke-tests each binary on its own OS and CPU (`--version`, `doctor --tui`), then publishes binaries, `SHA256SUMS`, and `install.sh` (`contents: write` in that job only).
 - Actions are pinned to major tags.

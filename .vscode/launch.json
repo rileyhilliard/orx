@@ -10,13 +10,6 @@
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Debug current vitest file",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "bun run test:unit ${relativeFile}",
-      "cwd": "${workspaceFolder}"
-    },
-    {
       "name": "Debug current bun test file",
       "type": "bun",
       "request": "launch",

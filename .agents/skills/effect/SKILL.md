@@ -1,11 +1,11 @@
 ---
 name: effect
-description: Effect 4 (effect-ts, 4.0.0-rc) guidance for orx. Use before writing or changing Effect code (services, layers, errors, Schema, Config, logging, streams, the CLI framework in effect/unstable/cli, Effect AI and @effect/ai-openrouter, MCP, @effect/platform-bun, @effect/vitest tests) and before looking up Effect docs, because most training data, blog posts, and some doc indexes show Effect 3 APIs that no longer exist.
+description: Effect 4 (effect-ts, 4.0.0-rc) guidance for orx. Use before writing or changing Effect code (services, layers, errors, Schema, Config, logging, streams, the CLI framework in effect/unstable/cli, Effect AI and @effect/ai-openrouter, MCP, @effect/platform-bun, Effect code in bun tests) and before looking up Effect docs, because most training data, blog posts, and some doc indexes show Effect 3 APIs that no longer exist.
 ---
 
 # Effect 4 in orx
 
-The repo is on `effect`, `@effect/platform-bun`, `@effect/platform-node`, `@effect/ai-openrouter`, and `@effect/vitest` 4.0.0-rc.117 (vitest 5), all pinned exactly because RC releases still break APIs; bump them together. Repo conventions (`Context.Service` with a static `layer`, `AppLayer`, thin commands, the stdout contract, exit codes) are in `.claude/rules/src/` and `AGENTS.md`; this file is the Effect knowledge behind them.
+The repo is on `effect`, `@effect/platform-bun`, and `@effect/ai-openrouter` 4.0.0-rc.117, all pinned exactly because RC releases still break APIs (plus an `overrides` pin on `@effect/platform-node-shared`, which `@effect/platform-bun` depends on with a caret range); bump them together. Tests run on `bun test`; there is no `@effect/vitest`. Repo conventions (`Context.Service` with a static `layer`, `AppLayer`, thin commands, the stdout contract, exit codes) are in `.claude/rules/src/` and `AGENTS.md`; this file is the Effect knowledge behind them.
 
 Everything below was checked against the installed rc.117 (run in this repo or read from its `.d.ts`), except lines marked "(docs)", which come from the Effect docs only.
 
@@ -49,7 +49,7 @@ If one of these shows up in a doc or your draft, it's v3. Use the v4 form.
 | `ParseResult.ParseError`, `TreeFormatter.formatErrorSync(e)` | `Schema.SchemaError` (`.issue`), `SchemaIssue.makeFormatterDefault()(error.issue)` |
 | `Schema.standardSchemaV1(s)` | `Schema.toStandardSchemaV1(s)` |
 | `JSONSchema.make(s)` | `Schema.toJsonSchemaDocument(s, opts)`, then `JsonSchema.toDocumentDraft07(doc)` if you need draft-07 |
-| `Arbitrary.make(s)`, `FastCheck` | `Arbitrary.schema(s)` from `effect/unstable/arbitrary`; fast-check is no longer bundled. In tests use `it.prop` |
+| `Arbitrary.make(s)`, `FastCheck` | `Arbitrary.schema(s)` from `effect/unstable/arbitrary`; fast-check is no longer bundled |
 | `Config.string`, `integer`, `redacted`, `literal`, ... | `Config.String`, `Int`, `Redacted`, `Literals`, ... (PascalCase) |
 | `Config.mapOrFail`, `ConfigError.InvalidData` | `Config.mapEffect(f)` failing with `new Config.ConfigError(new ConfigProvider.SourceError({ message }))`, or `Config.schema(schema, name)` |
 | `ConfigProvider.fromMap`, `Layer.setConfigProvider`, `Effect.withConfigProvider` | `ConfigProvider.fromEnv({ env })` / `fromUnknown(obj)`, `ConfigProvider.layer(p)`, `config.parse(p)` |
@@ -58,7 +58,7 @@ If one of these shows up in a doc or your draft, it's v3. Use the v4 form.
 | `LogLevel.Debug` objects, `logLevel.label` | string literals: `"Trace" "Debug" "Info" "Warn" "Error" "Fatal"` (`"Warn"`, not `"Warning"`) |
 | `TestClock` from `"effect"` | `import { TestClock } from "effect/testing"` |
 | `@effect/cli` (`Options`, `Args`, `CliApp`) | `effect/unstable/cli` (`Flag`, `Argument`, `Command`); see below |
-| `@effect/platform` (`FileSystem`, `Path`, `HttpClient`, `Terminal`), `@effect/platform-node` v0.x | `FileSystem`, `Path`, `Stdio`, `Terminal` from `"effect"`, HTTP from `effect/unstable/http`; runtimes in `@effect/platform-bun` / `@effect/platform-node` 4.x |
+| `@effect/platform` (`FileSystem`, `Path`, `HttpClient`, `Terminal`), `@effect/platform-node` v0.x | `FileSystem`, `Path`, `Stdio`, `Terminal` from `"effect"`, HTTP from `effect/unstable/http`; the runtime here is `@effect/platform-bun` 4.x |
 | `@effect/ai` (`AiLanguageModel`, `AiTool`, `AiToolkit`) | `LanguageModel`, `Tool`, `Toolkit` from `effect/unstable/ai` |
 
 Unchanged: `Schema.TaggedError<Self>()("Tag", fields)` (early v4 betas called it `TaggedErrorClass`; it was renamed back), `Schema.brand`, `Schema.Trim`, `Schema.NullOr`, `Effect.gen`, `Effect.fn`, `catchTag`, `tryPromise`, `annotateLogs`, `ManagedRuntime.make`/`dispose`, `Layer.succeed`/`sync`/`effectDiscard`/`mergeAll`/`provideMerge`, `Clock.currentTimeMillis`.
@@ -82,12 +82,12 @@ Unchanged: `Schema.TaggedError<Self>()("Tag", fields)` (early v4 betas called it
 - Layer memoization: a layer is reused only when an `Effect.provide` runs inside a scope where that same layer value is already live (a nested provide). Sequential or sibling provides, and separate `ManagedRuntime`s, each build fresh. `Effect.provide(layer, { local: true })` always builds fresh. Build services once into the runtime; never `Effect.provide(SomeLayer)` per request.
 - `Logger.layer([...])` replaces every logger, including the default one. A custom logger gets `{ message, logLevel, cause, date, fiber }`: `message` is the array of logged arguments, and annotations aren't there; read them with `options.fiber.getRef(References.CurrentLogAnnotations)` (a plain record). Options carry a live fiber, so tests can't build them by hand: `logging.ts` converts them to its own `LogEntry` (`toEntry`) and formats that, and tests pass hand-built `LogEntry` values to `toRecord`.
 - Config: the env providers treat `""` as absent (so `Config.option` gives `None`), but a whitespace-only value is present. `Config.withDefault` applies only to absent input, never to an invalid value (docs).
-- The default `ConfigProvider` copies `process.env` once, on first use, and caches it for the process (it's a `Context.Reference` default). Env changed later (`vi.stubEnv`, a script setting a var) is invisible unless you provide `ConfigProvider.layer(ConfigProvider.fromEnv(...))` built after the change; `runCli` provides `ConfigProvider.fromEnv({ env })` per run for exactly this reason.
+- The default `ConfigProvider` copies `process.env` once, on first use, and caches it for the process (it's a `Context.Reference` default). Env changed later (`stubEnv` in a test, a script setting a var) is invisible unless you provide `ConfigProvider.layer(ConfigProvider.fromEnv(...))` built after the change; `runCli` provides `ConfigProvider.fromEnv({ env })` per run for exactly this reason.
 - `Effect.runPromise` rejects with the original (squashed) error, not a `FiberFailure` wrapper. Use `runPromiseExit` to inspect the whole cause.
 - `Schema.decodeUnknownSync` throws a `SchemaError` whose `.message` is already the default-formatted issue (`"Missing key\n  at [\"a\"]"`); the structured issue is on `.issue` and `.cause` is `undefined`. With the `Effect`/`Result` decoders, format `error.issue` with `SchemaIssue.makeFormatterDefault()` (`formatIssue` in `src/core/input.ts`).
 - The default formatter's wording differs from v3's `TreeFormatter`: "Missing key", `Expected "user"`, "Expected a UUID", each followed by a path line (`at ["message"]["role"]`). It doesn't print schema identifiers; give a check an explicit `message` when a name must appear.
 - A `ManagedRuntime` rejects every run after `dispose()`. orx has none: `src/bin.ts` runs one program with `BunRuntime.runMain`, and tests run `main` with `Effect.runPromise`.
-- A pending forked fiber keeps the Node process alive (docs). A script or test that never joins or interrupts a fiber can hang.
+- A pending forked fiber keeps the process alive (docs). A script or test that never joins or interrupts a fiber can hang.
 
 ## Schema
 
@@ -101,9 +101,11 @@ Unchanged: `Schema.TaggedError<Self>()("Tag", fields)` (early v4 betas called it
 - `Schema.fromJsonString(S)` decodes JSON text straight to `S` (chat files, the config file) and encodes back with `Schema.encodeEffect`.
 - Before putting a schema in front of a model, print the final JSON Schema and read it, then pin it in a test.
 
-## @effect/vitest 4
+## Effect tests under bun test
 
-- `it.effect` provides the TestClock and TestConsole and a fresh `Scope` per test (there is no `it.scoped`; don't wrap bodies in `Effect.scoped`). The default logger writes to the TestConsole, so `Effect.log` prints nothing to the terminal; to assert on log records, provide your own logger with `Logger.layer`. `it.live` runs on the real clock.
+Tests use `bun:test`; Effect bodies run through `runTest` in `tests/helpers/effect.ts`, which replaces `@effect/vitest`'s `it.effect`: `it("...", () => runTest(Effect.gen(function* () { ... })))`.
+
+- `runTest` provides a fresh `Scope`, the TestClock, and the TestConsole (`TestClock.layer()` and `TestConsole.layer` from `"effect/testing"`), then `Effect.runPromise`. The default logger writes to the TestConsole, so `Effect.log` prints nothing; to assert on log records, provide your own logger with `Logger.layer`. A thrown `expect` inside the body is a defect, and the rejected promise fails the test. For the live clock, call `Effect.runPromise` yourself.
 - The TestClock starts at 0 and only moves on `TestClock.adjust`. Fork first, adjust, then join:
   ```ts
   const fiber = yield* Effect.forkChild(program);
@@ -111,12 +113,11 @@ Unchanged: `Schema.TaggedError<Self>()("Tag", fields)` (early v4 betas called it
   const result = yield* Fiber.join(fiber);
   ```
   `Clock.currentTimeMillis` reads the TestClock; `Date.now()` doesn't, which is one reason app code reads time through `Clock`.
-- The TestClock reaches only effects run in the test's own fiber and layers provided to it. Code run through its own `Effect.runPromise` (`runCli` in `tests/helpers/cli.ts`) uses the live clock. Test time-based behavior on the program or service inside `it.effect`, with the layers it needs provided there.
+- The TestClock reaches only effects run in the test's own fiber and layers provided to it. Code run through its own `Effect.runPromise` (`runCli` in `tests/helpers/cli.ts`) uses the live clock. Test time-based behavior on the program or service inside `runTest`, with the layers it needs provided there.
 - When a forked program waits on real I/O (a stub server) between clock steps, let the event loop run between adjustments: poll with `fiber.pollUnsafe()` and a short real yield, rather than a fixed sleep.
-- `it.layer(L)` / `layer(L)(...)` builds the layer once for the whole block, so state is shared across its tests. For isolation, `Effect.provide(layer)` per test (sequential provides build fresh each time; `ChatStore.layerMemory` starts empty on every build).
+- For isolation, `Effect.provide(layer)` per test (sequential provides build fresh each time; `ChatStore.layerMemory` starts empty on every build).
 - Assert a failure with `const exit = yield* Effect.exit(program)`, `Effect.result(program)`, or `Effect.flip(program)` for the error value.
-- Property tests: `it.prop(name, [SchemaA, SchemaB], ([a, b]) => ...)` (sync) or `it.effect.prop(...)`. Schemas are accepted as arbitraries directly.
-- Vitest 5: `.sequential` is gone (`{ concurrent: false }`), async `expect(...).resolves/rejects` must be awaited, and mock call history is cleared before each test (docs).
+- All test files share one bun process, so the default `ConfigProvider`'s cached copy of `process.env` (below) is shared too: provide `ConfigProvider.fromEnv({ env })` in any test that depends on env.
 
 ## The CLI framework (`effect/unstable/cli`)
 
@@ -124,7 +125,7 @@ Replaces v3's `@effect/cli`. Checked against the installed `dist/unstable/cli/*.
 
 - `Command.make(name, { ...flags, ...args }, handler)`; the handler gets the parsed config object and returns an Effect. Compose with `Command.withSubcommands([...])`, `Command.withDescription`, `Command.withAlias`, `Command.withExamples`, `Command.provide`/`provideEffect` (per-command layers). `cli.subcommands` lists the groups (`main` reads command names from it).
 - Flags: `Flag.String`, `Boolean`, `Int`, `Literals`, `ChoiceWithValue`, `Path`, `File`, `Redacted`, `KeyValuePair`, then `Flag.withAlias("m")`, `withDescription`, `withDefault`, `optional` (gives an `Option`), `withSchema`, `map`/`mapEffect`, `withFallbackConfig` (read a Config when the flag is absent). Arguments: `Argument.String`, `Int`, `Path`, ..., `Argument.variadic()` (an array), `optional`, `withDescription`. A `Flag.Boolean` without `withDefault(false)` is required: omitting it fails with "Missing required flag".
-- Running: `Command.run(cli, { version, renderErrors })` reads argv from the `Stdio` service's `args`; `Command.runWith(cli, { version, renderErrors })(argv)` takes argv directly (what `src/main.ts` uses, so tests pass argv). Both need `FileSystem | Path | Terminal | ChildProcessSpawner | Stdio` (`Command.Environment`); `BunServices.layer` / `NodeServices.layer` provide all five.
+- Running: `Command.run(cli, { version, renderErrors })` reads argv from the `Stdio` service's `args`; `Command.runWith(cli, { version, renderErrors })(argv)` takes argv directly (what `src/main.ts` uses, so tests pass argv). Both need `FileSystem | Path | Terminal | ChildProcessSpawner | Stdio` (`Command.Environment`); `BunServices.layer` provides all five.
 - Built-in global flags: `--help`/`-h`, `--version`/`-v` (not verbose), `--completions <bash|zsh|fish|sh>`, `--log-level <all|trace|debug|info|warn|warning|error|fatal|none>` (sets `MinimumLogLevel` for the handler), `--wizard` (interactive). They are `GlobalFlag.BuiltIns`.
 - Where output goes: help, `--version`, completions, and the wizard print with `Console.log`; on a parse error the framework prints the help doc with `Console.log` and the errors with `Console.error` (unless `renderErrors: false`, which skips the error rendering but still prints help). `Console.Console` is a `Context.Reference` whose default is the global console, so all of this goes to stdout unless you provide another `Console` (`Effect.provideService(Console.Console, c)`). `main` provides a holding console and flushes it by outcome.
 - Errors: failures are `CliError.CliError` (`CliError.isCliError`), tagged `UnrecognizedOption`, `DuplicateOption`, `MissingOption`, `MissingArgument`, `UnexpectedArgument`, `InvalidValue`, `UnknownSubcommand`, `UserError`, and `ShowHelp` (with `errors`; empty for an explicit `--help` or a bare parent command). The framework's own exit code for `ShowHelp` with errors is 1; orx maps every `CliError` to 2 in `outcomeOf`.
@@ -147,7 +148,7 @@ Replaces v3's `@effect/ai`. Checked against the installed `.d.ts` and by running
 
 - `BunRuntime.runMain(effect, { disableErrorReporting?, teardown? })` runs the program, interrupts it on SIGINT/SIGTERM, and calls `teardown(exit, onExit)` for the exit code. Without `disableErrorReporting: true` it logs an unreported failure with `Effect.logError`, and the default logger writes with `console.log`: stdout. orx disables it and maps the `Exit` itself (interrupt-only causes are 130).
 - The default logger (`Logger.defaultLogger`) and `Logger.consolePretty` use `console.log` unless `Logger.LogToStderr` (a `Context.Reference<boolean>`) is `true`. orx replaces the loggers entirely (`Logger.layer([...])` in `src/logging.ts`, stderr and file sinks) at the outermost layer, so nothing logged before or after the command reaches stdout.
-- `BunServices.layer` provides `ChildProcessSpawner | Crypto | FileSystem | Path | Terminal | Stdio`; `NodeServices.layer` (`@effect/platform-node`) is the Node equivalent tests use. `FetchHttpClient.layer` (`effect/unstable/http`) is the `HttpClient` for both. Only `src/bin.ts` imports `@effect/platform-bun`.
+- `BunServices.layer` provides `ChildProcessSpawner | Crypto | FileSystem | Path | Terminal | Stdio`; `src/bin.ts` provides it, and so does `runCli` in tests. `FetchHttpClient.layer` (`effect/unstable/http`) is the `HttpClient`. In `src/`, only `src/bin.ts` imports `@effect/platform-bun`.
 - `Stdio.Stdio` has `args`, `stdin` (a `Stream<Uint8Array>`), `stdout()`/`stderr()` sinks (`{ endOnDone: false }` to keep them open), `stdinIsTerminal`, `stdoutIsTerminal`. `Stdio.layerTest({ ...partial })` builds one for tests (`runCli` does).
 - `Terminal` (`BunTerminal` is the shared Node implementation): building the layer only adds an `end` listener to stdin. The readline interface, which puts a TTY in raw mode, is acquired on the first read and released 10 ms after the last, so providing `Terminal` doesn't take stdin away from piped `ask` or `orx mcp`.
 

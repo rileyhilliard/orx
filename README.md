@@ -99,7 +99,7 @@ Each run logs one `command` line (command, flag names, exit code, duration) and 
 
 ## Working in this repo
 
-Requires bun 1.4 and Node 24.
+Requires bun 1.4.
 
 ```bash
 cp .env.example .env              # optional: a real key for bun run orx
@@ -116,17 +116,17 @@ bun run check                     # the gate (CI adds coverage and build:all)
 | `bun run stub` / `stub:stop` | Stub OpenRouter and GitHub releases on local ports; prints the env to point orx at them |
 | `bun run tui:capture -- --keys ... [-- <orx flags>]` | Runs orx in a pseudo-terminal, types keys, prints the screen |
 | `bun run lint` / `format` / `typecheck` | Biome check / Biome fixes / tsc |
-| `bun run test` | vitest (Node) and the TUI tests (bun), no network |
+| `bun run test` | Every test under `tests/` (unit and TUI) with `bun test`, no network |
 | `bun run e2e` | Builds `dist/orx` and tests the binary, including the TUI in a PTY |
 | `bun run check` | lint, typecheck, test, e2e (CI also runs `coverage` and `build:all`) |
-| `bun run coverage` | vitest with a coverage report in `coverage/` |
+| `bun run coverage` | The same tests with a coverage report in `coverage/` |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams (needs a key) |
 | `bun run clean` | Removes `dist/`, `coverage/`, and `logs/` (dev chats in `.orx/` stay) |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `SHA256SUMS` |
 | `bun run eval --models a,b` | Model behavior against the real API (needs a key, costs a fraction of a cent) |
 | `bun run vanilla -- --name <name>` | Starts a different CLI from this one: on a new branch, removes the orx product (keeping one example model command and a placeholder TUI), renames orx to `<name>` when given one, runs the gate, and commits |
 
-Use `bun run test`, not `bun test`: most tests run on vitest. `AGENTS.md` is the map of the code and conventions, for agents and people. `docs/harness.md` explains the agent harness (hooks, rules, commands, reviewers) and which layer catches which mistake. To release, bump `version` in `package.json`, commit, and push a matching `v*` tag.
+`bun test ./tests/<file>` runs one file. `AGENTS.md` is the map of the code and conventions, for agents and people. `docs/harness.md` explains the agent harness (hooks, rules, commands, reviewers) and which layer catches which mistake. To release, bump `version` in `package.json`, commit, and push a matching `v*` tag.
 
 ## License
 

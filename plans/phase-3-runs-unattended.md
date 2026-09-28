@@ -166,7 +166,7 @@ Each step is one PR and leaves `bun run check` green.
 
 ## Testing
 
-- **Checkpoints:** vitest against a temp workspace: a turn with three edits and a created file rewinds to byte-identical files; an externally modified file is skipped and reported; a subagent's edit is rewound with the parent's message; retention prunes. `tests/tui` for the picker and the three choices.
+- **Checkpoints:** bun test against a temp workspace: a turn with three edits and a created file rewinds to byte-identical files; an externally modified file is skipped and reported; a subagent's edit is rewound with the parent's message; retention prunes. `tests/tui` for the picker and the three choices.
 - **Jobs:** a stub-scripted turn starts `sleep 30 && echo done` in the background, reads output, kills it; ending the session kills a job (process gone); `bash_output` on an unknown job is a tool failure.
 - **web_fetch:** a local HTTP stub (like `stub-releases.ts`) serving HTML, a redirect to another domain (refused), a 10 MB body (capped); the domain rule allowing one host; `prompt` mode against the stub OpenRouter, cost added to the reply.
 - **MCP:** orx as client to `orx mcp` over stdio, listing and calling `currentTime`; a server that fails to start; an `mcp__` rule.

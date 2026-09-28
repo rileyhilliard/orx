@@ -39,7 +39,7 @@ A bash script with `set -euo pipefail`, run as `curl -fsSL .../install.sh | bash
 
 ## e2e
 
-`bun run e2e` builds `dist/orx`, then `bun test ./e2e` drives the compiled binary in a PTY against the stub OpenRouter and stub releases, with an env built from scratch (never inherited). It is the only check of the compiled binary: the embedded native lib, `$bunfs` paths, `--version`, stdout staying empty for a bad flag, a `--json` error, and `orx mcp` besides protocol frames. Keep it to those; behavior belongs in vitest.
+`bun run e2e` builds `dist/orx`, then `bun test ./e2e` drives the compiled binary in a PTY against the stub OpenRouter and stub releases, with an env built from scratch (never inherited). It is the only check of the compiled binary: the embedded native lib, `$bunfs` paths, `--version`, stdout staying empty for a bad flag, a `--json` error, and `orx mcp` besides protocol frames. Keep it to those; behavior belongs in `tests/`.
 
 ## doctor
 

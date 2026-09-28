@@ -18,7 +18,7 @@ You design changes to orx. You research first, compare options, and recommend on
 Read `AGENTS.md` and the rules in `.claude/rules/src/` that touch the area. The constraints every design has to respect:
 
 - One binary, one process per invocation. Commands are thin: decode, run one program from `src/core/`, render through `Output`. No daemon, no shared state between runs except files in the data dir.
-- The platform boundary: only `src/bin.ts` and `src/tui/**` may use Bun or OpenTUI. Everything else is Effect services on abstract platform services, because vitest runs it on Node.
+- The platform boundary: only `src/bin.ts` and `src/tui/**` may use Bun or OpenTUI. Everything else is Effect services on abstract platform services: a platform-free core, given its platform in `src/bin.ts`.
 - The stdout contract: results on stdout, everything else on stderr, `--json` for machines, stable exit codes. `orx mcp` must write nothing but JSON-RPC to stdout.
 - Services are `Context.Service` classes composed into `AppLayer`. Swapping an implementation (JSON files to SQLite) means a new static layer on the same service.
 - Config is lazy: `--help`, `--version`, `doctor`, and `update` work with no key and a broken config file. The key never comes from a file.

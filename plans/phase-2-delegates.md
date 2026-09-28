@@ -179,7 +179,7 @@ Sources: `permissions: {allow, deny}` in `~/.config/orx/config.json` (`schemas/c
 
 `src/core/agents.ts` loads agent files the way `src/core/skills.ts` loads skills: frontmatter `name`, `description`, `tools`, `model` (an OpenRouter id or `inherit`), `maxSteps`, then the body as the agent's instructions. Unknown keys are ignored and listed once as a load warning ("ignored: permissionMode, hooks"), so a `.claude/agents` file that expects more than orx gives is visible, not silently different.
 
-Claude Code agent files write `tools` as a YAML list (this repo's `.claude/agents/architect.md` does), and `parseFields` in `src/core/commands.ts` only reads `key: value` lines, so today it would read `tools` as empty. The loader needs a real YAML parser: the `yaml` package, used only on frontmatter, is the conventional choice. `Bun.YAML` would work in the binary but breaks the platform boundary for vitest. The same parser replaces `parseFields` for commands and skills, so all three read the same frontmatter.
+Claude Code agent files write `tools` as a YAML list (this repo's `.claude/agents/architect.md` does), and `parseFields` in `src/core/commands.ts` only reads `key: value` lines, so today it would read `tools` as empty. The loader needs a real YAML parser: the `yaml` package, used only on frontmatter, is the conventional choice. `Bun.YAML` would work in the binary but breaks the platform boundary. The same parser replaces `parseFields` for commands and skills, so all three read the same frontmatter.
 
 Claude Code's model aliases (`sonnet`, `opus`, `haiku`) don't name an OpenRouter model. They resolve through `modelAliases` in the config file when set, else fall back to `inherit` with a load warning.
 

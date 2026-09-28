@@ -63,7 +63,7 @@ Environment variables OpenTUI reads on its own, so a user's shell can change beh
 - `mockInput`: `typeText(text)`, `pressKey(key, { ctrl, shift, meta })`, `pressKeys([...])`, `pressEnter()`, `pressCtrlC()`, `pasteBracketedText(text)`. `mockMouse` for clicks.
 - Options are `CliRendererConfig` plus `width`, `height`, `kittyKeyboard`.
 
-It runs under `bun test` only in this repo: `@opentui/react/test-utils.js` is a Bun build (`// @bun`), `@opentui/core/testing` resolves its `bun` export condition, and vitest excludes `tests/tui/`. `testRender` sets `IS_REACT_ACT_ENVIRONMENT` and wraps the first render in `act`; its `onDestroy` unmounts the root. Call `renderer.destroy()` after each test: the test renderer installs the same process handlers as a real one, and they accumulate across tests otherwise.
+It runs under `bun test` only in this repo: `@opentui/react/test-utils.js` is a Bun build (`// @bun`), `@opentui/core/testing` resolves its `bun` export condition. `testRender` sets `IS_REACT_ACT_ENVIRONMENT` and wraps the first render in `act`; its `onDestroy` unmounts the root. Call `renderer.destroy()` after each test: the test renderer installs the same process handlers as a real one, and they accumulate across tests otherwise.
 
 A component test passes a fake `ChatBridge` (plain objects, promises, and an `async function*` for `send`), types, waits for a frame, and asserts on `captureCharFrame()` text. Prefer `waitForFrame((f) => f.includes("..."))` over a fixed number of `renderOnce()` calls.
 
