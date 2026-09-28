@@ -141,22 +141,22 @@ describe("the @ picker's ranking and insertion", () => {
     expect(rankPaths(paths, "")).toEqual(paths);
   });
 
-  it("ranks a contiguous match anywhere above a subsequence scattered across segments", () => {
+  it("ranks a contiguous match anywhere above a subsequence, and drops mid-word scatter", () => {
     const repo = [
       "template/vanilla/.claude/hooks/",
       "template/vanilla/src/core/ask.ts",
-      "tests/fixtures/openrouter/",
       "src/packages/index.ts",
       "template/vanilla/package.json",
-      "scripts/pick.ts",
+      "src/pa-ck.ts",
+      "src/p/ack.ts",
       "package.json",
     ];
     expect(rankPaths(repo, "pack")).toEqual([
       "package.json",
       "template/vanilla/package.json",
       "src/packages/index.ts",
-      "template/vanilla/.claude/hooks/",
-      "template/vanilla/src/core/ask.ts",
+      "src/pa-ck.ts",
+      "src/p/ack.ts",
     ]);
   });
 

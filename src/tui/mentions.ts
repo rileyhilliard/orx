@@ -10,18 +10,24 @@ export const insertMention = (draft: string, path: string) => {
   return draft === "" || /\s$/.test(draft) ? draft + mention : `${draft} ${mention}`;
 };
 
+const startsWord = (text: string, at: number) => at === 0 || "/._- ".includes(text[at - 1] ?? "");
+
 /**
  * How many contiguous runs `query` splits into when matched left to right as a subsequence of
- * `text`, or undefined when it doesn't match. Fewer runs is a tighter match.
+ * `text`, or undefined when it doesn't match. Fewer runs is a tighter match. With `atWords`, a
+ * run may only start at the start of a word (after `/`, `.`, `_`, `-`), so `stapp` matches
+ * `src/tui/app.tsx` but `pack` doesn't match `template/vanilla/.claude/hooks/`.
  */
-const subsequenceRuns = (query: string, text: string) => {
+const subsequenceRuns = (query: string, text: string, atWords = false) => {
   let i = 0;
   let runs = 0;
   let previous = -2;
   for (const [at, char] of [...text].entries()) {
     if (i === query.length) break;
     if (char !== query[i]) continue;
-    if (at !== previous + 1) runs++;
+    const continues = at === previous + 1;
+    if (!continues && atWords && !startsWord(text, at)) continue;
+    if (!continues) runs++;
     previous = at;
     i++;
   }
@@ -33,9 +39,8 @@ const basename = (path: string) => path.replace(/\/$/, "").split("/").at(-1) ?? 
 /**
  * Paths matching `query` (case-insensitive), best first. Tiers: the basename contains the query
  * (starting with it first), the path contains it, the basename matches it as a subsequence, then
- * the whole path does. Subsequence matches in fewer contiguous runs rank higher, so `pack` puts
- * `x/package.json` well above `template/vanilla/.claude/hooks/`. Shorter paths break ties. An
- * empty query keeps the list as it is.
+ * the whole path does with each run starting a word. Subsequence matches in fewer contiguous runs
+ * rank higher; shorter paths break ties. An empty query keeps the list as it is.
  */
 export const rankPaths = (paths: ReadonlyArray<string>, query: string): ReadonlyArray<string> => {
   const q = query.trim().toLowerCase();
@@ -47,7 +52,7 @@ export const rankPaths = (paths: ReadonlyArray<string>, query: string): Readonly
     if (lower.includes(q)) return [1, 0];
     const baseRuns = subsequenceRuns(q, base);
     if (baseRuns !== undefined) return [2, baseRuns];
-    const pathRuns = subsequenceRuns(q, lower);
+    const pathRuns = subsequenceRuns(q, lower, true);
     return pathRuns === undefined ? undefined : [3, pathRuns];
   };
   return paths
