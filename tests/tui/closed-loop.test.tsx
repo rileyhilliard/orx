@@ -12,7 +12,7 @@ import { ChatStore } from "~/services/ChatStore";
 import { App } from "~/tui/app";
 import { makeBridge } from "~/tui/launch";
 import { type StubOpenRouter, startStubOpenRouter } from "../helpers/stub-openrouter";
-import { type RenderSetup, render } from "./render";
+import { type RenderSetup, render, waitForScreen } from "./render";
 
 // The TUI against the real programs: App + makeBridge + AppLayer, with OpenRouter replaced by
 // the stub. This is the check that the bridge's events and the components agree.
@@ -62,14 +62,15 @@ describe("TUI closed loop", () => {
       setup = yield* Effect.promise(() =>
         render(<App bridge={bridge} />, { width: 80, height: 20 }),
       );
-      const { mockInput, renderOnce, waitForFrame } = setup;
-      yield* Effect.promise(async () => {
-        await renderOnce();
-        await mockInput.typeText("hi there");
-        mockInput.pressEnter();
-        await waitForFrame((f) => f.includes("12 in / 5 out"));
+      const screen = setup;
+      const frame = yield* Effect.promise(async () => {
+        await screen.renderOnce();
+        await screen.mockInput.typeText("hi there");
+        screen.mockInput.pressEnter();
+        // The usage line renders on the turn's `finish` event, before the stream's onExit saves
+        // the chat; the input leaves "Replying…" only once the turn, save included, has ended.
+        return waitForScreen(screen, (f) => f.includes("12 in / 5 out") && !f.includes("Replying"));
       });
-      const frame = setup.captureCharFrame();
       expect(frame).toContain("Hello from the stub.");
       expect(frame).toContain("$0.000420");
       const saved = yield* Effect.flatMap(ChatStore, (store) => store.get(chatId));
@@ -90,12 +91,12 @@ describe("TUI closed loop", () => {
       setup = yield* Effect.promise(() =>
         render(<App bridge={bridge} />, { width: 80, height: 20 }),
       );
-      const { mockInput, renderOnce, waitForFrame } = setup;
+      const screen = setup;
       return yield* Effect.promise(async () => {
-        await renderOnce();
-        await mockInput.typeText("hi");
-        mockInput.pressEnter();
-        return waitForFrame((f) => /key/i.test(f) && f.includes("> hi"));
+        await screen.renderOnce();
+        await screen.mockInput.typeText("hi");
+        screen.mockInput.pressEnter();
+        return waitForScreen(screen, (f) => /key/i.test(f) && f.includes("> hi"));
       });
     });
     const frame = await Effect.runPromise(program.pipe(Effect.provide(layer(root)), quiet));
@@ -112,12 +113,12 @@ describe("TUI closed loop", () => {
       setup = yield* Effect.promise(() =>
         render(<App bridge={bridge} />, { width: 80, height: 20 }),
       );
-      const { mockInput, renderOnce, waitForFrame } = setup;
+      const screen = setup;
       yield* Effect.promise(async () => {
-        await renderOnce();
-        await mockInput.typeText("hi");
-        mockInput.pressEnter();
-        await waitForFrame((f) => f.includes("one two"));
+        await screen.renderOnce();
+        await screen.mockInput.typeText("hi");
+        screen.mockInput.pressEnter();
+        await waitForScreen(screen, (f) => f.includes("one two"));
         await stopTurns();
       });
       return yield* Effect.flatMap(ChatStore, (store) => store.get(chatId));
