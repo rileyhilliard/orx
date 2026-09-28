@@ -74,6 +74,8 @@ describe("orx ask --agent", () => {
     const edit = toolResults(run.stdout).find((r) => r.name === "edit");
     expect(edit?.isFailure).toBe(true);
     expect(JSON.stringify(edit?.output)).toContain("interactive");
+    // Bare `orx` is the interactive session; there is no `orx chat`.
+    expect(JSON.stringify(edit?.output)).toContain("(run orx, or pass");
   });
 
   it("reports a denied call as a permission-denied event before its tool-result", async () => {
@@ -98,6 +100,37 @@ describe("orx ask --agent", () => {
     expect(events[deniedAt + 1]).toMatchObject({ type: "tool-result", id: editCall?.id });
   });
 
+  it("notes a failed or denied tool call on stderr in text mode", async () => {
+    const dir = workspace();
+    stub.toolCalls = [
+      { name: "read", arguments: JSON.stringify({ path: "nope.txt" }) },
+      ...readThenEdit(dir),
+    ];
+    const run = await runCli(["ask", "fix it", "--agent", "--cwd", dir], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).not.toContain("✗");
+    expect(run.stderr).toContain("✗ read: nope.txt: no such file");
+    expect(run.stderr).toContain("✗ edit: Edit math.js: denied. edit needs an interactive session");
+  });
+
+  it("notes why a bash command failed, not the output it printed first", async () => {
+    stub.toolCalls = [
+      {
+        name: "bash",
+        arguments: JSON.stringify({ command: "echo started; sleep 5", timeout_ms: 300 }),
+      },
+    ];
+    const run = await runCli(
+      ["ask", "run it", "--agent", "--cwd", workspace(), "--permission-mode", "yolo"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    expect(run.exitCode).toBe(0);
+    expect(run.stderr).toContain("✗ bash: (timed out after 0.3 s");
+    expect(run.stderr).not.toContain("✗ bash: started");
+  });
+
   it("refuses --cwd and --permission-mode without --agent", async () => {
     const env = { OPENROUTER_BASE_URL: stub.baseUrl };
     const cwd = await runCli(["ask", "hi", "--cwd", workspace()], { env });
@@ -120,6 +153,17 @@ describe("orx ask --agent", () => {
     expect(run.exitCode).toBe(2);
     expect(run.stderr).toContain("doesn't support tool calling");
     expect(stub.chatRequests).toHaveLength(0);
+  });
+
+  it("warns when it can't check that the model calls tools", async () => {
+    stub.failModels = 10;
+    const run = await runCli(["ask", "hi", "--agent", "--cwd", workspace()], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    const warnings = run.logs.filter((r) => r.level === "warn" && /tool calling/.test(r.msg));
+    expect(warnings).toHaveLength(1);
   });
 
   it("gives plain ask no workspace tools", async () => {

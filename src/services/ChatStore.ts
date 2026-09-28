@@ -5,6 +5,10 @@ import { Paths } from "../config";
 
 export interface ChatStoreShape {
   readonly get: (id: ChatId) => Effect.Effect<Option.Option<StoredChat>>;
+  /**
+   * Dies when the chat can't be written, with an error that names the data dir (permission
+   * denied) or the file. It runs as the turn's finalizer, which can't fail.
+   */
   readonly save: (chat: StoredChat) => Effect.Effect<void>;
   /** Every saved chat, newest first. Unreadable files are skipped (and logged). */
   readonly list: Effect.Effect<ReadonlyArray<StoredChat>>;
@@ -51,7 +55,18 @@ const makeFileStore = Effect.gen(function* () {
           Effect.andThen(fs.rename(temp, fileFor(chat.id))),
           Effect.onError(() => fs.remove(temp).pipe(Effect.ignore)),
         );
-      }).pipe(Effect.orDie),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.die(
+            new Error(
+              error._tag === "PlatformError" && error.reason._tag === "PermissionDenied"
+                ? `Can't save chat ${chat.id}: ${dir} isn't writable (permission denied); fix its permissions or set ORX_DATA_DIR to a writable directory`
+                : `Saving chat ${chat.id} to ${fileFor(chat.id)} failed`,
+              { cause: error },
+            ),
+          ),
+        ),
+      ),
     list: Effect.gen(function* () {
       if (!(yield* fs.exists(dir))) return [];
       const names = (yield* fs.readDirectory(dir)).filter((name) => name.endsWith(".json"));

@@ -1,10 +1,11 @@
 import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
-import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
 import { Tool } from "effect/unstable/ai";
 import { ToolFailure, WriteInput } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
-import { ensureResolvesTo, freshnessFailure, permit, readUtf8 } from "./permit";
+import { WRITE_MAX_DIFF_CHARS } from "./limits";
+import { ensureResolvesTo, freshnessFailure, permit, platformFailure, readUtf8 } from "./permit";
 
 export const Write = Tool.make("write", {
   description: [
@@ -27,8 +28,11 @@ export const unifiedDiff = (shown: string, before: string, after: string) =>
 
 const BOM = "\uFEFF";
 
+const isNotFound = (error: PlatformError.PlatformError) => error.reason._tag === "NotFound";
+
 /**
- * The `write` tool. Holds the file's lock from the freshness check to recording the new
+ * The `write` tool. Returns a one-line summary, and for an overwrite the diff under it. Holds
+ * the file's lock from the freshness check to recording the new
  * contents, asks Permissions with the diff, and checks again after the answer (the user may
  * have edited or created the file, or swapped in a symlink, while the panel was open). An
  * existing file's byte order mark is kept.
@@ -42,10 +46,16 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
     const path = yield* workspace.resolve(input);
     const shown = workspace.display(path);
     const failed = (message: string) => new ToolFailure({ message: `${shown}: ${message}` });
+    const failedWith = (error: PlatformError.PlatformError) => platformFailure(shown, error);
 
     return yield* fileState.withLock(path)(
       Effect.gen(function* () {
-        const info = yield* Effect.option(fs.stat(path));
+        // Only NotFound means a new file; any other stat failure is reported, not guessed at.
+        const info = yield* fs.stat(path).pipe(
+          Effect.map(Option.some),
+          Effect.catchIf(isNotFound, () => Effect.succeedNone),
+          Effect.mapError(failedWith),
+        );
         const exists = Option.isSome(info);
         if (exists && info.value.type === "Directory") return yield* failed("is a directory");
         const ensureFresh = Effect.gen(function* () {
@@ -54,29 +64,40 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
           if (freshness !== "ok") return yield* freshnessFailure(shown, freshness);
         });
         yield* ensureFresh;
-        const before = exists ? yield* readUtf8(path, failed) : "";
+        const before = exists ? yield* readUtf8(path, shown) : "";
         const after = before.startsWith(BOM) && !content.startsWith(BOM) ? BOM + content : content;
+        const diff = unifiedDiff(shown, before, after);
         yield* permit({
           tool: "write",
           summary: `${exists ? "Overwrite" : "Create"} ${shown}`,
-          diff: unifiedDiff(shown, before, after),
+          diff,
           path: shown,
         });
         yield* ensureResolvesTo(input, path, shown);
         yield* ensureFresh;
-        if (!exists && (yield* fs.exists(path).pipe(Effect.orElseSucceed(() => true)))) {
+        const appeared = fs.stat(path).pipe(
+          Effect.as(true),
+          Effect.catchIf(isNotFound, () => Effect.succeed(false)),
+          Effect.mapError(failedWith),
+        );
+        if (!exists && (yield* appeared)) {
           return yield* failed("was created since you started; read it, then write again");
         }
 
         const bytes = new TextEncoder().encode(after);
         yield* fs
           .makeDirectory(pathService.dirname(path), { recursive: true })
-          .pipe(Effect.mapError((e) => failed(e.reason._tag)));
-        yield* fs.writeFile(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));
-        yield* fileState.record(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));
+          .pipe(Effect.mapError(failedWith));
+        yield* fs.writeFile(path, bytes).pipe(Effect.mapError(failedWith));
+        yield* fileState.record(path, bytes).pipe(Effect.mapError(failedWith));
         const lines =
           content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
-        return `${exists ? "Overwrote" : "Created"} ${shown} (${lines} lines)`;
+        // An overwrite returns its diff, as edit does, unless it would flood the context; a new
+        // file's diff would only repeat the content the model just sent.
+        if (!exists) return `Created ${shown} (${lines} lines)`;
+        return diff.length > WRITE_MAX_DIFF_CHARS
+          ? `Overwrote ${shown} (${lines} lines; the diff is too large to show)`
+          : `Overwrote ${shown} (${lines} lines)\n${diff}`;
       }),
     );
   });

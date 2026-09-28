@@ -100,12 +100,13 @@ export const summarizeTool = (
       return { summary: exit === undefined ? head : `${head} · exit ${exit}` };
     }
     case "write": {
-      // A new file's diff is its content; the tool reports an overwrite in one line (the
-      // approval panel showed that diff).
-      const summary = text.split("\n")[0] || head;
+      // A new file's diff is its content; an overwrite's result is a summary line, then its diff.
+      const [summary = head, ...rest] = text.split("\n");
       const diff = summary.startsWith("Created")
         ? createdDiff(field(input, "content") ?? "")
-        : undefined;
+        : rest.length > 0
+          ? rest.join("\n")
+          : undefined;
       return diff === undefined ? { summary } : { summary, diff };
     }
     case "edit":

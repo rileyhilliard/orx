@@ -16,8 +16,9 @@ export const usageLine = (reply: AssistantMessage): string =>
 
 export const noteLine = (text: string, color: boolean) => dim(color)(text);
 
-/** USD per million tokens, the way people compare prices. */
-const perMillion = (price: number) => (price === 0 ? "free" : `$${(price * 1e6).toFixed(2)}`);
+/** USD per million tokens, the way people compare prices; null is a price that varies. */
+const perMillion = (price: number | null) =>
+  price === null ? "varies" : price === 0 ? "free" : `$${(price * 1e6).toFixed(2)}`;
 
 /** Plain-text columns: id, context, input and output price per million tokens. */
 export const modelsTable = (models: ReadonlyArray<ModelInfo>, defaultModel: string): string => {

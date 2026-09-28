@@ -52,6 +52,7 @@ const model = (id: string, name = id): ModelInfo => ({
   contextLength: 128_000,
   promptPrice: 0.000001,
   completionPrice: 0.000002,
+  maxCompletionTokens: null,
 });
 
 describe("toPrompt", () => {

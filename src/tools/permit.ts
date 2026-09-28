@@ -1,4 +1,4 @@
-import { Effect, FileSystem } from "effect";
+import { Cause, Effect, FileSystem, type PlatformError } from "effect";
 import { ToolFailure } from "~/schemas";
 import { type PermissionRequest, Permissions } from "../services/permissions";
 import { Workspace } from "../services/workspace";
@@ -39,18 +39,62 @@ export const ensureResolvesTo = (input: string, path: string, shown: string) =>
     }
   });
 
+/** What the model can do about a failed file operation, by the platform error's reason. */
+const RECOVERY: Partial<Record<PlatformError.PlatformError["reason"]["_tag"], string>> = {
+  PermissionDenied: "the user running orx can't access it, so retrying won't help",
+  NotFound: "check the path with glob",
+  Busy: "try again",
+  TimedOut: "try again",
+  WouldBlock: "try again",
+  Unknown: "try again",
+};
+
+/**
+ * A file operation's PlatformError as a ToolFailure: the path as shown, the reason (with the
+ * platform's description when it has one), and what the model can do about it.
+ */
+export const platformFailure = (shown: string, error: PlatformError.PlatformError) => {
+  const { _tag, description } = error.reason;
+  const hint = RECOVERY[_tag];
+  return new ToolFailure({
+    message: `${shown}: ${_tag}${description ? ` (${description})` : ""}${hint ? `; ${hint}` : ""}`,
+  });
+};
+
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /**
  * A file's text for write and edit. UTF-8 only: another encoding would be rewritten as mojibake.
  * A byte order mark stays in the text (U+FEFF), so encoding the text again writes it back.
  */
-export const readUtf8 = (path: string, failed: (message: string) => ToolFailure) =>
+export const readUtf8 = (path: string, shown: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const bytes = yield* fs.readFile(path).pipe(Effect.mapError((e) => failed(e.reason._tag)));
+    const bytes = yield* fs.readFile(path).pipe(Effect.mapError((e) => platformFailure(shown, e)));
     return yield* Effect.try({
       try: () => utf8.decode(bytes),
-      catch: () => failed("not UTF-8 text; write and edit only change UTF-8 files"),
+      catch: () =>
+        new ToolFailure({
+          message: `${shown}: not UTF-8 text; write and edit only change UTF-8 files`,
+        }),
     });
   });
+
+/**
+ * A defect in a tool handler (a bug in orx or in a library it calls) would end the whole turn.
+ * Instead it's logged once, with the tool's name, and goes back to the model as a failure it
+ * can route around. Interruption still passes through.
+ */
+export const catchToolDefect =
+  <E>(name: string, fail: (message: string) => E) =>
+  <A, E0, R>(effect: Effect.Effect<A, E0, R>): Effect.Effect<A, E | E0, R> =>
+    effect.pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logError(`${name} tool failed unexpectedly`, Cause.die(defect)).pipe(
+          Effect.annotateLogs({ tool: name }),
+          Effect.andThen(
+            Effect.fail(fail(`${name} failed unexpectedly; try a different approach`)),
+          ),
+        ),
+      ),
+    );

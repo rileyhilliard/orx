@@ -87,7 +87,7 @@ export const runBash = ({ command, timeout_ms, description }: BashInput) =>
     const body = text === "" ? "(no output)" : text;
     if (Option.isNone(exit)) {
       return yield* new ToolFailure({
-        message: `${body}\n(timed out after ${timeoutMs / 1000} s; the command was killed)`,
+        message: `${body}\n(timed out after ${timeoutMs / 1000} s; the command was killed. Pass a larger timeout_ms (max ${BASH_MAX_TIMEOUT_MS}), or avoid starting servers or background processes that keep output open)`,
       });
     }
     return `${body}\n(exit code ${exit.value})`;

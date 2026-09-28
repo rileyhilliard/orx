@@ -19,6 +19,9 @@ describe("summarizeTool", () => {
     expect(
       summarizeTool("write", { path: "a.ts", content: "a\nb\n" }, "Created a.ts (2 lines)", false),
     ).toEqual({ summary: "Created a.ts (2 lines)", diff: "+a\n+b" });
+    expect(
+      summarizeTool("write", { path: "a.ts" }, "Overwrote a.ts (1 lines)\n-a\n+b", false),
+    ).toEqual({ summary: "Overwrote a.ts (1 lines)", diff: "-a\n+b" });
     expect(summarizeTool("edit", { path: "a.ts" }, "-a\n+b", false)).toEqual({
       summary: "edit a.ts",
       diff: "-a\n+b",

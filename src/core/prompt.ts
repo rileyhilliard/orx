@@ -136,10 +136,19 @@ export const loadMemory = (root: string) =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const { configFile } = yield* Paths;
+    // A missing file is the normal case; any other failure (a directory named AGENTS.md, no
+    // read permission) is left out with a warning, so the user can see why.
     const readIfExists = (file: string) =>
       fs.readFileString(file).pipe(
         Effect.map((text) => Option.some(text.trim())),
-        Effect.orElseSucceed(() => Option.none<string>()),
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound"
+            ? Effect.succeedNone
+            : Effect.as(
+                Effect.logWarning(`Skipping ${file}: can't read it`, error.message),
+                Option.none<string>(),
+              ),
+        ),
       );
 
     const top = Option.getOrElse(yield* findGitRoot(root), () => root);

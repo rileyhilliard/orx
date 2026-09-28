@@ -115,9 +115,9 @@ export const resolveModel = (requested: string | undefined) =>
 /**
  * `resolveModel` for the coding agent (the session and `ask --agent`), which needs tool
  * calling: a model whose `supported_parameters` lack `tools` is UnknownModel (exit 2) with the
- * reason, the default model included. When the models list is unavailable, or doesn't have the
- * model (the default is trusted), the model is used as resolved. `fix` ends the message: what
- * to change to pick another.
+ * reason, the default model included. When the models list is unavailable (logged as a
+ * warning), or doesn't have the model (the default is trusted), the model is used as resolved.
+ * `fix` ends the message: what to change to pick another.
  */
 export const resolveToolModel = (
   requested: string | undefined,
@@ -126,7 +126,15 @@ export const resolveToolModel = (
   Effect.gen(function* () {
     const modelId = yield* resolveModel(requested);
     const models = yield* (yield* OpenRouterModels).list.pipe(
-      Effect.catchTag("UpstreamUnavailable", () => Effect.succeed([])),
+      Effect.catchTag("UpstreamUnavailable", (error) =>
+        Effect.as(
+          Effect.logWarning(
+            `Models list unavailable; can't check that ${modelId} supports tool calling`,
+            error.message,
+          ),
+          [],
+        ),
+      ),
     );
     const base = modelId.split(":", 1)[0];
     const model = models.find((m) => m.id === modelId) ?? models.find((m) => m.id === base);

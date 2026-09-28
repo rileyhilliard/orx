@@ -1,11 +1,10 @@
 import { Effect, Fiber, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { Tool } from "effect/unstable/ai";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import picomatch from "picomatch";
 import { GrepInput, type GrepOutputMode, ToolFailure } from "~/schemas";
 import { mtimeOf } from "../services/file-state";
 import { isSecretPath, Workspace } from "../services/workspace";
-import { newestFirst, type WalkEntry, walkFiles } from "./glob";
+import { compileGlob, newestFirst, type WalkEntry, walkFiles } from "./glob";
 import {
   BINARY_SNIFF_BYTES,
   GREP_DEFAULT_HEAD_LIMIT,
@@ -67,6 +66,8 @@ const makeCollector = (mode: GrepOutputMode, limit: number) => {
     counts,
     lines,
     full,
+    /** Why some files weren't searched (rg's first error line), when it said. */
+    unsearched: undefined as string | undefined,
     /** Secret-shaped files in scope whose contents weren't searched. */
     secretsSkipped: () => secretsSkipped,
     skipSecrets: (n: number) => {
@@ -109,7 +110,12 @@ const ripgrep = (root: string, target: string, input: GrepInput, collector: Coll
           Effect.map(
             (out) => out.split("\n").filter((file) => file !== "" && isSecretPath(file)).length,
           ),
-          Effect.orElseSucceed(() => 0),
+          Effect.catch((error) =>
+            Effect.as(
+              Effect.logWarning("Couldn't count the secret-shaped files grep skipped", error),
+              0,
+            ),
+          ),
         ),
     );
     // Later globs win in rg, so the exclusions come after the caller's glob.
@@ -135,10 +141,12 @@ const ripgrep = (root: string, target: string, input: GrepInput, collector: Coll
     collector.skipSecrets(yield* Fiber.join(listed));
     // Stopped early: closing the scope kills rg.
     if (collector.full()) return;
-    // rg exits 1 for no matches and 2 for an error (a bad regex, an unreadable file).
-    if ((yield* handle.exitCode) === 2 && collector.counts.size === 0) {
-      const message = yield* Effect.orElseSucceed(Fiber.join(stderr), () => "");
-      return yield* failed(message.trim() || "rg exited with an error");
+    // rg exits 1 for no matches and 2 for an error (a bad regex, an unreadable file). With
+    // matches, the error still says some files weren't searched.
+    if ((yield* handle.exitCode) === 2) {
+      const message = (yield* Effect.orElseSucceed(Fiber.join(stderr), () => "")).trim();
+      if (collector.counts.size === 0) return yield* failed(message || "rg exited with an error");
+      collector.unsearched = message.split("\n", 1)[0] || "rg exited with an error";
     }
   }).pipe(
     Effect.scoped,
@@ -165,7 +173,7 @@ const jsGrep = (root: string, target: string, input: GrepInput, collector: Colle
     const matchesGlob =
       input.glob === undefined
         ? () => true
-        : picomatch(input.glob, { dot: true, basename: !input.glob.includes("/") });
+        : yield* compileGlob(input.glob, { dot: true, basename: !input.glob.includes("/") });
     for (const file of files) {
       if (!matchesGlob(path.relative(target, file.path) || path.basename(file.path))) continue;
       // A symlink's name can hide what it points at (notes.txt -> .env).
@@ -211,19 +219,22 @@ export const grepFiles = (input: GrepInput, useRipgrep: boolean) =>
     else yield* (useRipgrep ? ripgrep : jsGrep)(workspace.root, target, input, collector);
 
     const skipped = collector.secretsSkipped();
-    const secretNote =
-      skipped === 0
+    const notes =
+      (skipped === 0
         ? ""
-        : `\n(${skipped} secret-shaped ${skipped === 1 ? "file" : "files"} (.env*, *.pem, *.key, id_*) not searched; read one by path if you need it)`;
-    if (collector.counts.size === 0) return `No matches for ${input.pattern}${secretNote}`;
+        : `\n(${skipped} secret-shaped ${skipped === 1 ? "file" : "files"} (.env*, *.pem, *.key, id_*) not searched; read one by path if you need it)`) +
+      (collector.unsearched === undefined
+        ? ""
+        : `\n(some files couldn't be searched: ${collector.unsearched})`);
+    if (collector.counts.size === 0) return `No matches for ${input.pattern}${notes}`;
     if (mode === "content") {
       const body = collector.lines
         .slice(0, limit)
         .map(({ file, line, text }) => `${shown(file)}:${line}:${cut(text)}`)
         .join("\n");
       return collector.full()
-        ? `${body}\n(showing the first ${limit} matching lines; narrow the search or raise head_limit)${secretNote}`
-        : `${body}${secretNote}`;
+        ? `${body}\n(showing the first ${limit} matching lines; narrow the search or raise head_limit)${notes}`
+        : `${body}${notes}`;
     }
     const files = [...collector.counts.keys()];
     if (mode === "count") files.sort((a, b) => a.localeCompare(b));
@@ -244,6 +255,6 @@ export const grepFiles = (input: GrepInput, useRipgrep: boolean) =>
       )
       .join("\n");
     return files.length > limit
-      ? `${body}\n(showing ${limit} of ${files.length} files; narrow the search or raise head_limit)${secretNote}`
-      : `${body}${secretNote}`;
+      ? `${body}\n(showing ${limit} of ${files.length} files; narrow the search or raise head_limit)${notes}`
+      : `${body}${notes}`;
   });

@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -10,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Logger, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GrepInput } from "~/schemas";
 import { FileState } from "~/services/file-state";
@@ -109,6 +110,19 @@ describe("read", () => {
     );
   });
 
+  it("says why a file can't be read and whether retrying can help", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "locked.txt"), "x\n");
+    chmodSync(join(root, "locked.txt"), 0o000);
+    try {
+      expect((await run(root, readFile({ path: "locked.txt" }))).failure).toBe(
+        "locked.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "locked.txt"), 0o644);
+    }
+  });
+
   it("fails for a missing file, a directory, a secret-shaped path, and a path outside", async () => {
     const root = tempDir();
     mkdirSync(join(root, "src"));
@@ -174,6 +188,14 @@ describe("glob", () => {
     expect(result[0]).toBe(`f${total - 1}.ts`);
     expect(result.at(-1)).toBe(
       `(showing ${GLOB_MAX_RESULTS} of ${total} matches; narrow the pattern or path)`,
+    );
+  });
+
+  it("fails with a message, not a defect, for a pattern picomatch rejects", async () => {
+    const root = tempDir();
+    expect((await run(root, globFiles({ pattern: "" }))).failure).toMatch(/^invalid glob: /);
+    expect((await run(root, grepFiles({ pattern: "x", glob: "" }, false))).failure).toMatch(
+      /^invalid glob: /,
     );
   });
 
@@ -312,6 +334,21 @@ describe("grep with rg", () => {
     vi.unstubAllEnvs();
   });
 
+  it.skipIf(!rgInstalled)("keeps its matches and says which files it couldn't search", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "a.txt"), "needle\n");
+    writeFileSync(join(root, "locked.txt"), "needle\n");
+    chmodSync(join(root, "locked.txt"), 0o000);
+    try {
+      const result = await run(root, grepFiles({ pattern: "needle" }, true));
+      expect(result.value).toMatch(
+        /^a\.txt\n\(some files couldn't be searched: .*locked\.txt.*[Pp]ermission denied.*\)$/,
+      );
+    } finally {
+      chmodSync(join(root, "locked.txt"), 0o644);
+    }
+  });
+
   it.skipIf(!rgInstalled)("ignores RIPGREP_CONFIG_PATH, which could turn on --follow", async () => {
     const outside = tempDir();
     writeFileSync(join(outside, "leak.txt"), "needle outside\n");
@@ -354,6 +391,81 @@ describe("AgentTools", () => {
       },
       { isFailure: false, encodedResult: "     1\thello" },
     ]);
+  });
+
+  const handleAll = (
+    root: string,
+    calls: ReadonlyArray<readonly [string, Record<string, unknown>]>,
+    workspace: Layer.Layer<Workspace, never, NodeServices.NodeServices> = Workspace.layerTest(root),
+  ) => {
+    const logs: Array<{ level: string; message: unknown }> = [];
+    const services = Layer.mergeAll(
+      workspace,
+      FileState.layer,
+      Permissions.layerHeadless("default"),
+    ).pipe(Layer.provideMerge(NodeServices.layer));
+    return Effect.runPromise(
+      Effect.gen(function* () {
+        const toolkit = yield* AgentTools;
+        const results = [];
+        for (const [name, params] of calls) {
+          // The table names tools dynamically; the handler decodes the params either way.
+          const stream = yield* toolkit.handle(name as "read", params as never);
+          results.push(...(yield* Stream.runCollect(stream)));
+        }
+        return results.map(({ isFailure, encodedResult }) => ({ isFailure, encodedResult }));
+      }).pipe(
+        Effect.provide(AgentToolsLive),
+        Effect.provide(services),
+        Effect.provide(
+          Logger.layer([
+            Logger.make(({ logLevel, message }) => {
+              logs.push({ level: logLevel, message });
+            }),
+          ]),
+        ),
+      ),
+    ).then((results) => ({ results, logs }));
+  };
+
+  it("returns an empty glob or grep pattern to the model instead of failing the turn", async () => {
+    const root = tempDir();
+    const { results } = await handleAll(root, [
+      ["glob", { pattern: "" }],
+      ["grep", { pattern: "" }],
+      ["grep", { pattern: "x", glob: "" }],
+    ]);
+    expect(results.map((r) => r.isFailure)).toEqual([true, true, true]);
+    for (const { encodedResult } of results) {
+      expect(JSON.stringify(encodedResult)).toMatch(/must not be empty/);
+    }
+  });
+
+  it("logs a tool's defect once and returns a failure the model can act on", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "a.txt"), "hello\n");
+    const broken = Layer.effect(
+      Workspace,
+      Effect.map(Workspace, (workspace) => ({
+        ...workspace,
+        display: (): string => {
+          throw new Error("boom");
+        },
+      })),
+    ).pipe(Layer.provide(Workspace.layerTest(root)));
+    const { results, logs } = await handleAll(root, [["read", { path: "a.txt" }]], broken);
+    expect(results).toEqual([
+      {
+        isFailure: true,
+        encodedResult: {
+          _tag: "ToolFailure",
+          message: "read failed unexpectedly; try a different approach",
+        },
+      },
+    ]);
+    const errors = logs.filter((log) => log.level === "Error");
+    expect(errors).toHaveLength(1);
+    expect(JSON.stringify(errors[0]?.message)).toContain("read");
   });
 
   it("offers the file tools, bash, and currentTime", () => {

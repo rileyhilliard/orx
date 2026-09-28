@@ -61,6 +61,12 @@ const optionalNullable = <S extends Schema.Top>(schema: S) =>
     ),
   );
 
+/** A string that must not be empty; `what` names it in the message the model reads. */
+const nonEmpty = (description: string, what: string) =>
+  Schema.String.annotate({ description }).check(
+    Schema.isNonEmpty({ message: `${what} must not be empty` }),
+  );
+
 /** A positive integer. The description goes on the number before the checks, so it reaches the JSON Schema. */
 const positiveInt = (description: string) =>
   Schema.Number.annotate({ description }).check(Schema.isInt(), Schema.isGreaterThan(0));
@@ -77,9 +83,10 @@ export type ReadInput = typeof ReadInput.Type;
 
 /** Input of the `glob` tool. */
 export const GlobInput = Schema.Struct({
-  pattern: Schema.String.annotate({
-    description: "A glob matched against paths relative to the search directory, e.g. src/**/*.ts",
-  }),
+  pattern: nonEmpty(
+    "A glob matched against paths relative to the search directory, e.g. src/**/*.ts",
+    "pattern",
+  ),
   path: optionalNullable(
     Schema.String.annotate({ description: "The directory to search (default: workspace root)" }),
   ),
@@ -91,15 +98,13 @@ export type GrepOutputMode = typeof GrepOutputMode.Type;
 
 /** Input of the `grep` tool. */
 export const GrepInput = Schema.Struct({
-  pattern: Schema.String.annotate({ description: "A regular expression (ripgrep syntax)" }),
+  pattern: nonEmpty("A regular expression (ripgrep syntax)", "pattern"),
   path: optionalNullable(
     Schema.String.annotate({
       description: "The file or directory to search (default: workspace root)",
     }),
   ),
-  glob: optionalNullable(
-    Schema.String.annotate({ description: "Only search files matching this glob, e.g. *.ts" }),
-  ),
+  glob: optionalNullable(nonEmpty("Only search files matching this glob, e.g. *.ts", "glob")),
   output_mode: optionalNullable(
     GrepOutputMode.annotate({
       description:

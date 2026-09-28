@@ -1,5 +1,7 @@
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -18,6 +20,7 @@ import { type PermissionMode, Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { makeOutputBuffer, runBash } from "~/tools/bash";
 import { editFile, replaceIn, stripLineNumbers } from "~/tools/edit";
+import { WRITE_MAX_DIFF_CHARS } from "~/tools/limits";
 import { readFile } from "~/tools/read";
 import { writeFile } from "~/tools/write";
 import { ndjson, runCli } from "./helpers/cli";
@@ -293,8 +296,22 @@ describe("write", () => {
         writeFile({ path: "a.txt", content: "new\n" }),
       ),
     );
-    expect(result.value).toBe("Overwrote a.txt (1 lines)");
+    // The summary line, then the diff (as edit returns it), so the TUI can show what changed.
+    expect(result.value).toBe(
+      "Overwrote a.txt (1 lines)\n--- a.txt\n+++ a.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+    );
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("new\n");
+  });
+
+  it("leaves out an overwrite's diff when it's too large to return", async () => {
+    const root = fileIn("a.txt", "old\n");
+    const content = "x".repeat(WRITE_MAX_DIFF_CHARS);
+    const result = await run(
+      root,
+      Effect.flatMap(readFile({ path: "a.txt" }), () => writeFile({ path: "a.txt", content })),
+    );
+    expect(result.value).toBe("Overwrote a.txt (1 lines; the diff is too large to show)");
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe(content);
   });
 
   it("refuses to overwrite a file that wasn't read or went stale", async () => {
@@ -347,6 +364,38 @@ describe("write", () => {
     expect(existsSync(join(outside, "new.txt"))).toBe(false);
   });
 
+  it("reports a directory it can't look into instead of treating the file as new", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, "locked"));
+    chmodSync(join(root, "locked"), 0o000);
+    try {
+      // Headless default mode would deny a create; the stat failure comes first.
+      const result = await run(root, writeFile({ path: "locked/x.txt", content: "x" }), "default");
+      expect(result.failure).toBe(
+        "locked/x.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "locked"), 0o755);
+    }
+  });
+
+  it("doesn't call a file new-since-you-started when its directory became unreadable", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, "dir"));
+    try {
+      const result = await approveAfter(
+        root,
+        writeFile({ path: "dir/x.txt", content: "x\n" }),
+        () => chmodSync(join(root, "dir"), 0o000),
+      );
+      expect(result.failure).toBe(
+        "dir/x.txt: PermissionDenied; the user running orx can't access it, so retrying won't help",
+      );
+    } finally {
+      chmodSync(join(root, "dir"), 0o755);
+    }
+  });
+
   it("stays inside the workspace", async () => {
     const root = tempDir();
     expect((await run(root, writeFile({ path: "../x.txt", content: "x" }))).failure).toContain(
@@ -385,7 +434,9 @@ describe("bash", () => {
       "yolo",
     );
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(result.failure).toBe("before\n(timed out after 0.3 s; the command was killed)");
+    expect(result.failure).toBe(
+      "before\n(timed out after 0.3 s; the command was killed. Pass a larger timeout_ms (max 600000), or avoid starting servers or background processes that keep output open)",
+    );
   });
 
   it("runs with orx's secrets removed and git and pagers made non-interactive", async () => {
