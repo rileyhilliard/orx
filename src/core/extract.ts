@@ -1,3 +1,4 @@
+import { OpenRouterLanguageModel } from "@effect/ai-openrouter";
 import { Duration, Effect, Schedule, Schema } from "effect";
 import { AiError, LanguageModel } from "effect/unstable/ai";
 import { Contact, type Usage } from "~/schemas";
@@ -9,11 +10,27 @@ import { formatIssue } from "./input";
 import { timedOut, toUpstreamError } from "./upstream";
 
 export const EXTRACT_TIMEOUT = Duration.seconds(30);
-/** Retries transient upstream failures only; a bad model output isn't retried. */
+/** A rate limit asking for a longer wait than this isn't retried: the user gets it now. */
+export const EXTRACT_MAX_RETRY_AFTER = Duration.seconds(5);
+
+/** How long a RateLimitError asks callers to wait, when it says. */
+const retryAfterOf = (error: unknown): Duration.Duration | undefined =>
+  AiError.isAiError(error) && error.reason._tag === "RateLimitError"
+    ? error.reason.retryAfter
+    : undefined;
+
+/**
+ * Two retries, jittered exponential from 500ms, each at least the Retry-After OpenRouter sent
+ * with a 429.
+ */
 export const extractRetrySchedule = Schedule.max([
   Schedule.exponential(Duration.millis(500)).pipe(Schedule.jittered),
   Schedule.recurs(2),
-]);
+]).pipe(
+  Schedule.modifyDelay(({ input, duration }) =>
+    Effect.succeed(Duration.max(duration, retryAfterOf(input) ?? Duration.zero)),
+  ),
+);
 
 export interface ExtractResult {
   readonly contact: Contact;
@@ -25,8 +42,23 @@ export interface ExtractResult {
 const isOutputError = (error: AiError.AiError) =>
   error.reason._tag === "StructuredOutputError" || error.reason._tag === "InvalidOutputError";
 
+/** Transient upstream failures only; a bad model output or a long Retry-After isn't retried. */
+const shouldRetry = (error: AiError.AiError | UpstreamUnavailable) => {
+  if (!AiError.isAiError(error)) return error.retryable;
+  const retryAfter = retryAfterOf(error);
+  return (
+    !isOutputError(error) &&
+    toUpstreamError(error).retryable &&
+    (retryAfter === undefined || Duration.isLessThanOrEqualTo(retryAfter, EXTRACT_MAX_RETRY_AFTER))
+  );
+};
+
+const notAContact = () =>
+  new InvalidModelOutput({ message: "The model returned output that isn't a contact." });
+
 /**
- * Structured-output example: pull contact details out of free text. The model's output is a
+ * Structured-output example: pull contact details out of free text, with a strict JSON schema
+ * (https://openrouter.ai/docs/guides/features/structured-outputs). The model's output is a
  * trust boundary, so it's decoded again with the same schema that described it. `modelId`
  * defaults to OPENROUTER_MODEL; evals pass others.
  */
@@ -47,24 +79,20 @@ export const extractContact = (text: string, modelId?: string) =>
       objectName: "Contact",
     }).pipe(
       Effect.provideService(LanguageModel.LanguageModel, model),
+      OpenRouterLanguageModel.withConfigOverride({ strictJsonSchema: true }),
       Effect.tapError((error) => Effect.logWarning("Extract model call failed", String(error))),
-      Effect.mapError((error): UpstreamUnavailable | InvalidModelOutput =>
-        AiError.isAiError(error) && isOutputError(error)
-          ? new InvalidModelOutput({ message: "The model returned output that isn't a contact." })
-          : AiError.isAiError(error)
-            ? toUpstreamError(error)
-            : new InvalidModelOutput({
-                message: "The model returned output that isn't a contact.",
-              }),
-      ),
       Effect.timeoutOrElse({
         duration: EXTRACT_TIMEOUT,
         orElse: () => Effect.fail(timedOut("The model call")),
       }),
-      Effect.retry({
-        schedule: extractRetrySchedule,
-        while: (error) => error._tag === "UpstreamUnavailable" && error.retryable,
-      }),
+      Effect.retry({ schedule: extractRetrySchedule, while: shouldRetry }),
+      Effect.mapError((error): UpstreamUnavailable | InvalidModelOutput =>
+        !AiError.isAiError(error)
+          ? error
+          : isOutputError(error)
+            ? notAContact()
+            : toUpstreamError(error),
+      ),
     );
     const response = yield* generate;
     const contact = yield* Schema.decodeUnknownEffect(Contact)(response.value).pipe(

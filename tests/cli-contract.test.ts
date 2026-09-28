@@ -371,6 +371,35 @@ describe("orx extract", () => {
     });
   });
 
+  it("asks for strict structured output (https://openrouter.ai/docs/guides/features/structured-outputs)", async () => {
+    await runCli(["extract", "Ada"], withStub());
+    expect(stub.chatRequests.at(-1)).toMatchObject({
+      response_format: { type: "json_schema", json_schema: { name: "Contact", strict: true } },
+    });
+  });
+
+  it("waits out a short Retry-After on a 429, and gives up on a long one", async () => {
+    const contact = { name: "Ada", email: null, phone: null, company: null };
+    stub.completion = { ...stub.completion, text: JSON.stringify(contact) };
+    try {
+      stub.failCompletions = { status: 429, headers: { "retry-after": "1" }, times: 1 };
+      const started = Date.now();
+      const waited = await runCli(["extract", "Ada"], withStub());
+      expect(waited.exitCode).toBe(0);
+      // The backoff alone is about 500 ms; Retry-After asks for a second.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+
+      stub.chatRequests.length = 0;
+      stub.failCompletions = { status: 429, headers: { "retry-after": "60" } };
+      const gaveUp = await runCli(["extract", "Ada"], withStub());
+      expect(gaveUp.exitCode).toBe(4);
+      expect(stub.chatRequests).toHaveLength(1);
+    } finally {
+      stub.failCompletions = undefined;
+      stub.completion = { ...stub.completion, text: "Hello from the stub." };
+    }
+  });
+
   it("exits 5 when the model's output isn't a contact", async () => {
     stub.completion = { ...stub.completion, text: JSON.stringify({ nope: true }) };
     const run = await runCli(["extract", "Ada"], withStub());
