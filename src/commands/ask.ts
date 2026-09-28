@@ -46,8 +46,11 @@ const permissionDenied = (event: Extract<TurnEvent, { type: "tool-result" }>) =>
     ),
   );
 
-/** A failed tool-result's message, on one line, for the text-mode note. */
-const failureLine = (output: unknown): string => {
+/**
+ * A failed tool-result's message, on one line, for the text-mode note: the first line, or for
+ * bash the last, since its message is the command's output with the reason under it.
+ */
+const failureLine = (name: string, output: unknown): string => {
   const message = Option.match(decodeToolFailure(output), {
     onSome: (failure) => failure.message,
     onNone: () =>
@@ -60,7 +63,8 @@ const failureLine = (output: unknown): string => {
           ? output.message
           : JSON.stringify(output),
   });
-  return message.split("\n", 1)[0] ?? "";
+  const lines = message.split("\n").filter((line) => line.trim() !== "");
+  return (name === "bash" ? lines.at(-1) : lines[0]) ?? "";
 };
 
 /**
@@ -131,7 +135,9 @@ export const ask = Command.make(
             return out.note(noteLine(`→ ${event.name}(${JSON.stringify(event.input)})`, out.color));
           case "tool-result":
             return event.isFailure
-              ? out.note(noteLine(`✗ ${event.name}: ${failureLine(event.output)}`, out.color))
+              ? out.note(
+                  noteLine(`✗ ${event.name}: ${failureLine(event.name, event.output)}`, out.color),
+                )
               : Effect.void;
           case "note":
             return out.note(noteLine(event.message, out.color));

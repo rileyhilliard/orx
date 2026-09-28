@@ -115,6 +115,22 @@ describe("orx ask --agent", () => {
     expect(run.stderr).toContain("✗ edit: Edit math.js: denied. edit needs an interactive session");
   });
 
+  it("notes why a bash command failed, not the output it printed first", async () => {
+    stub.toolCalls = [
+      {
+        name: "bash",
+        arguments: JSON.stringify({ command: "echo started; sleep 5", timeout_ms: 300 }),
+      },
+    ];
+    const run = await runCli(
+      ["ask", "run it", "--agent", "--cwd", workspace(), "--permission-mode", "yolo"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    expect(run.exitCode).toBe(0);
+    expect(run.stderr).toContain("✗ bash: (timed out after 0.3 s");
+    expect(run.stderr).not.toContain("✗ bash: started");
+  });
+
   it("refuses --cwd and --permission-mode without --agent", async () => {
     const env = { OPENROUTER_BASE_URL: stub.baseUrl };
     const cwd = await runCli(["ask", "hi", "--cwd", workspace()], { env });
