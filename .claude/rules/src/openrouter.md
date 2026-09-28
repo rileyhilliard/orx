@@ -22,7 +22,7 @@ paths:
 
 There is no `usage: { include: true }` equivalent in the Effect provider; cost arrives in each step's finish metadata (`metadata.openrouter.usage.cost`). Tests point the real provider at the stub OpenRouter and assert on the request body it received (`stub.chatRequests`, as in `tests/config.test.ts`). Give each new setting such a case, so a renamed option shows up as a failing test, not a silent no-op.
 
-The client (`OpenRouterClient.make({ apiKey, apiUrl, siteTitle })`) is built once per process, on first use, because it needs the key and `--help` doesn't. No key is `NotConfigured` (exit 3) from `Llm.languageModel`, not from building the layer.
+The client (`OpenRouterClient.make({ apiKey, apiUrl, ...attribution })`, with the app attribution headers from https://openrouter.ai/docs/app-attribution: `HTTP-Referer`, `X-OpenRouter-Title`, `X-OpenRouter-Categories: cli-agent`) is built once per process, on first use, because it needs the key and `--help` doesn't. No key is `NotConfigured` (exit 3) from `Llm.languageModel`, not from building the layer.
 
 ## Models list
 

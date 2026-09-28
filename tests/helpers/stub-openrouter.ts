@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +75,8 @@ export interface StubOpenRouter {
   readonly baseUrl: string;
   /** Parsed JSON bodies of every POST /chat/completions. */
   readonly chatRequests: unknown[];
+  /** Request headers of every POST /chat/completions (lower-cased names), in the same order. */
+  readonly chatHeaders: IncomingHttpHeaders[];
   /** Count of GET /models requests. */
   modelsRequests: number;
   /** Fail the next N GET /models requests with a 500. */
@@ -146,6 +153,7 @@ const readBody = (req: IncomingMessage) =>
 export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => {
   const state = {
     chatRequests: [] as unknown[],
+    chatHeaders: [] as IncomingHttpHeaders[],
     modelsRequests: 0,
     failModels: 0,
     failCompletions: undefined as CompletionFailure | undefined,
@@ -206,6 +214,7 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     if (req.method === "POST" && url.pathname === "/api/v1/chat/completions") {
       const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
       state.chatRequests.push(body);
+      state.chatHeaders.push(req.headers);
       const failure = state.failCompletions;
       if (failure !== undefined) {
         if (failure.times !== undefined) {
@@ -355,6 +364,9 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     baseUrl: `http://127.0.0.1:${listening}/api/v1`,
     get chatRequests() {
       return state.chatRequests;
+    },
+    get chatHeaders() {
+      return state.chatHeaders;
     },
     get modelsRequests() {
       return state.modelsRequests;

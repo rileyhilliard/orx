@@ -140,6 +140,16 @@ describe("orx ask", () => {
     expect(run.stderr).toMatch(/chat [0-9a-f-]{36}/);
   });
 
+  it("attributes its requests to orx (https://openrouter.ai/docs/app-attribution)", async () => {
+    const run = await runCli(["ask", "hi"], withStub());
+    expect(run.exitCode).toBe(0);
+    expect(stub.chatHeaders.at(-1)).toMatchObject({
+      "http-referer": "https://github.com/rileyhilliard/orx",
+      "x-openrouter-title": "orx",
+      "x-openrouter-categories": "cli-agent",
+    });
+  });
+
   it("reads the prompt from piped stdin", async () => {
     stub.chatRequests.length = 0;
     const run = await runCli(["ask"], { ...withStub(), stdin: "from a pipe\n" });

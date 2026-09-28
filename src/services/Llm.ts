@@ -1,8 +1,8 @@
 import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
 import { Context, Effect, Layer, Option } from "effect";
 import type { LanguageModel } from "effect/unstable/ai";
-import type { HttpClient } from "effect/unstable/http";
-import { AppConfig, type AppConfigShape } from "../config";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { AppConfig, type AppConfigShape, DEFAULT_RELEASES_REPO } from "../config";
 import { type InvalidConfig, NotConfigured } from "../errors";
 
 export interface LlmShape {
@@ -43,6 +43,21 @@ export const openRouterSettings = (config: AppConfigShape) => ({
   max_tokens: config.limits.maxOutputTokens,
 });
 
+/**
+ * App attribution (https://openrouter.ai/docs/app-attribution). The provider sets HTTP-Referer
+ * and the legacy X-Title; the current title header and the category are added here.
+ */
+const attribution = {
+  siteReferrer: `https://github.com/${DEFAULT_RELEASES_REPO}`,
+  siteTitle: "orx",
+  transformClient: HttpClient.mapRequest(
+    HttpClientRequest.setHeaders({
+      "X-OpenRouter-Title": "orx",
+      "X-OpenRouter-Categories": "cli-agent",
+    }),
+  ),
+};
+
 const make = Effect.gen(function* () {
   const { load } = yield* AppConfig;
   const http = yield* Effect.context<HttpClient.HttpClient>();
@@ -59,7 +74,7 @@ const make = Effect.gen(function* () {
       return yield* OpenRouterClient.make({
         apiKey: config.apiKey.value,
         apiUrl: config.baseUrl,
-        siteTitle: "orx",
+        ...attribution,
       }).pipe(Effect.provideContext(http));
     }),
   );
