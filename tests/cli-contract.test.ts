@@ -126,7 +126,7 @@ describe("choosing a model", () => {
     const run = await runCli(["ask", "hi", "-m", "acme/no-tools", "--json"], withStub());
     stub.models = models;
     expect(run.exitCode).toBe(0);
-    expect(ndjson(run.stdout).filter((e) => e.type === "text").length).toBeGreaterThan(0);
+    expect(askEvents(run.stdout).filter((e) => e.type === "text").length).toBeGreaterThan(0);
     const request = stub.chatRequests.at(-1) as { model: string; tools?: unknown };
     expect(request.model).toBe("acme/no-tools");
     expect(request).not.toHaveProperty("tools");
