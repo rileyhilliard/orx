@@ -295,7 +295,10 @@ describe("write", () => {
         writeFile({ path: "a.txt", content: "new\n" }),
       ),
     );
-    expect(result.value).toBe("Overwrote a.txt (1 lines)");
+    // The summary line, then the diff (as edit returns it), so the TUI can show what changed.
+    expect(result.value).toBe(
+      "Overwrote a.txt (1 lines)\n--- a.txt\n+++ a.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+    );
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("new\n");
   });
 

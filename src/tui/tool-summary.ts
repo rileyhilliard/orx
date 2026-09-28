@@ -62,8 +62,11 @@ export const summarizeTool = (
       const exit = /\(exit code (-?\d+)\)\s*$/.exec(text)?.[1];
       return { summary: exit === undefined ? head : `${head} · exit ${exit}` };
     }
-    case "write":
-      return { summary: text.split("\n")[0] ?? head };
+    case "write": {
+      // A summary line, then (for an overwrite) the diff.
+      const [summary = head, ...diff] = text.split("\n");
+      return diff.length > 0 ? { summary, diff: diff.join("\n") } : { summary };
+    }
     case "edit":
       return { summary: head, diff: text };
     default:

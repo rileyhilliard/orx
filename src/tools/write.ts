@@ -30,7 +30,8 @@ const BOM = "\uFEFF";
 const isNotFound = (error: PlatformError.PlatformError) => error.reason._tag === "NotFound";
 
 /**
- * The `write` tool. Holds the file's lock from the freshness check to recording the new
+ * The `write` tool. Returns a one-line summary, and for an overwrite the diff under it. Holds
+ * the file's lock from the freshness check to recording the new
  * contents, asks Permissions with the diff, and checks again after the answer (the user may
  * have edited or created the file, or swapped in a symlink, while the panel was open). An
  * existing file's byte order mark is kept.
@@ -64,10 +65,11 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
         yield* ensureFresh;
         const before = exists ? yield* readUtf8(path, shown) : "";
         const after = before.startsWith(BOM) && !content.startsWith(BOM) ? BOM + content : content;
+        const diff = unifiedDiff(shown, before, after);
         yield* permit({
           tool: "write",
           summary: `${exists ? "Overwrite" : "Create"} ${shown}`,
-          diff: unifiedDiff(shown, before, after),
+          diff,
           path: shown,
         });
         yield* ensureResolvesTo(input, path, shown);
@@ -89,7 +91,11 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
         yield* fileState.record(path, bytes).pipe(Effect.mapError(failedWith));
         const lines =
           content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
-        return `${exists ? "Overwrote" : "Created"} ${shown} (${lines} lines)`;
+        // An overwrite returns its diff, as edit does; a new file's diff would only repeat
+        // the content the model just sent.
+        return exists
+          ? `Overwrote ${shown} (${lines} lines)\n${diff}`
+          : `Created ${shown} (${lines} lines)`;
       }),
     );
   });
