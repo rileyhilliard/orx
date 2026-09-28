@@ -1,3 +1,4 @@
+import { DiffLines } from "./approval-panel";
 import { theme } from "./theme";
 import type { UiMessage } from "./types";
 
@@ -23,9 +24,14 @@ export const MessageList = ({
           <>
             {message.tools.map((tool, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
-              <text key={i} fg={tool.status === "error" ? theme.error : theme.tool}>
-                {`→ ${tool.name}(${tool.input})${tool.status ? ` · ${tool.status}` : ""}`}
-              </text>
+              <box key={i} flexDirection="column">
+                <text fg={tool.status === "error" ? theme.error : theme.tool}>
+                  {tool.summary
+                    ? `→ ${tool.summary}`
+                    : `→ ${tool.name}(${tool.input})${tool.status ? ` · ${tool.status}` : ""}`}
+                </text>
+                {tool.diff ? <DiffLines diff={tool.diff} /> : null}
+              </box>
             ))}
             <text fg={theme.text}>
               {message.text || (streaming && index === messages.length - 1 ? "…" : "")}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { App } from "~/tui/app";
-import type { ChatBridge, UiEvent } from "~/tui/types";
+import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMode } from "~/tui/types";
 import { type RenderSetup, render as renderTui, waitForScreen } from "./render";
 
 let setup: RenderSetup | undefined;
@@ -11,7 +11,14 @@ afterEach(() => {
 
 /** A bridge that replies with `events` and records what the app asked for. */
 const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridge> = {}) => {
-  const calls = { sent: [] as Array<[string, string]>, quit: 0, exported: 0, newChats: 0 };
+  const calls = {
+    sent: [] as Array<[string, string]>,
+    quit: 0,
+    exported: 0,
+    newChats: 0,
+    answers: [] as Array<[string, UiDecision]>,
+    modes: [] as Array<UiMode>,
+  };
   const bridge: ChatBridge = {
     chatId: "0f0e0d0c-0000-4000-8000-000000000000",
     initialModel: "openai/gpt-test",
@@ -50,6 +57,13 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
       calls.newChats += 1;
       return "1a2b3c4d-0000-4000-8000-000000000000";
     },
+    answer: async (id, decision) => {
+      calls.answers.push([id, decision]);
+    },
+    setMode: async (mode) => {
+      calls.modes.push(mode);
+    },
+    watchMode: () => () => {},
     listFiles: async () => ["README.md", "docs/", "docs/readme-notes.txt", "src/app.tsx"],
     attachFiles: async (text) =>
       text.includes("@README.md") ? `${text}\n\n<file path="README.md">…</file>` : text,
@@ -304,5 +318,118 @@ describe("the @ file picker", () => {
       ['look at @README.md please\n\n<file path="README.md">…</file>', "openai/gpt-test"],
     ]);
     expect(frame).not.toContain("<file");
+  });
+});
+
+describe("the approval panel", () => {
+  const screen = (setup: RenderSetup, predicate: (frame: string) => boolean) =>
+    waitForScreen(setup, predicate, 2000);
+
+  const bashApproval: UiApproval = {
+    id: "approval-1",
+    tool: "bash",
+    summary: "bun test",
+    canAlways: true,
+  };
+
+  /** A turn that asks for `request`, waits for the answer, then finishes with `after`. */
+  const askingBridge = (request: UiApproval, after: ReadonlyArray<UiEvent> = []) => {
+    let answered: () => void = () => {};
+    const waiting = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
+    const fake = fakeBridge([], {
+      send: (text, model) => {
+        fake.calls.sent.push([text, model]);
+        return (async function* () {
+          yield { type: "approval", request } satisfies UiEvent;
+          await waiting;
+          for (const event of after) yield event;
+        })();
+      },
+      answer: async (id, decision) => {
+        fake.calls.answers.push([id, decision]);
+        answered();
+      },
+    });
+    return fake;
+  };
+
+  it("shows the command with y / a / n in the footer, and y allows it", async () => {
+    const { bridge, calls } = askingBridge(bashApproval, [
+      { type: "text", delta: "tests pass" },
+      { type: "done", usage: "u1" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("run the tests");
+    setup.mockInput.pressEnter();
+    const panel = await screen(setup, (f) => f.includes("Run  bun test"));
+    expect(panel).toContain("y allow · a always · n deny · Esc stop");
+    await setup.mockInput.typeText("y");
+    const done = await screen(setup, (f) => f.includes("tests pass"));
+    expect(calls.answers).toEqual([["approval-1", "yes"]]);
+    expect(done).not.toContain("Run  bun test");
+    // The y went to the panel, not the composer.
+    expect(done).not.toContain("│ y");
+  });
+
+  it("offers always only when allowed, and n takes an optional note", async () => {
+    const { bridge, calls } = askingBridge(
+      {
+        id: "approval-2",
+        tool: "edit",
+        summary: "Edit src/a.ts",
+        diff: "--- a/src/a.ts\n+++ b/src/a.ts\n-old\n+new",
+        canAlways: false,
+      },
+      [{ type: "done", usage: "u2" }],
+    );
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("edit it");
+    setup.mockInput.pressEnter();
+    const panel = await screen(setup, (f) => f.includes("Edit src/a.ts"));
+    expect(panel).toContain("+new");
+    expect(panel).toContain("y allow · n deny");
+    await setup.mockInput.typeText("a");
+    expect(calls.answers).toEqual([]);
+    await setup.mockInput.typeText("n");
+    await screen(setup, (f) => f.includes("Enter deny with this note"));
+    await setup.mockInput.typeText("use a flag");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("u2"));
+    expect(calls.answers).toEqual([["approval-2", { no: "use a flag" }]]);
+    expect(calls.sent).toHaveLength(1);
+  });
+
+  it("closes when the request is cancelled or the turn ends", async () => {
+    const { bridge } = fakeBridge([
+      { type: "approval", request: bashApproval },
+      { type: "approval-cancelled", id: "approval-1" },
+      { type: "text", delta: "stopped" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("stopped") && !f.includes("Replying"));
+    expect(frame).not.toContain("Run  bun test");
+    expect(frame).toContain("Enter send");
+  });
+
+  it("cycles the permission mode with Shift+Tab and follows the bridge's changes", async () => {
+    let push: (mode: UiMode) => void = () => {};
+    const { bridge, calls } = fakeBridge([], {
+      watchMode: (onMode) => {
+        push = onMode;
+        return () => {};
+      },
+    });
+    const setup = await render(bridge);
+    setup.mockInput.pressKey("\t", { shift: true });
+    await screen(setup, (f) => /acceptEdits\s*$/m.test(f));
+    setup.mockInput.pressKey("\t", { shift: true });
+    await screen(setup, (f) => /plan\s*$/m.test(f));
+    expect(calls.modes).toEqual(["acceptEdits", "plan"]);
+    push("yolo");
+    await screen(setup, (f) => /yolo\s*$/m.test(f));
   });
 });

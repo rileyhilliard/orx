@@ -78,10 +78,12 @@ const REMOVE = [
   "src/services/permissions.ts",
   "src/services/workspace.ts",
   "src/tools",
+  "src/tui/approval-panel.tsx",
   "src/tui/commands.ts",
   "src/tui/mentions.ts",
   "src/tui/message-list.tsx",
   "src/tui/model-picker.tsx",
+  "src/tui/tool-summary.ts",
   "tests/agent-approval.test.ts",
   "tests/agent-tools.test.ts",
   "tests/agent-write-tools.test.ts",
@@ -99,6 +101,7 @@ const REMOVE = [
   "tests/script-layer.test.ts",
   "tests/workspace.test.ts",
   "tests/slash.test.ts",
+  "tests/tool-summary.test.ts",
 ];
 
 /** The vanilla machinery itself, gone from the result. */

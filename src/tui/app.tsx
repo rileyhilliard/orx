@@ -1,13 +1,14 @@
 import type { InputRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import { useCallback, useRef, useState } from "react";
-import { BUILTINS, isBuiltin, isMode, KEYS, MODES, type Mode, parseSlash } from "./commands";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ApprovalPanel } from "./approval-panel";
+import { BUILTINS, isBuiltin, isMode, KEYS, MODES, parseSlash } from "./commands";
 import { insertMention, opensMentionPicker, rankPaths } from "./mentions";
 import { MessageList } from "./message-list";
 import { ModelPicker } from "./model-picker";
 import { Picker, type PickerItem, type PickerList } from "./picker";
 import { theme } from "./theme";
-import type { ChatBridge, UiEvent, UiMessage } from "./types";
+import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMessage, UiMode } from "./types";
 
 const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
   switch (event.type) {
@@ -19,9 +20,20 @@ const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
       return {
         ...reply,
         tools: reply.tools.map((call) =>
-          call.id === event.id ? { ...call, status: event.isFailure ? "error" : "ok" } : call,
+          call.id === event.id
+            ? {
+                ...call,
+                status: event.isFailure ? "error" : "ok",
+                ...(event.summary === undefined ? {} : { summary: event.summary }),
+                ...(event.diff === undefined ? {} : { diff: event.diff }),
+              }
+            : call,
         ),
       };
+    // The approval panel's, not the reply's (App handles them).
+    case "approval":
+    case "approval-cancelled":
+      return reply;
     case "note":
       return { ...reply, note: event.message };
     case "done":
@@ -58,7 +70,12 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   const [commandList, setCommandList] = useState(false);
   const [fileList, setFileList] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; lines: ReadonlyArray<string> }>();
-  const [mode, setMode] = useState<Mode>("default");
+  const [mode, setMode] = useState<UiMode>("default");
+  useEffect(() => bridge.watchMode(setMode), [bridge]);
+  const [approval, setApproval] = useState<UiApproval | undefined>(undefined);
+  // After `n` on an approval, the composer takes an optional note for the model.
+  const [noting, setNoting] = useState(false);
+  const draftBeforeNote = useRef("");
   const [chatId, setChatId] = useState(bridge.chatId);
   const current = useRef<AsyncIterator<UiEvent> | undefined>(undefined);
 
@@ -87,6 +104,13 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         current.current = it;
         for (let next = await it.next(); !next.done; next = await it.next()) {
           const event = next.value;
+          if (event.type === "approval") {
+            // The panel takes y / a / n; the composer must not (the prop alone doesn't blur it).
+            input.current?.blur();
+            setApproval(event.request);
+          } else if (event.type === "approval-cancelled") {
+            setApproval((open) => (open?.id === event.id ? undefined : open));
+          }
           setMessages((ms) => {
             const last = ms.at(-1);
             return last ? [...ms.slice(0, -1), applyEvent(last, event)] : ms;
@@ -102,6 +126,12 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       } finally {
         current.current = undefined;
         setStreaming(false);
+        setApproval(undefined);
+        setNoting((was) => {
+          if (was) setDraft(draftBeforeNote.current);
+          return false;
+        });
+        input.current?.focus();
       }
     },
     [bridge, model, streaming, setDraft],
@@ -138,7 +168,8 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
             lines: [`Unknown mode "${args}". Modes: ${MODES.join(", ")}.`],
           });
         }
-        return setMode(args);
+        setMode(args);
+        return bridge.setMode(args).catch(() => setStatus("Couldn't change the mode."));
       case "export":
         return bridge.exportMarkdown().then(setStatus, () => setStatus("Export failed."));
       case "quit":
@@ -146,8 +177,21 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     }
   };
 
+  /** Answers the open approval and gives the composer back. */
+  const decide = (decision: UiDecision) => {
+    if (!approval) return;
+    setApproval(undefined);
+    if (noting) {
+      setNoting(false);
+      setDraft(draftBeforeNote.current);
+    }
+    input.current?.focus();
+    bridge.answer(approval.id, decision).catch(() => setStatus("Couldn't answer the request."));
+  };
+
   /** Enter in the composer: a slash command, or a message. */
   const submit = (text: string) => {
+    if (approval && noting) return decide({ no: text });
     if (text.trim() === "/") return setCommandList(true);
     const slash = parseSlash(text);
     if (slash === undefined) return void send(text);
@@ -193,7 +237,25 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   }, [bridge]);
 
   useKeyboard((key) => {
-    if (key.ctrl && key.name === "c") {
+    if (approval && !noting && !key.ctrl && !key.meta) {
+      // The panel's keys, kept from the composer, which regains focus while this key is handled.
+      if (["y", "a", "n"].includes(key.name)) key.preventDefault();
+      if (key.name === "y") return decide("yes");
+      if (key.name === "a" && approval.canAlways) return decide("always");
+      if (key.name === "n") {
+        draftBeforeNote.current = input.current?.value ?? "";
+        setDraft("");
+        setNoting(true);
+        input.current?.focus();
+        return;
+      }
+    }
+    if (key.name === "tab" && key.shift) {
+      const next = MODES[(MODES.indexOf(mode as (typeof MODES)[number]) + 1) % MODES.length];
+      if (next === undefined) return;
+      setMode(next);
+      bridge.setMode(next).catch(() => setStatus("Couldn't change the mode."));
+    } else if (key.ctrl && key.name === "c") {
       stop().then(bridge.quit, bridge.quit);
     } else if (key.name === "escape") {
       if (picking || commandList || fileList) closeLists();
@@ -225,6 +287,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
           ))}
         </box>
       ) : null}
+      {approval ? <ApprovalPanel approval={approval} /> : null}
       <box
         border
         flexShrink={0}
@@ -232,9 +295,15 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         paddingLeft={1}
       >
         <input
-          focused={!picking && !commandList && !fileList}
+          focused={!picking && !commandList && !fileList && (!approval || noting)}
           ref={input}
-          placeholder={streaming ? "Replying… Esc stops" : "Message"}
+          placeholder={
+            noting
+              ? "Why not? Enter sends (a note is optional)"
+              : streaming
+                ? "Replying… Esc stops"
+                : "Message"
+          }
           onInput={(value) => {
             if (value === "/") setCommandList(true);
             else if (opensMentionPicker(value)) setFileList(true);
@@ -246,8 +315,12 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       </box>
       <box flexDirection="row" flexShrink={0} paddingLeft={1}>
         <text fg={theme.faint} wrapMode="none" flexShrink={1}>
-          {status ??
-            "Enter send · / commands · Esc stop · Ctrl+P model · Ctrl+E export · Ctrl+C quit"}
+          {approval
+            ? noting
+              ? "Enter deny with this note · Esc stop"
+              : `y allow · ${approval.canAlways ? "a always · " : ""}n deny · Esc stop`
+            : (status ??
+              "Enter send · @ files · / commands · Shift+Tab mode · Ctrl+P model · Ctrl+C quit")}
         </text>
         <box flexGrow={1} />
         {mode === "default" ? null : (

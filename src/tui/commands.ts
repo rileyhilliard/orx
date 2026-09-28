@@ -36,8 +36,11 @@ export const isBuiltin = (name: string): name is Builtin => BUILTINS.some((b) =>
 /** The keys, for /help. Keep in step with the footer and DESIGN.md. */
 export const KEYS = [
   ["Enter", "send"],
+  ["@", "attach a file"],
   ["/", "commands and skills"],
   ["Esc", "stop a reply, or close a list"],
+  ["Shift+Tab", "cycle the permission mode"],
+  ["y / a / n", "allow, always allow, or deny a tool call"],
   ["Ctrl+P", "pick a model"],
   ["Ctrl+E", "export as Markdown"],
   ["Ctrl+C", "quit"],

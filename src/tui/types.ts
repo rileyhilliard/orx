@@ -10,6 +10,10 @@ export interface UiToolCall {
   readonly input: string;
   /** Running until its result arrives; a saved call is ok or error. */
   readonly status?: "running" | "ok" | "error";
+  /** Once finished, one line saying what it did (`read src/x.ts · 120 lines`). */
+  readonly summary?: string;
+  /** The diff an edit applied. */
+  readonly diff?: string;
 }
 
 export interface UiMessage {
@@ -31,10 +35,35 @@ export interface UiError {
 export type UiEvent =
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "tool"; readonly call: UiToolCall }
-  | { readonly type: "tool-result"; readonly id: string; readonly isFailure: boolean }
+  | {
+      readonly type: "tool-result";
+      readonly id: string;
+      readonly isFailure: boolean;
+      readonly summary?: string;
+      readonly diff?: string;
+    }
+  | { readonly type: "approval"; readonly request: UiApproval }
+  | { readonly type: "approval-cancelled"; readonly id: string }
   | { readonly type: "note"; readonly message: string }
   | { readonly type: "done"; readonly usage: string }
   | { readonly type: "error"; readonly error: UiError };
+
+/** A tool call waiting for the user: answer it with `ChatBridge.answer`. */
+export interface UiApproval {
+  readonly id: string;
+  readonly tool: string;
+  /** The command for bash, or what a write or edit does ("Edit src/x.ts"). */
+  readonly summary: string;
+  /** The unified diff a write or edit would apply. */
+  readonly diff?: string;
+  /** Whether "always" is on offer. */
+  readonly canAlways: boolean;
+}
+
+export type UiDecision = "yes" | "always" | { readonly no: string };
+
+/** How much the agent may do without asking (Permissions). */
+export type UiMode = "default" | "acceptEdits" | "plan" | "yolo";
 
 export interface UiModel {
   readonly id: string;
@@ -77,6 +106,14 @@ export interface ChatBridge {
    * nothing to attach it resolves to `text`.
    */
   readonly attachFiles: (text: string) => Promise<string>;
+  /** Answers an approval request; an unknown id (already answered or cancelled) is ignored. */
+  readonly answer: (id: string, decision: UiDecision) => Promise<void>;
+  readonly setMode: (mode: UiMode) => Promise<void>;
+  /**
+   * Calls `onMode` with the permission mode now and on every change (an "always" answer to an
+   * edit switches it too). Returns an unsubscribe. Without a session, never calls it.
+   */
+  readonly watchMode: (onMode: (mode: UiMode) => void) => () => void;
   /** Starts a new, empty chat on the same model (`/clear`); resolves to its id. */
   readonly newChat: () => Promise<string>;
 }

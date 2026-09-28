@@ -28,6 +28,8 @@ Messages are separated by one blank row. A reply is its tool lines, then its tex
 
 The model picker and the command list share one overlay (`src/tui/picker.tsx`), inset from the edges, with a search input and a list (the command list shows each description under its name). It's the only bordered panel besides the composer.
 
+The `@` file list uses the same overlay. A tool call waiting for approval shows unbordered above the composer: the command (`Run  bun test`) or the change (`Edit src/x.ts`) in `tool`, then its diff (added lines `text`, the rest `muted`, cut at 20 lines with a `faint` count). While it's open the composer is unfocused and the footer shows `y allow · a always · n deny · Esc stop`; after `n` the composer takes an optional note. A finished agent tool call is one `tool` line saying what it did (`→ read src/x.ts · 120 lines`, `→ bash bun test · exit 1`), an edit's diff under it the same way.
+
 Slash command output (`/help`, an unknown command or mode) is a few unbordered lines between the messages and the composer, `muted` (or `error`), until the next message or Esc. A permission mode other than `default` shows right-aligned in the footer, `muted`.
 
 ## Keys
@@ -36,6 +38,9 @@ Slash command output (`/help`, an unknown command or mode) is a few unbordered l
 | --- | --- |
 | Enter | Send the message, or run a `/command` |
 | / | In an empty composer, open the command list (built-ins, custom commands, skills) |
+| @ | At the start of a word, open the file list; picking inserts `@path`, and on send the file is attached for the model |
+| y / a / n | With an approval open: allow, always allow (when offered), deny with an optional note |
+| Shift+Tab | Cycle the permission mode: default, acceptEdits, plan |
 | Esc | Stop the streaming reply (it's saved, marked interrupted), close a list, or dismiss the /help or error lines |
 | Ctrl+P | Open the model picker (not while a reply streams) |
 | Ctrl+E | Export the chat as Markdown into the current directory |
