@@ -1,12 +1,14 @@
 import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { Cause, Effect, FileSystem, Option, Stream } from "effect";
-import type { ChatMessage, StoredChat } from "~/schemas";
-import { loadChat, sendMessage, type TurnEvent } from "../core/chat";
+import { Cause, Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
+import { loadChat, newChat, sendMessage, type TurnEvent } from "../core/chat";
+import { expandCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
 import { listModels } from "../core/models";
+import { expandSkill, loadSlash } from "../core/skills";
 import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
 import { App } from "./app";
@@ -29,6 +31,7 @@ type LaunchServices =
   | Stream.Services<ReturnType<typeof sendMessage>>
   | Effect.Services<typeof listModels>
   | Effect.Services<ReturnType<typeof loadChat>>
+  | Effect.Services<ReturnType<typeof loadSlash>>
   | FileSystem.FileSystem;
 
 const toUiMessage = (message: ChatMessage): UiMessage =>
@@ -72,13 +75,26 @@ const logDefect = (cause: Cause.Cause<unknown>) =>
  * get instead of Effect. `quit` is called when the user quits. `stopTurns` ends any reply still
  * streaming (saved as interrupted); launchChat calls it when its scope closes, so a signal
  * saves the reply too. tests/tui/closed-loop.test.tsx drives this with a test renderer.
+ * `root` is where custom commands and skills load from (`<root>/.orx/`).
  */
-export const makeBridge = (initial: StoredChat, quit: () => void) =>
+export const makeBridge = (initial: StoredChat, quit: () => void, root: string = process.cwd()) =>
   Effect.gen(function* () {
     const context = yield* Effect.context<LaunchServices>();
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
     let chat = initial;
+    // Commands and skills load once per session; the loader logs its warnings.
+    const slash = yield* Effect.cached(
+      loadSlash(root).pipe(
+        Effect.catchCause((cause) =>
+          Effect.as(Effect.logError("loading commands and skills failed", cause), {
+            commands: [],
+            skills: [],
+            warnings: [],
+          }),
+        ),
+      ),
+    );
     // The turns' iterators run on their own fibers, outside launchChat's scope.
     const active = new Set<AsyncIterator<UiEvent>>();
     const tracked = (iterable: AsyncIterable<UiEvent>): AsyncIterable<UiEvent> => ({
@@ -153,6 +169,34 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
         );
       },
       quit,
+      listCommands: () =>
+        run(
+          Effect.map(slash, (s) =>
+            s.commands.map((c) => ({ name: c.name, description: c.description })),
+          ),
+        ),
+      listSkills: () =>
+        run(
+          Effect.map(slash, (s) =>
+            s.skills.map((k) => ({ name: k.name, description: k.description })),
+          ),
+        ),
+      expandCommand: (name, args) =>
+        run(
+          Effect.map(slash, (s) => {
+            const command = s.commands.find((c) => c.name === name);
+            if (command) return expandCommand(command, args);
+            const skill = s.skills.find((k) => k.name === name);
+            return skill ? { text: expandSkill(skill, args) } : undefined;
+          }),
+        ),
+      newChat: () =>
+        run(
+          Effect.sync(() => {
+            chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model);
+            return chat.id;
+          }),
+        ),
     };
     return { bridge, stopTurns };
   });

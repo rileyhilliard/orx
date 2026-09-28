@@ -47,7 +47,8 @@ src/
                     ask, chat, models, extract, chats, export, mcp, update, doctor; shared.ts flags
   core/             programs: chat.ts (the turn loop, a Stream of TurnEvents), models.ts, extract.ts,
                     export.ts, update.ts, upstream.ts (AiError -> UpstreamUnavailable), input.ts,
-                    format.ts (human output), stdin.ts, mcp-stdio.ts
+                    format.ts (human output), stdin.ts, mcp-stdio.ts, commands.ts + skills.ts
+                    (custom commands and skills from .orx/ and ~/.config/orx/)
   services/         Context.Service + static layers: Llm, OpenRouterModels (10 min cache), ChatStore
                     (JSON files; layerMemory), Releases, Output (the only stdout writer), Host
   tools/            Effect AI tools: ChatTools (chat + mcp), mcp.ts adds extractContact
@@ -57,7 +58,8 @@ src/
   logging.ts        record shape, terminal and JSON formats, file sink; everything on stderr
   runtime.ts        AppLayer (every service; platform from outside), LoggerLayer
   tui/              Bun-only: launch.tsx (renderer + makeBridge: the only TUI file importing effect),
-                    app.tsx, message-list, model-picker, types.ts (the bridge), theme.ts
+                    app.tsx, message-list, picker.tsx (shared list overlay) + model-picker,
+                    commands.ts (slash parsing, built-ins), types.ts (the bridge), theme.ts
 scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-server.ts, tui-capture.ts,
                     record-openrouter.ts, prepare.ts, vanilla.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
                     recording.ts)
@@ -127,7 +129,7 @@ Things in the tree that exist to get a build through, not because they are right
 | `src/core/mcp-stdio.ts` | Effect's stdio MCP transport stops when stdin closes and drops in-flight requests; the wrapper holds stdin open until every request has a response (or is cancelled), for at most 30 seconds | the transport drains pending requests on EOF |
 | `src/commands/mcp.ts` runs the server in a child fiber | the stdio transport interrupts the fiber that started it on EOF, which would make every session exit 130 | the transport ends normally on EOF |
 | `provider` is always null in `llm call` lines and replies | `@effect/ai-openrouter`'s chunk schema drops OpenRouter's `provider` field; `readOpenRouter` in `core/chat.ts` reads it when present | the provider keeps `provider` (`tests/openrouter-replay.test.ts` can then assert it) |
-| `src/tui/app.tsx` reads the submitted value and remounts the input to clear it | `onInput` didn't fire for typed text under the test renderer, so a controlled draft stayed empty | a controlled `<input>` works in `tests/tui/app.test.tsx` |
+| `src/tui/app.tsx` sets the composer through a ref (`input.value = ...`) and calls `focus()` when a list closes | a controlled `value` drops a keystroke typed just before Enter (both states batch to the same value), and flipping `focused` back after an overlay's input unmounts leaves nothing focused | a controlled `<input>` and the `focused` prop alone pass `tests/tui/app.test.tsx` |
 
 ## CI
 

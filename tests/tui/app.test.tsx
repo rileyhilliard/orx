@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { App } from "~/tui/app";
 import type { ChatBridge, UiEvent } from "~/tui/types";
-import { type RenderSetup, render as renderTui } from "./render";
+import { type RenderSetup, render as renderTui, waitForScreen } from "./render";
 
 let setup: RenderSetup | undefined;
 afterEach(() => {
@@ -11,7 +11,7 @@ afterEach(() => {
 
 /** A bridge that replies with `events` and records what the app asked for. */
 const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridge> = {}) => {
-  const calls = { sent: [] as Array<[string, string]>, quit: 0, exported: 0 };
+  const calls = { sent: [] as Array<[string, string]>, quit: 0, exported: 0, newChats: 0 };
   const bridge: ChatBridge = {
     chatId: "0f0e0d0c-0000-4000-8000-000000000000",
     initialModel: "openai/gpt-test",
@@ -35,6 +35,20 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
     },
     quit: () => {
       calls.quit += 1;
+    },
+    listCommands: async () => [{ name: "review", description: "Review a file" }],
+    listSkills: async () => [
+      { name: "pdf", description: "Fill PDF forms" },
+      { name: "review", description: "A skill the command shadows" },
+    ],
+    expandCommand: async (name, args) => {
+      if (name === "review") return { text: `Review ${args}`, model: "acme/reviewer" };
+      if (name === "pdf") return { text: `PDF steps${args ? `\n\nARGUMENTS: ${args}` : ""}` };
+      return undefined;
+    },
+    newChat: async () => {
+      calls.newChats += 1;
+      return "1a2b3c4d-0000-4000-8000-000000000000";
     },
     ...overrides,
   };
@@ -119,6 +133,134 @@ describe("App", () => {
     const { bridge, calls } = fakeBridge([]);
     const { mockInput, waitFor } = await render(bridge);
     mockInput.pressCtrlC();
+    await waitFor(() => calls.quit === 1);
+  });
+});
+
+describe("slash commands", () => {
+  const screen = (setup: RenderSetup, predicate: (frame: string) => boolean) =>
+    waitForScreen(setup, predicate, 2000);
+  // These wait with waitForScreen: the list loads through two bridge promises, which can land
+  // after waitForFrame has given up on an idle renderer.
+  /** Types `/`, waits for the list, then types `rest` into its filter. */
+  const openList = async (setup: RenderSetup, rest = "") => {
+    await setup.mockInput.typeText("/");
+    await screen(setup, (f) => f.includes("Commands"));
+    if (rest !== "") await setup.mockInput.typeText(rest);
+  };
+
+  it("opens a list of built-ins, commands, and skills on /, with descriptions", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup);
+    const first = await screen(setup, (f) => f.includes("/help"));
+    expect(first).toContain("List commands and keys");
+    await setup.mockInput.typeText("pdf");
+    const frame = await screen(setup, (f) => f.includes("/pdf"));
+    expect(frame).toContain("Fill PDF forms");
+    expect(frame).not.toContain("/help");
+    // The skill named like the command is listed once, as the command.
+    await setup.mockInput.typeText("\b\b\breview");
+    const review = await screen(setup, (f) => f.includes("Review a file"));
+    expect(review).not.toContain("A skill the command shadows");
+  });
+
+  it("inserts the picked command into the composer, and Enter runs it", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup, "hel");
+    await screen(setup, (f) => f.includes("▶ /help"));
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => !f.includes("Commands") && f.includes("/help "));
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("/export  Export the chat as Markdown"));
+    expect(frame).toContain("Ctrl+C quit");
+  });
+
+  it("shows an error for an unknown command and sends nothing", async () => {
+    const { bridge, calls } = fakeBridge([]);
+    const setup = await render(bridge);
+    await openList(setup);
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Commands"));
+    await setup.mockInput.typeText("nope now");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("Unknown command /nope"));
+    expect(calls.sent).toEqual([]);
+  });
+
+  it("sends a custom command's expansion on its own model for that turn", async () => {
+    const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
+    const setup = await render(bridge);
+    await openList(setup);
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Commands"));
+    await setup.mockInput.typeText("review src/a.ts");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("> Review src/a.ts"));
+    await setup.mockInput.typeText("next");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("> next"));
+    expect(calls.sent).toEqual([
+      ["Review src/a.ts", "acme/reviewer"],
+      ["next", "openai/gpt-test"],
+    ]);
+  });
+
+  it("sends a skill's body with the arguments appended", async () => {
+    const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
+    const setup = await render(bridge);
+    await openList(setup, "pdf");
+    await screen(setup, (f) => f.includes("▶ /pdf"));
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => !f.includes("Commands") && f.includes("/pdf "));
+    await setup.mockInput.typeText("form.pdf");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("> PDF steps"));
+    expect(calls.sent).toEqual([["PDF steps\n\nARGUMENTS: form.pdf", "openai/gpt-test"]]);
+  });
+
+  it("runs /clear, /mode, /export, /model, and /quit", async () => {
+    const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
+    const setup = await render(bridge);
+    const { mockInput, waitFor } = setup;
+    const waitForFrame = (predicate: (frame: string) => boolean) => screen(setup, predicate);
+    const run = async (command: string) => {
+      await openList(setup);
+      mockInput.pressEscape();
+      await waitForFrame((f) => !f.includes("Commands"));
+      await mockInput.typeText(command);
+      mockInput.pressEnter();
+    };
+
+    await mockInput.typeText("hi");
+    mockInput.pressEnter();
+    await waitForFrame((f) => f.includes("> hi"));
+    await run("clear");
+    let frame = await waitForFrame((f) => f.includes("chat 1a2b3c4d"));
+    expect(frame).not.toContain("> hi");
+    expect(calls.newChats).toBe(1);
+
+    await run("mode plan");
+    await waitForFrame((f) =>
+      /plan\s*$/m.test(
+        f
+          .split("\n")
+          .filter((l) => l.trim())
+          .at(-1) ?? "",
+      ),
+    );
+    await run("mode yolo");
+    await waitForFrame((f) => f.includes('Unknown mode "yolo"'));
+
+    await run("export");
+    await waitForFrame((f) => f.includes("Exported to orx-chat-0f0e0d0c.md"));
+    expect(calls.exported).toBe(1);
+
+    await run("model");
+    frame = await waitForFrame((f) => f.includes("Search models"));
+    mockInput.pressEscape();
+    await waitForFrame((f) => !f.includes("Search models"));
+
+    await run("quit");
     await waitFor(() => calls.quit === 1);
   });
 });
