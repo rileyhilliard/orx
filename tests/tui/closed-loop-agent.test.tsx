@@ -1,0 +1,229 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BunServices } from "@effect/platform-bun";
+import { ConfigProvider, Effect, Layer, Logger, Option } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { INTERRUPTED_RESULT, newChat } from "~/core/chat";
+import { prepareSession } from "~/core/session";
+import { AppLayer } from "~/runtime";
+import type { ChatId } from "~/schemas";
+import { ChatStore } from "~/services/ChatStore";
+import { Host } from "~/services/Host";
+import { APPROVAL_ARM_MS, App } from "~/tui/app";
+import { makeBridge } from "~/tui/launch";
+import { type StubOpenRouter, startStubOpenRouter } from "../helpers/stub-openrouter";
+import { type RenderSetup, render, waitForScreen } from "./render";
+
+// The coding session end to end below the terminal: App + makeBridge + prepareSession's tools
+// and Permissions + AppLayer, OpenRouter replaced by the stub. The model reads and edits a file
+// in a temp workspace; the approval panel is the only thing between the edit and the disk.
+
+let stub: StubOpenRouter;
+beforeAll(async () => {
+  stub = await startStubOpenRouter();
+});
+afterAll(() => stub.close());
+
+let setup: RenderSetup | undefined;
+afterEach(() => {
+  setup?.renderer.destroy();
+  setup = undefined;
+  stub.steps = [];
+  stub.chatRequests.length = 0;
+});
+
+const layer = (home: string) =>
+  AppLayer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        BunServices.layer,
+        FetchHttpClient.layer,
+        Host.layer({
+          execPath: join(home, "bin", "orx"),
+          compiled: false,
+          platform: "darwin",
+          arch: "arm64",
+        }),
+      ),
+    ),
+    Layer.provide(Logger.layer([])),
+    Layer.provide(
+      ConfigProvider.layer(
+        ConfigProvider.fromEnv({
+          env: {
+            OPENROUTER_API_KEY: "sk-or-test",
+            OPENROUTER_MODEL: "openai/gpt-test",
+            OPENROUTER_BASE_URL: stub.baseUrl,
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, "config"),
+            ORX_DATA_DIR: join(home, "data"),
+          },
+        }),
+      ),
+    ),
+  );
+
+const quiet = Effect.provide(Logger.layer([]));
+
+const chatId = "1a2b3c4d-0000-4000-8000-000000000001" as ChatId;
+const ORIGINAL = "export const add = (a, b) => a + b;\n";
+
+/** A home dir and, inside it, a project with one file (the workspace can't be $HOME itself). */
+const project = () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "orx-tui-agent-")));
+  const work = join(home, "project");
+  mkdirSync(work);
+  writeFileSync(join(work, "math.js"), ORIGINAL);
+  return { home, work };
+};
+
+/** The model reads math.js, edits it, then says it's done. */
+const readThenEdit = () => [
+  { toolCalls: [{ name: "read", arguments: JSON.stringify({ path: "math.js" }) }] },
+  {
+    toolCalls: [
+      {
+        name: "edit",
+        arguments: JSON.stringify({
+          path: "math.js",
+          old_string: "a + b",
+          new_string: "a + b + 0",
+        }),
+      },
+    ],
+  },
+  { text: "Done editing." },
+];
+
+/**
+ * Types `key` until `done`: the panel ignores y / a / n for its first APPROVAL_ARM_MS, so a
+ * press lands once it's armed. Checks between presses so no extra key reaches the composer.
+ */
+const pressWhenArmed = async (screen: RenderSetup, key: string, done: () => boolean) => {
+  const deadline = Date.now() + APPROVAL_ARM_MS + 3000;
+  for (;;) {
+    await screen.renderOnce();
+    if (done()) return;
+    if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
+    await screen.mockInput.typeText(key);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+
+/**
+ * Starts a session in `work`, sends a message, waits for the edit's approval panel, answers
+ * it with `key` (Esc stops the reply instead), and returns the screen once the turn (save
+ * included) is over, and the chat.
+ */
+const editWithAnswer = (home: string, work: string, key: "y" | "n" | "escape") =>
+  Effect.gen(function* () {
+    const session = yield* prepareSession(Option.some(work));
+    return yield* Effect.gen(function* () {
+      const { bridge } = yield* makeBridge(
+        newChat(chatId, "openai/gpt-test", session.root),
+        () => {},
+        session,
+      );
+      setup = yield* Effect.promise(() =>
+        render(<App bridge={bridge} />, { width: 100, height: 40 }),
+      );
+      const screen = setup;
+      const { panel, done } = yield* Effect.promise(async () => {
+        await screen.renderOnce();
+        await screen.mockInput.typeText("add zero");
+        screen.mockInput.pressEnter();
+        const panel = await waitForScreen(screen, (f) => f.includes("y allow"));
+        // Nothing is written while the panel waits.
+        expect(readFileSync(join(work, "math.js"), "utf8")).toBe(ORIGINAL);
+        if (key === "escape") {
+          screen.mockInput.pressEscape();
+        } else {
+          await pressWhenArmed(screen, key, () => !screen.captureCharFrame().includes("y allow"));
+          // n opens an optional note for the model; Enter sends it empty.
+          if (key === "n") screen.mockInput.pressEnter();
+        }
+        const done = await waitForScreen(
+          screen,
+          (f) =>
+            (key === "escape" || f.includes("Done editing.")) &&
+            !f.includes("y allow") &&
+            !f.includes("Replying"),
+        );
+        return { panel, done };
+      });
+      const saved = yield* Effect.flatMap(ChatStore, (store) => store.get(chatId));
+      return { panel, done, saved };
+    }).pipe(Effect.provide(session.layer));
+  }).pipe(Effect.provide(layer(home)), quiet, Effect.runPromise);
+
+describe("TUI closed loop, coding session", () => {
+  it("shows the edit's diff for approval, and y writes it to disk", async () => {
+    const { home, work } = project();
+    stub.steps = readThenEdit();
+    const { panel, done, saved } = await editWithAnswer(home, work, "y");
+    expect(panel).toContain("Edit math.js");
+    expect(panel).toContain("-export const add = (a, b) => a + b;");
+    expect(panel).toContain("+export const add = (a, b) => a + b + 0;");
+    expect(readFileSync(join(work, "math.js"), "utf8")).toBe(
+      "export const add = (a, b) => a + b + 0;\n",
+    );
+    expect(done).not.toContain("y allow");
+    // The model saw the edit succeed: its next request carries a non-failed result.
+    const third = stub.chatRequests.at(-1) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const results = third.messages.filter((m) => m.role === "tool");
+    expect(results).toHaveLength(2);
+    expect(JSON.stringify(results[1]?.content)).not.toContain("said no");
+    expect(Option.isSome(saved)).toBe(true);
+    const reply = Option.getOrThrow(saved).messages.at(-1);
+    expect(reply).toMatchObject({
+      role: "assistant",
+      text: "Done editing.",
+      tools: [
+        { name: "read", isFailure: false },
+        { name: "edit", isFailure: false },
+      ],
+    });
+  });
+
+  it("leaves the file alone on n, and the model is told the user said no", async () => {
+    const { home, work } = project();
+    stub.steps = readThenEdit();
+    const { saved } = await editWithAnswer(home, work, "n");
+    expect(readFileSync(join(work, "math.js"), "utf8")).toBe(ORIGINAL);
+    const reply = Option.getOrThrow(saved).messages.at(-1);
+    expect(reply).toMatchObject({
+      role: "assistant",
+      tools: [
+        { name: "read", isFailure: false },
+        { name: "edit", isFailure: true },
+      ],
+    });
+    const last = stub.chatRequests.at(-1) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const results = last.messages.filter((m) => m.role === "tool");
+    expect(JSON.stringify(results[1]?.content)).toContain("The user said no.");
+  });
+
+  it("closes the panel on Esc, writes nothing, and saves the edit as interrupted", async () => {
+    const { home, work } = project();
+    stub.steps = readThenEdit();
+    const { saved } = await editWithAnswer(home, work, "escape");
+    expect(readFileSync(join(work, "math.js"), "utf8")).toBe(ORIGINAL);
+    // The model was never asked again: the reply stopped at the edit.
+    expect(stub.chatRequests).toHaveLength(2);
+    const reply = Option.getOrThrow(saved).messages.at(-1);
+    expect(reply).toMatchObject({
+      role: "assistant",
+      interrupted: true,
+      tools: [
+        { name: "read", isFailure: false },
+        { name: "edit", isFailure: true, output: INTERRUPTED_RESULT },
+      ],
+    });
+  });
+});
