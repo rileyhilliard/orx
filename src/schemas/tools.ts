@@ -38,10 +38,12 @@ export type CurrentTimeOutput = typeof CurrentTimeOutput.Type;
 /**
  * Why an agent tool call failed (a path outside the workspace, a missing file, a bad regex).
  * Returned to the model as the tool's result (`failureMode: "return"`), never an AppError: the
- * model reads the message and tries something else.
+ * model reads the message and tries something else. `denied` marks a call Permissions refused,
+ * so `ask --json` can report it as a `permission-denied` event.
  */
 export class ToolFailure extends Schema.TaggedError<ToolFailure>()("ToolFailure", {
   message: Schema.String,
+  denied: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /**

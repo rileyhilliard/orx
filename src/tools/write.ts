@@ -4,7 +4,7 @@ import { Tool } from "effect/unstable/ai";
 import { ToolFailure, WriteInput } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
-import { freshnessFailure, permit } from "./permit";
+import { ensureResolvesTo, freshnessFailure, permit, readUtf8 } from "./permit";
 
 export const Write = Tool.make("write", {
   description: [
@@ -25,10 +25,13 @@ export const unifiedDiff = (shown: string, before: string, after: string) =>
     headerOptions: FILE_HEADERS_ONLY,
   });
 
+const BOM = "\uFEFF";
+
 /**
  * The `write` tool. Holds the file's lock from the freshness check to recording the new
- * contents, asks Permissions with the diff, and checks freshness again after the answer (the
- * user may have edited the file while the panel was open).
+ * contents, asks Permissions with the diff, and checks again after the answer (the user may
+ * have edited or created the file, or swapped in a symlink, while the panel was open). An
+ * existing file's byte order mark is kept.
  */
 export const writeFile = ({ path: input, content }: WriteInput) =>
   Effect.gen(function* () {
@@ -51,18 +54,21 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
           if (freshness !== "ok") return yield* freshnessFailure(shown, freshness);
         });
         yield* ensureFresh;
-        const before = exists
-          ? yield* fs.readFileString(path).pipe(Effect.mapError((e) => failed(e.reason._tag)))
-          : "";
+        const before = exists ? yield* readUtf8(path, failed) : "";
+        const after = before.startsWith(BOM) && !content.startsWith(BOM) ? BOM + content : content;
         yield* permit({
           tool: "write",
           summary: `${exists ? "Overwrite" : "Create"} ${shown}`,
-          diff: unifiedDiff(shown, before, content),
+          diff: unifiedDiff(shown, before, after),
           path: shown,
         });
+        yield* ensureResolvesTo(input, path, shown);
         yield* ensureFresh;
+        if (!exists && (yield* fs.exists(path).pipe(Effect.orElseSucceed(() => true)))) {
+          return yield* failed("was created since you started; read it, then write again");
+        }
 
-        const bytes = new TextEncoder().encode(content);
+        const bytes = new TextEncoder().encode(after);
         yield* fs
           .makeDirectory(pathService.dirname(path), { recursive: true })
           .pipe(Effect.mapError((e) => failed(e.reason._tag)));

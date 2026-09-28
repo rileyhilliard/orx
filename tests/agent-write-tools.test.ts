@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
@@ -47,6 +55,28 @@ const fileIn = (name: string, content: string) => {
   return root;
 };
 
+/**
+ * Runs `effect` in a workspace at `root` with an interactive Permissions: at the first approval
+ * request, runs `meanwhile` (the user changing things while the panel is open), then says yes.
+ */
+const approveAfter = <A, E extends { message: string }>(
+  root: string,
+  effect: Effect.Effect<A, E, Services>,
+  meanwhile: () => void,
+) =>
+  run(
+    root,
+    Effect.gen(function* () {
+      const permissions = yield* Permissions;
+      const fiber = yield* Effect.forkChild(effect);
+      const [event] = yield* Stream.runCollect(Stream.take(permissions.events, 1));
+      if (event?.type !== "approval-request") throw new Error("expected an approval request");
+      meanwhile();
+      yield* permissions.answer(event.id, "yes");
+      return yield* Fiber.join(fiber);
+    }).pipe(Effect.provide(Permissions.layer("default"))),
+  );
+
 const readAndEdit = (input: Parameters<typeof editFile>[0]) =>
   Effect.flatMap(readFile({ path: input.path }), () => editFile(input));
 
@@ -88,6 +118,49 @@ describe("edit", () => {
       readAndEdit({ path: "win.txt", old_string: "beta\ngamma", new_string: "B\nG" }),
     );
     expect(readFileSync(join(root, "win.txt"), "utf8")).toBe("alpha\r\nB\r\nG\r\n");
+  });
+
+  it("leaves a mixed-line-ending file's other lines alone, so the write is the approved diff", async () => {
+    const root = fileIn("mixed.txt", "alpha\r\nbeta\ngamma\r\n");
+    const result = await run(
+      root,
+      readAndEdit({ path: "mixed.txt", old_string: "beta", new_string: "B" }),
+    );
+    expect(result.failure).toBeUndefined();
+    expect(readFileSync(join(root, "mixed.txt"), "utf8")).toBe("alpha\r\nB\ngamma\r\n");
+  });
+
+  it("keeps a byte order mark, and refuses a file that isn't UTF-8", async () => {
+    const root = fileIn("bom.txt", "\uFEFFhello\n");
+    writeFileSync(join(root, "latin1.txt"), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+    const bom = await run(
+      root,
+      readAndEdit({ path: "bom.txt", old_string: "hello", new_string: "hi" }),
+    );
+    expect(bom.failure).toBeUndefined();
+    expect([...readFileSync(join(root, "bom.txt"))]).toEqual([0xef, 0xbb, 0xbf, 0x68, 0x69, 0x0a]);
+    const latin1 = await run(
+      root,
+      readAndEdit({ path: "latin1.txt", old_string: "caf", new_string: "tea" }),
+    );
+    expect(latin1.failure).toContain("latin1.txt: not UTF-8 text");
+    expect([...readFileSync(join(root, "latin1.txt"))]).toEqual([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+  });
+
+  it("refuses to write through a symlink swapped in while the approval was open", async () => {
+    const outside = tempDir();
+    writeFileSync(join(outside, "a.txt"), "hello\n");
+    const root = fileIn("a.txt", "hello\n");
+    const result = await approveAfter(
+      root,
+      readAndEdit({ path: "a.txt", old_string: "hello", new_string: "hi" }),
+      () => {
+        renameSync(join(root, "a.txt"), join(root, "moved.txt"));
+        symlinkSync(join(outside, "a.txt"), join(root, "a.txt"));
+      },
+    );
+    expect(result.failure).toContain("outside the workspace");
+    expect(readFileSync(join(outside, "a.txt"), "utf8")).toBe("hello\n");
   });
 
   it("falls back to indentation-insensitive matching and re-indents new_string", async () => {
@@ -241,6 +314,39 @@ describe("write", () => {
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("changed\n");
   });
 
+  it("keeps an existing file's byte order mark, and refuses one that isn't UTF-8", async () => {
+    const root = fileIn("bom.txt", "\uFEFFold\n");
+    writeFileSync(join(root, "latin1.txt"), Buffer.from([0xe9, 0x0a]));
+    const overwrite = (path: string) =>
+      run(
+        root,
+        Effect.flatMap(readFile({ path }), () => writeFile({ path, content: "new\n" })),
+      );
+    expect((await overwrite("bom.txt")).failure).toBeUndefined();
+    expect(readFileSync(join(root, "bom.txt"), "utf8")).toBe("\uFEFFnew\n");
+    expect((await overwrite("latin1.txt")).failure).toContain("latin1.txt: not UTF-8 text");
+    expect([...readFileSync(join(root, "latin1.txt"))]).toEqual([0xe9, 0x0a]);
+  });
+
+  it("refuses to create a file that appeared while the approval was open", async () => {
+    const root = tempDir();
+    const result = await approveAfter(root, writeFile({ path: "new.txt", content: "mine\n" }), () =>
+      writeFileSync(join(root, "new.txt"), "theirs\n"),
+    );
+    expect(result.failure).toContain("new.txt: was created since you started");
+    expect(readFileSync(join(root, "new.txt"), "utf8")).toBe("theirs\n");
+  });
+
+  it("refuses to write through a symlink swapped in while the approval was open", async () => {
+    const outside = tempDir();
+    const root = tempDir();
+    const result = await approveAfter(root, writeFile({ path: "new.txt", content: "x\n" }), () =>
+      symlinkSync(join(outside, "new.txt"), join(root, "new.txt")),
+    );
+    expect(result.failure).toContain("new.txt");
+    expect(existsSync(join(outside, "new.txt"))).toBe(false);
+  });
+
   it("stays inside the workspace", async () => {
     const root = tempDir();
     expect((await run(root, writeFile({ path: "../x.txt", content: "x" }))).failure).toContain(
@@ -368,7 +474,9 @@ describe("parallel edits in one step", () => {
       messages: Array<{ role: string; content: unknown; tool_call_id?: string }>;
     };
     const answered = third.messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id);
-    expect(answered).toEqual(["call_stub_1", "call_stub_2", "call_stub_2_1"]);
+    // The step's calls run concurrently and their results arrive in completion order, so which
+    // edit took the file's lock first varies.
+    expect(answered.sort()).toEqual(["call_stub_1", "call_stub_2", "call_stub_2_1"]);
     expect(
       events
         .filter((e) => e.type === "text")

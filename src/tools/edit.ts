@@ -3,7 +3,7 @@ import { Tool } from "effect/unstable/ai";
 import { EditInput, ToolFailure } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
-import { freshnessFailure, permit } from "./permit";
+import { ensureResolvesTo, freshnessFailure, permit, readUtf8 } from "./permit";
 import { unifiedDiff } from "./write";
 
 export const Edit = Tool.make("edit", {
@@ -111,8 +111,10 @@ export const replaceIn = (
 
 /**
  * The `edit` tool. Holds the file's lock from the freshness check to recording the new
- * contents: match, diff, ask Permissions with the diff, check freshness again, write with the
- * file's own line endings. Returns the diff.
+ * contents: match, diff, ask Permissions with the diff, check the path and freshness again,
+ * write. A file that is CRLF throughout is matched as LF and written back as CRLF; a file
+ * with mixed line endings is matched as it is, so the write is exactly the approved diff.
+ * Returns the diff.
  */
 export const editFile = (input: EditInput) =>
   Effect.gen(function* () {
@@ -130,10 +132,8 @@ export const editFile = (input: EditInput) =>
           if (freshness !== "ok") return yield* freshnessFailure(shown, freshness);
         });
         yield* ensureFresh;
-        const raw = yield* fs
-          .readFileString(path)
-          .pipe(Effect.mapError((e) => failed(e.reason._tag)));
-        const crlf = raw.includes("\r\n");
+        const raw = yield* readUtf8(path, failed);
+        const crlf = raw.includes("\r\n") && !/(^|[^\r])\n/.test(raw);
         const before = crlf ? raw.replace(/\r\n/g, "\n") : raw;
         const lf = (text: string) => text.replace(/\r\n/g, "\n");
         let oldString = lf(input.old_string);
@@ -150,6 +150,7 @@ export const editFile = (input: EditInput) =>
 
         const diff = unifiedDiff(shown, before, replaced.text);
         yield* permit({ tool: "edit", summary: `Edit ${shown}`, diff, path: shown });
+        yield* ensureResolvesTo(input.path, path, shown);
         yield* ensureFresh;
 
         const bytes = new TextEncoder().encode(
