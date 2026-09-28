@@ -1,3 +1,4 @@
+import { OpenRouterLanguageModel } from "@effect/ai-openrouter";
 import { Cause, Clock, Duration, Effect, Exit, type Layer, Option, Ref, Stream } from "effect";
 import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
@@ -27,6 +28,12 @@ export const defaultToolkit: TurnToolkit<ChatToolHandlers> = ChatTools;
 
 /** The same tool with identical input this many times in a row ends the turn with a note. */
 export const MAX_REPEATED_CALLS = 3;
+
+/** A step retries a rate limit only when OpenRouter's Retry-After is at most this long. */
+export const MAX_RETRY_AFTER = Duration.seconds(5);
+
+/** Anthropic model ids, including the `~anthropic/...-latest` aliases. */
+const ANTHROPIC_MODEL = /^~?anthropic\//;
 
 /** The result the model sees for a tool call the user interrupted before it finished. */
 export const INTERRUPTED_RESULT = "Interrupted by the user before the tool finished.";
@@ -146,6 +153,9 @@ interface TurnState {
   steps: Prompt.Prompt[];
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
   cost: number | undefined;
   model: string | undefined;
   provider: string | undefined;
@@ -170,6 +180,69 @@ export const readOpenRouter = (part: Response.FinishPart) => {
     cost: typeof openrouter?.usage?.cost === "number" ? openrouter.usage.cost : undefined,
   };
 };
+
+/** OpenRouter's error object in a stream chunk (the provider passes it through as-is). */
+interface StreamErrorBody {
+  readonly code?: unknown;
+  readonly message?: unknown;
+  readonly metadata?: { readonly error_type?: unknown };
+}
+
+/**
+ * The reason for an error OpenRouter sent after the stream started, by its code (OpenRouter's
+ * HTTP status equivalent), so `toUpstreamError` words it as it would the same status before the
+ * stream. Follows @effect/ai-openrouter's status mapping, except where OpenRouter documents its
+ * own meaning: 402 is no credits, 403 a moderation flag.
+ */
+const streamErrorReason = (body: StreamErrorBody): AiError.AiErrorReason => {
+  const code = typeof body.code === "number" ? body.code : undefined;
+  const description =
+    typeof body.message === "string" && body.message !== ""
+      ? body.message
+      : "The provider reported an error mid-reply";
+  const errorType = typeof body.metadata?.error_type === "string" ? body.metadata.error_type : null;
+  const metadata = { openrouter: { errorCode: code ?? null, errorType, midStream: true } };
+  switch (code) {
+    case 400:
+    case 404:
+    case 409:
+    case 413:
+    case 422:
+      return new AiError.InvalidRequestError({ description, metadata });
+    case 401:
+      return new AiError.AuthenticationError({ kind: "InvalidKey", description, metadata });
+    case 402:
+      return new AiError.QuotaExhaustedError({ metadata });
+    case 403:
+      return new AiError.ContentPolicyError({ description, metadata });
+    case 429:
+      return new AiError.RateLimitError({ metadata });
+    default:
+      return code !== undefined && code < 500 && code !== 408
+        ? new AiError.UnknownError({ description, metadata })
+        : new AiError.InternalProviderError({ description, metadata });
+  }
+};
+
+/** An `error` part (OpenRouter's mid-stream error) as the AiError that fails the step. */
+const streamError = (part: Response.ErrorPart) =>
+  AiError.make({
+    module: "orx/chat",
+    method: "step",
+    reason: streamErrorReason(
+      typeof part.error === "object" && part.error !== null ? (part.error as StreamErrorBody) : {},
+    ),
+  });
+
+/** A step that finished with reason "error" but sent no error body with it. */
+const erroredFinish = () =>
+  AiError.make({
+    module: "orx/chat",
+    method: "step",
+    reason: new AiError.UnknownError({
+      description: 'The provider ended the reply with finish reason "error"',
+    }),
+  });
 
 /**
  * A step's parts as the prompt the next request replays. For a step that was cut off, text or
@@ -225,12 +298,16 @@ interface StepOptions<R> {
   readonly state: Ref.Ref<TurnState>;
   readonly collected: Ref.Ref<StepResult>;
   readonly activity: Ref.Ref<Activity>;
+  /** Request settings for this turn (`cache_control`, `session_id`) over the model's own. */
+  readonly requestConfig: typeof OpenRouterLanguageModel.Config.Service;
 }
 
 /**
- * One model step: streams the parts, records them into `state`, and emits TurnEvents. The step
- * is retried (twice, backing off from 500 ms) only while it hasn't emitted anything: once a part
- * reached the user, a retry would repeat it. A context-length rejection is retried once with a
+ * One model step: streams the parts, records them into `state`, and emits TurnEvents. An error
+ * OpenRouter sends mid-stream (an `error` part, or finish reason "error") fails the step. The
+ * step is retried (twice, backing off from 500 ms, or after Retry-After when a rate limit gives
+ * one up to MAX_RETRY_AFTER) only while it hasn't emitted anything: once a part reached the
+ * user, a retry would repeat it. A context-length rejection is retried once with a
  * harder-elided prompt.
  */
 const step = <R>(options: StepOptions<R>) => {
@@ -251,6 +328,7 @@ const step = <R>(options: StepOptions<R>) => {
       >;
       const stream = parts.pipe(
         Stream.provideService(LanguageModel.LanguageModel, model),
+        Stream.provideService(OpenRouterLanguageModel.Config, options.requestConfig),
         Stream.tap((part) =>
           touch((n) =>
             part.type === "tool-call"
@@ -263,8 +341,23 @@ const step = <R>(options: StepOptions<R>) => {
         Stream.tap((part) =>
           Ref.update(collected, (result) => ({
             parts: [...result.parts, part],
-            finishReason: part.type === "finish" ? part.reason : result.finishReason,
+            finishReason:
+              part.type === "finish"
+                ? part.reason
+                : part.type === "error"
+                  ? "error"
+                  : result.finishReason,
           })),
+        ),
+        Stream.mapEffect((part) =>
+          part.type === "error" ? Effect.fail(streamError(part)) : Effect.succeed(part),
+        ),
+        Stream.concat(
+          Stream.unwrap(
+            Effect.map(Ref.get(collected), ({ finishReason }) =>
+              finishReason === "error" ? Stream.fail(erroredFinish()) : Stream.empty,
+            ),
+          ),
         ),
         Stream.mapEffect((part) => toEvents(part, state)),
         Stream.flattenIterable,
@@ -293,10 +386,19 @@ const step = <R>(options: StepOptions<R>) => {
                     return run(yield* options.shorter, retriesLeft, delay, true);
                   }
                   if (started || retriesLeft === 0 || !error.isRetryable) return Stream.fail(error);
+                  const retryAfter = error.retryAfter;
+                  if (
+                    retryAfter !== undefined &&
+                    Duration.isGreaterThan(retryAfter, MAX_RETRY_AFTER)
+                  ) {
+                    return Stream.fail(error);
+                  }
+                  const wait = retryAfter === undefined ? delay : Duration.max(delay, retryAfter);
                   yield* Effect.logWarning("Model call failed before any output; retrying", {
                     reason: error.reason._tag,
+                    waitMs: Duration.toMillis(wait),
                   });
-                  yield* Effect.sleep(delay);
+                  yield* Effect.sleep(wait);
                   return run(prompt, retriesLeft - 1, Duration.times(delay, 2), shortened);
                 }),
               ),
@@ -357,6 +459,9 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
             ...s,
             inputTokens: s.inputTokens + (part.usage.inputTokens.total ?? 0),
             outputTokens: s.outputTokens + (part.usage.outputTokens.total ?? 0),
+            cacheReadTokens: s.cacheReadTokens + (part.usage.inputTokens.cacheRead ?? 0),
+            cacheWriteTokens: s.cacheWriteTokens + (part.usage.inputTokens.cacheWrite ?? 0),
+            reasoningTokens: s.reasoningTokens + (part.usage.outputTokens.reasoning ?? 0),
             cost: cost === undefined ? s.cost : (s.cost ?? 0) + cost,
             provider: provider ?? s.provider,
           },
@@ -378,6 +483,9 @@ const toReply = (
     inputTokens: s.inputTokens,
     outputTokens: s.outputTokens,
     ...(s.cost === undefined ? {} : { cost: s.cost }),
+    ...(s.cacheReadTokens > 0 ? { cacheReadTokens: s.cacheReadTokens } : {}),
+    ...(s.cacheWriteTokens > 0 ? { cacheWriteTokens: s.cacheWriteTokens } : {}),
+    ...(s.reasoningTokens > 0 ? { reasoningTokens: s.reasoningTokens } : {}),
   };
   // A cut-off step is kept as far as it got; its unfinished tool calls count as failed.
   const lastStep = interrupted && partial.length > 0 ? [stepPrompt(partial, true)] : [];
@@ -411,6 +519,11 @@ export interface TurnOptions<R = ChatToolHandlers> {
   readonly toolkit?: TurnToolkit<R>;
   /** The system prompt. Default: SYSTEM_PROMPT from the config. */
   readonly systemPrompt?: string;
+  /**
+   * Sent as OpenRouter's `session_id` (the chat id): requests with one id stick to one
+   * provider, which keeps its prompt cache warm across steps and turns.
+   */
+  readonly sessionId?: string;
   /** Called once with the reply as far as it got, including when the turn fails or is interrupted. */
   readonly onEnd?: (reply: AssistantMessage) => Effect.Effect<void>;
 }
@@ -440,7 +553,16 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
       const model = yield* llm.languageModel(options.modelId);
       // With no toolkit given, R is its default, ChatToolHandlers.
       const toolkit = (options.toolkit ?? defaultToolkit) as TurnToolkit<R>;
-      const cacheBreakpoints = options.modelId.startsWith("anthropic/");
+      const cacheBreakpoints = ANTHROPIC_MODEL.test(options.modelId);
+      // Anthropic: top-level `cache_control` puts a breakpoint on the last cacheable block, so
+      // it follows the tool loop (the explicit ones stay on the system prompt and the last user
+      // message; 3 of Anthropic's 4). Merged over any Config in context, as withConfigOverride.
+      const existingConfig = yield* Effect.serviceOption(OpenRouterLanguageModel.Config);
+      const requestConfig: typeof OpenRouterLanguageModel.Config.Service = {
+        ...Option.getOrUndefined(existingConfig),
+        ...(cacheBreakpoints ? { cache_control: { type: "ephemeral" as const } } : {}),
+        ...(options.sessionId === undefined ? {} : { session_id: options.sessionId }),
+      };
       const models = yield* OpenRouterModels;
       const contextLength = yield* Effect.cached(
         contextLengthOf(options.modelId).pipe(Effect.provideService(OpenRouterModels, models)),
@@ -451,6 +573,9 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
         steps: [],
         inputTokens: 0,
         outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
         cost: undefined,
         model: undefined,
         provider: undefined,
@@ -498,6 +623,7 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
               state,
               collected,
               activity,
+              requestConfig,
             }).pipe(
               Stream.concat(
                 Stream.unwrap(
@@ -519,6 +645,10 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
                       } else {
                         return loop(Prompt.concat(prompt, done), stepIndex + 1);
                       }
+                    } else if (result.finishReason === "length") {
+                      note = `Reply cut off at its length limit (MAX_OUTPUT_TOKENS is ${config.limits.maxOutputTokens}; the model or its context window can be lower).`;
+                    } else if (result.finishReason === "content-filter") {
+                      note = "The provider filtered the reply.";
                     }
                     const events: TurnEvent[] = note ? [{ type: "note", message: note }] : [];
                     events.push({
@@ -553,6 +683,8 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
           const interrupted = !done;
           const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
           const error = Option.getOrUndefined(failure);
+          // A bug (a defect) is neither the user stopping the turn nor an expected failure.
+          const defect = Exit.isFailure(exit) && Cause.hasDies(exit.cause);
           const s = yield* Ref.get(state);
           const { finishReason, parts } = yield* Ref.get(collected);
           const reply = toReply(options.modelId, s, finishReason, interrupted, parts);
@@ -566,11 +698,14 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
               finishReason,
               inputTokens: s.inputTokens,
               outputTokens: s.outputTokens,
+              cacheReadTokens: s.cacheReadTokens,
+              cacheWriteTokens: s.cacheWriteTokens,
+              reasoningTokens: s.reasoningTokens,
               cost: s.cost ?? null,
               tools: s.tools.length,
               steps: s.steps.length,
-              aborted: interrupted && error === undefined,
-              errorTag: isAppError(error) ? error._tag : null,
+              aborted: interrupted && error === undefined && !defect,
+              errorTag: defect ? "Defect" : isAppError(error) ? error._tag : null,
               errorDetail:
                 error instanceof UpstreamUnavailable ? (error.detail ?? error.message) : null,
               timeToFirstTokenMs: Option.getOrNull(Option.map(ttft, (at) => at - startedAt)),
@@ -682,6 +817,7 @@ export const sendMessage = <R = ChatToolHandlers>(
         modelId,
         ...(options.toolkit ? { toolkit: options.toolkit } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+        sessionId: chat.id,
         onEnd: (reply) =>
           reply.interrupted && reply.text === "" && reply.tools.length === 0
             ? Effect.void
