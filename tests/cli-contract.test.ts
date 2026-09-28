@@ -227,6 +227,24 @@ describe("orx ask", () => {
     }
   });
 
+  it("exits 6 naming the data dir when the chat can't be saved there", async () => {
+    const dataDir = join(tempRoot(), "data");
+    mkdirSync(dataDir, { mode: 0o555 });
+    try {
+      const run = await runCli(["ask", "hi", "--json"], {
+        env: { OPENROUTER_BASE_URL: stub.baseUrl, ORX_DATA_DIR: dataDir },
+      });
+      expect(run.exitCode).toBe(6);
+      expect(ndjson(run.stdout).at(-1)).toMatchObject({
+        type: "error",
+        error: { tag: "PermissionDenied", retryable: false },
+      });
+      expect(JSON.parse(run.stderr).error.message).toContain(dataDir);
+    } finally {
+      chmodSync(dataDir, 0o755);
+    }
+  });
+
   it("exits 2 exporting a chat that doesn't exist", async () => {
     const run = await runCli(["export", "00000000-0000-4000-8000-000000000000"]);
     expect(run.exitCode).toBe(2);
