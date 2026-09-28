@@ -61,13 +61,48 @@ const isEmptyAssistant = (message: Prompt.Message) =>
   message.role === "assistant" &&
   message.content.every((part) => part.type === "text" && part.text === "");
 
+/** Provider options without OpenRouter's `reasoningDetails`. */
+const withoutReasoningDetails = <O extends Prompt.ProviderOptions>(options: O): O => {
+  const openrouter = options.openrouter as Record<string, unknown> | undefined;
+  if (openrouter?.reasoningDetails === undefined) return options;
+  const { reasoningDetails: _, ...rest } = openrouter;
+  return { ...options, openrouter: rest };
+};
+
+/**
+ * A replayed message without the reasoning another model produced: reasoning parts and the
+ * `reasoning_details` OpenRouter attaches to the message and its tool calls are provider-specific
+ * (signed or encrypted), and a different model can reject them.
+ */
+const withoutReasoning = (message: Prompt.Message): Prompt.Message => {
+  if (message.role !== "assistant") return message;
+  return Prompt.makeMessage("assistant", {
+    content: message.content
+      .filter((part) => part.type !== "reasoning")
+      .map((part) =>
+        part.type === "tool-call"
+          ? Prompt.makePart("tool-call", {
+              ...part,
+              options: withoutReasoningDetails(part.options),
+            })
+          : part,
+      ),
+    options: withoutReasoningDetails(message.options),
+  });
+};
+
 /**
  * The prompt for a chat: the system prompt, then each message. A reply with `steps` replays
  * them verbatim (tool calls with their ids and results, reasoning details); a reply saved
- * before steps existed replays its text. An assistant message with no text is left out: some
- * providers reject empty assistant content.
+ * before steps existed replays its text. Given the turn's `modelId`, a reply another model
+ * produced replays without its reasoning (switching models mid-chat). An assistant message
+ * with no text is left out: some providers reject empty assistant content.
  */
-export const toPrompt = (systemPrompt: string, history: ReadonlyArray<ChatMessage>) => {
+export const toPrompt = (
+  systemPrompt: string,
+  history: ReadonlyArray<ChatMessage>,
+  modelId?: string,
+) => {
   const messages: Prompt.Message[] = [Prompt.makeMessage("system", { content: systemPrompt })];
   for (const message of history) {
     if (message.role === "user") {
@@ -77,8 +112,11 @@ export const toPrompt = (systemPrompt: string, history: ReadonlyArray<ChatMessag
         }),
       );
     } else if (message.steps !== undefined && message.steps.length > 0) {
+      const producer = message.requestedModel ?? message.model;
+      const switched = modelId !== undefined && producer !== undefined && producer !== modelId;
       for (const step of message.steps) {
-        messages.push(...step.content.filter((m) => !isEmptyAssistant(m)));
+        const replayed = switched ? step.content.map(withoutReasoning) : step.content;
+        messages.push(...replayed.filter((m) => !isEmptyAssistant(m)));
       }
     } else if (message.text !== "") {
       messages.push(
@@ -325,6 +363,7 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
   });
 
 const toReply = (
+  requestedModel: string,
   s: TurnState,
   finishReason: string,
   interrupted: boolean,
@@ -351,6 +390,7 @@ const toReply = (
     text: s.text,
     tools: [...s.tools, ...unfinished],
     ...(steps.length > 0 ? { steps } : {}),
+    requestedModel,
     ...(s.model === undefined ? {} : { model: s.model }),
     ...(s.provider === undefined ? {} : { provider: s.provider }),
     usage,
@@ -478,7 +518,7 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
                     const events: TurnEvent[] = note ? [{ type: "note", message: note }] : [];
                     events.push({
                       type: "finish",
-                      reply: toReply(s, result.finishReason, false, []),
+                      reply: toReply(options.modelId, s, result.finishReason, false, []),
                     });
                     return Stream.fromIterable(events);
                   }),
@@ -510,7 +550,7 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
           const error = Option.getOrUndefined(failure);
           const s = yield* Ref.get(state);
           const { finishReason, parts } = yield* Ref.get(collected);
-          const reply = toReply(s, finishReason, interrupted, parts);
+          const reply = toReply(options.modelId, s, finishReason, interrupted, parts);
           const ttft = yield* Ref.get(firstTokenAt);
           const endedAt = yield* Clock.currentTimeMillis;
           yield* Effect.logInfo("llm call").pipe(
@@ -554,7 +594,10 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
         onSome: (p) => Effect.asVoid(p.cancelAll),
       });
 
-      return loop(toPrompt(options.systemPrompt ?? config.systemPrompt, options.history), 0).pipe(
+      return loop(
+        toPrompt(options.systemPrompt ?? config.systemPrompt, options.history, options.modelId),
+        0,
+      ).pipe(
         Stream.tap((event) =>
           event.type === "text"
             ? Effect.flatMap(Clock.currentTimeMillis, (now) =>

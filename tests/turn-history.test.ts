@@ -15,6 +15,7 @@ afterAll(() => stub.close());
 beforeEach(() => {
   stub.chatRequests.length = 0;
   stub.toolCalls = [];
+  stub.steps = [];
 });
 
 type WireMessage = {
@@ -72,6 +73,57 @@ describe("turn history", () => {
       "assistant",
       "user",
     ]);
+  });
+
+  it("drops an earlier model's reasoning details when the chat switches models", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    vi.stubEnv("LOG_LEVEL", "error");
+    const detail = { type: "reasoning.text", text: "Need the time.", signature: "sig-1", index: 0 };
+    stub.steps = [
+      {
+        reasoningDetails: [detail],
+        toolCalls: [{ name: "currentTime", arguments: '{"timeZone":"UTC"}' }],
+      },
+      { text: "It's noon." },
+    ];
+    try {
+      await runScript(
+        Effect.gen(function* () {
+          const replies: AssistantMessage[] = [];
+          const first: ChatMessage[] = [{ role: "user", text: "time?" }];
+          yield* Stream.runDrain(
+            runTurn({
+              history: first,
+              modelId: "openai/gpt-test",
+              onEnd: (reply) => Effect.sync(() => replies.push(reply)),
+            }),
+          );
+          const codec = Schema.fromJsonString(AssistantMessage);
+          const saved = Schema.decodeUnknownSync(codec)(
+            Schema.encodeSync(codec)(replies[0] as AssistantMessage),
+          );
+          const history = [...first, saved, { role: "user" as const, text: "again" }];
+          yield* Stream.runDrain(runTurn({ history, modelId: "openai/gpt-test" }));
+          yield* Stream.runDrain(runTurn({ history, modelId: "acme/cheap-model" }));
+        }),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(stub.chatRequests).toHaveLength(4);
+    const assistantCall = (request: unknown) =>
+      (request as { messages: Array<WireMessage & { reasoning_details?: unknown }> }).messages.find(
+        (m) => m.role === "assistant" && m.tool_calls,
+      );
+    // Within the turn and on the same model, the details go back as they came.
+    expect(assistantCall(stub.chatRequests[1])?.reasoning_details).toMatchObject([detail]);
+    expect(assistantCall(stub.chatRequests[2])?.reasoning_details).toMatchObject([detail]);
+    // Another model gets the tool call and its id, but not the reasoning.
+    const switched = assistantCall(stub.chatRequests[3]);
+    expect(switched?.tool_calls?.[0]?.id).toBe("call_stub_1");
+    expect(switched?.reasoning_details).toBeUndefined();
+    expect(JSON.stringify(stub.chatRequests[3])).not.toContain("sig-1");
   });
 
   it("gives an interrupted step's unanswered tool calls a synthetic result", () => {

@@ -44,6 +44,8 @@ export const AssistantMessage = Schema.Struct({
    * The next turn replays these verbatim. Chats saved before steps existed replay `text`.
    */
   steps: Schema.optional(Schema.Array(AiPrompt.Prompt)),
+  /** The model the turn asked for; its steps' reasoning details replay only to that model. */
+  requestedModel: Schema.optional(Schema.String),
   /** The model that served the reply's last step (may differ from the requested one). */
   model: Schema.optional(Schema.String),
   /** The upstream provider OpenRouter routed to. */
