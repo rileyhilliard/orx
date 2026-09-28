@@ -42,6 +42,8 @@ Work that is deliberately not scheduled in any phase, so nobody mistakes it for 
 
 **Image input.** Pasting a screenshot for the model. Many OpenRouter models accept images and Effect AI has file parts, but the TUI has no paste path for binary data and the terminal protocols for it vary. Trigger: a user workflow (UI bugs from screenshots) that comes up repeatedly.
 
+**Recovering from a call to a tool orx doesn't have.** Effect AI decodes each streamed chunk against the toolkit's tool names, so a made-up name fails the step with `InvalidOutputError`, and `InvalidOutputError.fromSchemaError` keeps only the message, which lists the expected names but not the one the model sent. orx can't answer the call, so the step is retried before any output and the turn fails after it, with a message that blames the model's output rather than the network (`toUpstreamError`). Recovering (answer "there is no tool X" and let the model go on) needs the tool name. Trigger: Effect AI keeps the schema issue or the raw part on the error, or orx decodes the provider's stream below `LanguageModel`.
+
 **Serving the agent's tools over `orx mcp`.** Won't do as long as the approval gate lives in orx's TUI: an MCP client calling `edit` or `bash` would bypass it. Listed so nobody adds it by accident.
 
 ## TUI

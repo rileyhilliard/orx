@@ -67,9 +67,10 @@ sequenceDiagram
         C->>O: next step with the tool result
         O-->>C: answer
     end
+    Note over C: save the chat (a data dir it can't write is exit 6, before done)
     C-->>H: finish (text, tools, tokens, cost summed over steps)
     H-->>U: done event on stdout (usage line on stderr in text mode)
-    Note over C: onExit: log "llm call", save the chat<br/>(partial and marked interrupted on failure or Ctrl+C)
+    Note over C: onExit: log "llm call"; on failure or Ctrl+C,<br/>save the partial reply marked interrupted
     M-->>U: exit code (0, or 4 with an error event and stderr JSON)
     Note over M: logs one "command" line with runId, exitCode, durationMs
 ```
