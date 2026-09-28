@@ -1,6 +1,6 @@
 // The recorder's checks (scripts/lib/recording.ts) on plain data: the recorder itself calls
 // the real API, so this is what keeps a bad recording from becoming fixtures.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { TurnEvent } from "~/core/chat";
 import { type RecordedTurn, recordingProblems } from "../scripts/lib/recording";
 

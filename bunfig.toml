@@ -1,8 +1,13 @@
-# bun test runs only the TUI tests (tests/tui) and the e2e suite (e2e); vitest runs the rest.
-# Always go through `bun run test` / `test:tui` / `e2e`: a bare `bun test` is rooted here, so
-# it passes on the TUI tests alone and silently skips every vitest test.
+# bun test is the only test runner. A bare `bun test` (or `bun run test`) runs everything under
+# tests/: the unit tests and tests/tui, in one process. e2e/ is outside the root on purpose: it
+# needs a fresh dist/orx, so it runs through `bun run e2e`, which builds first.
 [test]
-root = "./tests/tui"
+root = "./tests"
 # Blanks the key, points every network URL at an unreachable port, and moves config, data,
 # and logs into temp dirs. bun auto-loads .env, so this must run before any test code.
-preload = ["./tests/tui/setup.ts"]
+preload = ["./tests/setup.ts"]
+# `bun run coverage`: a report on the app's code, no threshold.
+coverageReporter = ["text", "lcov"]
+coverageDir = "./coverage"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["tests/**", "scripts/**", "evals/**"]

@@ -1,7 +1,10 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Fixture, makeFixture, runHook } from "../helpers/hooks";
+
+// Each test spawns the hook (and biome, tsc, or git), so it gets more than the default 5 s.
+const TIMEOUT = 60_000;
 
 let project: Fixture;
 
@@ -43,48 +46,72 @@ const typecheck = async (filePath: string) => {
   return { result, context: result.output?.hookSpecificOutput?.additionalContext };
 };
 
-describe("typecheck-on-write", { timeout: 60_000 }, () => {
-  it("reports errors in the written file first", async () => {
-    put("src/other.ts", "export const s: string = 1;\n");
-    const { context } = await typecheck(put("src/a.ts", "export const n: number = 'x';\n"));
-    expect(context).toMatch(
-      /^tsc found 2 type error\(s\), 1 in src\/a\.ts\. Fix the ones in this file now;[^\n]*\nsrc\/a\.ts\(1,14\): error TS2322/,
-    );
-    expect(context).toContain("src/other.ts(1,14): error TS2322");
-  });
+describe("typecheck-on-write", () => {
+  it(
+    "reports errors in the written file first",
+    async () => {
+      put("src/other.ts", "export const s: string = 1;\n");
+      const { context } = await typecheck(put("src/a.ts", "export const n: number = 'x';\n"));
+      expect(context).toMatch(
+        /^tsc found 2 type error\(s\), 1 in src\/a\.ts\. Fix the ones in this file now;[^\n]*\nsrc\/a\.ts\(1,14\): error TS2322/,
+      );
+      expect(context).toContain("src/other.ts(1,14): error TS2322");
+    },
+    TIMEOUT,
+  );
 
-  it("says when every error is in another file", async () => {
-    put("b.ts", 'import { n } from "./a";\nexport const s: string = n;\n');
-    const { context } = await typecheck(put("a.ts", "export const n = 1;\n"));
-    expect(context).toMatch(/^tsc found 1 type error\(s\) in other files \(none in a\.ts\)\./);
-    expect(context).toContain("b.ts(2,14): error TS2322");
-  });
+  it(
+    "says when every error is in another file",
+    async () => {
+      put("b.ts", 'import { n } from "./a";\nexport const s: string = n;\n');
+      const { context } = await typecheck(put("a.ts", "export const n = 1;\n"));
+      expect(context).toMatch(/^tsc found 1 type error\(s\) in other files \(none in a\.ts\)\./);
+      expect(context).toContain("b.ts(2,14): error TS2322");
+    },
+    TIMEOUT,
+  );
 
-  it("says nothing when the project type-checks", async () => {
-    const { result } = await typecheck(put("a.ts", "export const n = 1;\n"));
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
-  });
+  it(
+    "says nothing when the project type-checks",
+    async () => {
+      const { result } = await typecheck(put("a.ts", "export const n = 1;\n"));
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("");
+    },
+    TIMEOUT,
+  );
 
-  it("ignores build output", async () => {
-    put("a.ts", "export const n: number = 'x';\n");
-    const { result } = await typecheck(put("dist/gen.ts", "export const x = 1;\n"));
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
-  });
+  it(
+    "ignores build output",
+    async () => {
+      put("a.ts", "export const n: number = 'x';\n");
+      const { result } = await typecheck(put("dist/gen.ts", "export const x = 1;\n"));
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("");
+    },
+    TIMEOUT,
+  );
 
-  it("ignores files that aren't TypeScript", async () => {
-    put("a.ts", "export const n: number = 'x';\n");
-    const { result } = await typecheck(put("tool.js", "export const x = 1;\n"));
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
-  });
+  it(
+    "ignores files that aren't TypeScript",
+    async () => {
+      put("a.ts", "export const n: number = 'x';\n");
+      const { result } = await typecheck(put("tool.js", "export const x = 1;\n"));
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("");
+    },
+    TIMEOUT,
+  );
 
-  it("truncates a long error list", async () => {
-    const lines = Array.from({ length: 50 }, (_, i) => `export const n${i}: number = 'x';`);
-    const { context } = await typecheck(put("a.ts", `${lines.join("\n")}\n`));
-    const body = (context ?? "").split("\n");
-    expect(body).toHaveLength(42);
-    expect(body.at(-1)).toBe("... (truncated; run bun run typecheck for the rest)");
-  });
+  it(
+    "truncates a long error list",
+    async () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `export const n${i}: number = 'x';`);
+      const { context } = await typecheck(put("a.ts", `${lines.join("\n")}\n`));
+      const body = (context ?? "").split("\n");
+      expect(body).toHaveLength(42);
+      expect(body.at(-1)).toBe("... (truncated; run bun run typecheck for the rest)");
+    },
+    TIMEOUT,
+  );
 });

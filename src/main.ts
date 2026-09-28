@@ -16,8 +16,8 @@ const subcommands: ReadonlyArray<string> = cli.subcommands.flatMap((group) =>
 
 /**
  * One run of orx, to an exit code: parse argv, run the handler, then render the outcome. The
- * platform is provided by the caller (src/bin.ts under Bun, tests under Node), so vitest runs
- * this exact code. It never fails: every failure is an exit code and a message on stderr.
+ * platform is provided by the caller (src/bin.ts, or tests/helpers/cli.ts with a captured Stdio),
+ * so tests run this exact code. It never fails: every failure is an exit code and a message on stderr.
  */
 export const main = ({ argv, stdout, stderr }: MainIO) => {
   const json = argv.includes("--json");

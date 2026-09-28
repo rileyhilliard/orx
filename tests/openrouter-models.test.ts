@@ -1,14 +1,14 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
-import { describe, expect, it } from "@effect/vitest";
+import { BunServices } from "@effect/platform-bun";
 import { ConfigProvider, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { FetchHttpClient } from "effect/unstable/http";
-import { afterAll, afterEach, beforeAll } from "vitest";
 import { AppConfig, Paths } from "~/config";
 import { MODELS_FAILURE_TTL, OpenRouterModels } from "~/services/OpenRouterModels";
+import { runTest } from "./helpers/effect";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 // The models list service on the TestClock against the stub: what it caches, for how long,
@@ -42,7 +42,7 @@ const fresh = () => {
     OpenRouterModels.layer.pipe(
       Layer.provide(AppConfig.layer),
       Layer.provide(Paths.layer),
-      Layer.provide(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer)),
+      Layer.provide(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer)),
       Layer.provide(env),
     ),
   );
@@ -69,60 +69,64 @@ const withClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   });
 
 describe("OpenRouterModels", () => {
-  it.effect("keeps the list for the cache TTL, then fetches it again", () =>
-    Effect.gen(function* () {
-      yield* list;
-      yield* list;
-      expect(stub.modelsRequests).toBe(1);
-      yield* TestClock.adjust("10 minutes");
-      yield* list;
-      expect(stub.modelsRequests).toBe(2);
-    }).pipe(fresh()),
-  );
+  it("keeps the list for the cache TTL, then fetches it again", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* list;
+        yield* list;
+        expect(stub.modelsRequests).toBe(1);
+        yield* TestClock.adjust("10 minutes");
+        yield* list;
+        expect(stub.modelsRequests).toBe(2);
+      }).pipe(fresh()),
+    ));
 
-  it.effect("keeps a failure for MODELS_FAILURE_TTL, so callers don't each wait on it", () =>
-    Effect.gen(function* () {
-      stub.failModels = 1;
-      stub.failModelsStatus = 404;
-      const first = yield* failure;
-      expect(first.retryable).toBe(false);
-      expect(first.detail).toContain("404");
-      const second = yield* failure;
-      expect(second).toBe(first);
-      expect(stub.modelsRequests).toBe(1);
-      yield* TestClock.adjust(MODELS_FAILURE_TTL);
-      const models = yield* list;
-      expect(models.length).toBeGreaterThan(0);
-      expect(stub.modelsRequests).toBe(2);
-    }).pipe(fresh()),
-  );
+  it("keeps a failure for MODELS_FAILURE_TTL, so callers don't each wait on it", () =>
+    runTest(
+      Effect.gen(function* () {
+        stub.failModels = 1;
+        stub.failModelsStatus = 404;
+        const first = yield* failure;
+        expect(first.retryable).toBe(false);
+        expect(first.detail).toContain("404");
+        const second = yield* failure;
+        expect(second).toBe(first);
+        expect(stub.modelsRequests).toBe(1);
+        yield* TestClock.adjust(MODELS_FAILURE_TTL);
+        const models = yield* list;
+        expect(models.length).toBeGreaterThan(0);
+        expect(stub.modelsRequests).toBe(2);
+      }).pipe(fresh()),
+    ));
 
-  it.effect("shares one fetch between concurrent callers", () =>
-    Effect.gen(function* () {
-      const lists = yield* Effect.all([list, list, list], { concurrency: "unbounded" });
-      expect(lists[1]).toBe(lists[0]);
-      expect(stub.modelsRequests).toBe(1);
-    }).pipe(fresh()),
-  );
+  it("shares one fetch between concurrent callers", () =>
+    runTest(
+      Effect.gen(function* () {
+        const lists = yield* Effect.all([list, list, list], { concurrency: "unbounded" });
+        expect(lists[1]).toBe(lists[0]);
+        expect(stub.modelsRequests).toBe(1);
+      }).pipe(fresh()),
+    ));
 
-  it.effect("retries a 5xx and a 429, but not another 4xx", () =>
-    Effect.gen(function* () {
-      for (const [status, requests] of [
-        [500, 3],
-        [429, 3],
-        [400, 1],
-        [404, 1],
-      ] as const) {
-        stub.modelsRequests = 0;
-        stub.failModels = 3;
-        stub.failModelsStatus = status;
-        const error = yield* withClock(failure.pipe(fresh()));
-        expect({ status, retryable: error.retryable }).toEqual({
-          status,
-          retryable: status >= 500 || status === 429,
-        });
-        expect({ status, requests: stub.modelsRequests }).toEqual({ status, requests });
-      }
-    }),
-  );
+  it("retries a 5xx and a 429, but not another 4xx", () =>
+    runTest(
+      Effect.gen(function* () {
+        for (const [status, requests] of [
+          [500, 3],
+          [429, 3],
+          [400, 1],
+          [404, 1],
+        ] as const) {
+          stub.modelsRequests = 0;
+          stub.failModels = 3;
+          stub.failModelsStatus = status;
+          const error = yield* withClock(failure.pipe(fresh()));
+          expect({ status, retryable: error.retryable }).toEqual({
+            status,
+            retryable: status >= 500 || status === 429,
+          });
+          expect({ status, requests: stub.modelsRequests }).toEqual({ status, requests });
+        }
+      }),
+    ));
 });

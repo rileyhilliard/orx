@@ -1,6 +1,6 @@
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import { denyReason, edit, makeFixture, REPO, runHook, write } from "../helpers/hooks";
 
 const check = (relPath: string, content: string) =>
@@ -127,9 +127,9 @@ describe.concurrent("guard-boundaries allows", () => {
       'import { OpenRouterClient } from "@effect/ai-openrouter";',
     ],
     [
-      "a platform-node import in a test",
+      "a platform-bun import in a test",
       "tests/config.test.ts",
-      'import { NodeServices } from "@effect/platform-node";\nconsole.log(process.env.X);',
+      'import { BunServices } from "@effect/platform-bun";\nconsole.log(process.env.X);',
     ],
     [
       "a script using Bun",

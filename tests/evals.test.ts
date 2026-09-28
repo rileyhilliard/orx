@@ -1,10 +1,11 @@
 // evals/score.ts and the case checks, on plain data. The runner (evals/run.ts) calls the real
 // API, so it's exercised only by a manual `bun run eval`.
+
+import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
 import { type CodingCase, cases, type Outcome } from "../evals/cases";
 import {
   type CaseRun,

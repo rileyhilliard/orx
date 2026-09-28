@@ -1,6 +1,6 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { compareVersions } from "~/core/update";
 import { runCli, tempRoot } from "./helpers/cli";
 import { type StubReleases, startStubReleases } from "./helpers/stub-releases";

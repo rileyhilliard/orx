@@ -1,16 +1,18 @@
 // The layer bun scripts (evals, the fixture recorder) run orx's programs with, against the stub
 // OpenRouter: the real config, Llm, and @effect/ai-openrouter, over a custom fetch.
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Option, Stream } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newChat, runTurn, sendMessage } from "~/core/chat";
 import { extractContact } from "~/core/extract";
 import { LoggerLayer } from "~/runtime";
 import type { ChatId } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { runScript, type ScriptFetch } from "../scripts/lib/script-layer";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 // One chat turn the way evals and the recorder make one: orx's runTurn, which logs an
@@ -26,17 +28,17 @@ describe("script layer", () => {
   beforeEach(async () => {
     stub = await startStubOpenRouter();
     dir = mkdtempSync(join(tmpdir(), "orx-script-layer-"));
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("SYSTEM_PROMPT", "Be terse.");
-    vi.stubEnv("MAX_OUTPUT_TOKENS", "77");
-    vi.stubEnv("ORX_DATA_DIR", join(dir, "data"));
-    vi.stubEnv("ORX_LOG_FILE", join(dir, "orx.jsonl"));
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("SYSTEM_PROMPT", "Be terse.");
+    stubEnv("MAX_OUTPUT_TOKENS", "77");
+    stubEnv("ORX_DATA_DIR", join(dir, "data"));
+    stubEnv("ORX_LOG_FILE", join(dir, "orx.jsonl"));
+    stubEnv("LOG_LEVEL", "error");
   });
 
   afterEach(async () => {
-    vi.unstubAllEnvs();
+    restoreEnv();
     rmSync(dir, { recursive: true, force: true });
     await stub.close();
   });
@@ -100,7 +102,7 @@ describe("script layer", () => {
   });
 
   it("logs to stderr only, even with ORX_LOG_FILE set", async () => {
-    vi.stubEnv("LOG_LEVEL", "info");
+    stubEnv("LOG_LEVEL", "info");
     await runScript(chatTurn);
     expect(existsSync(join(dir, "orx.jsonl"))).toBe(false);
 

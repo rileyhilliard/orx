@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Cause, Exit, Option } from "effect";
-import { describe, expect, it } from "vitest";
 import { toPrompt } from "~/core/chat";
 import { chatToMarkdown } from "~/core/export";
 import { modelsTable, usageLine } from "~/core/format";

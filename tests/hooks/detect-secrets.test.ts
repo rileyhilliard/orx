@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { denyReason, edit, REPO, runHook, write } from "../helpers/hooks";
 
 // Credential-shaped values are assembled at runtime, so this file holds none itself (the hook

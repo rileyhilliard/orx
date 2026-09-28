@@ -1,5 +1,5 @@
-// The no-network, no-real-state environment every test process starts from, shared by vitest
-// (tests/setup.ts) and bun test (tests/tui/setup.ts). bun auto-loads .env and the user may have a
+// The no-network, no-real-state environment every bun test process starts from (tests/setup.ts,
+// the bunfig.toml preload). bun auto-loads .env and the user may have a
 // real ~/.config/orx/config.json, so this overrides both: no key, every URL unreachable, and
 // config, data, and logs in a fresh temp dir. Tests that need a key or a stub set them explicitly.
 import { mkdtempSync } from "node:fs";

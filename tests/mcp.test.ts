@@ -1,5 +1,5 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Sink, Stdio, Stream } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drainingStdio } from "~/core/mcp-stdio";
 import { ndjson, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";

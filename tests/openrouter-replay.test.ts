@@ -2,8 +2,9 @@
 // replayed through orx and the real @effect/ai-openrouter provider. The expected values are
 // read from the recordings themselves, so a re-record keeps this passing unless the provider
 // stops parsing what OpenRouter actually sends: text, tool calls, tokens, cost, served model.
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ndjson, runCli } from "./helpers/cli";
 import { FIXTURES_DIR, type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 

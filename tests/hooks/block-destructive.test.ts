@@ -1,7 +1,7 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bash, denyReason, GIT_ENV, type GitRepo, makeGitRepo, runHook } from "../helpers/hooks";
 
 // Outside any git repo, so the rules that check the working tree can't find it clean and deny.

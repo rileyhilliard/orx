@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type LogEntry,
   type LogRecord,
@@ -105,18 +105,18 @@ describe("toConsoleLine (the terminal)", () => {
 describe("makeLoggerLayer", () => {
   let dir: string;
   let stderr: string[];
-  let stdout: ReturnType<typeof vi.spyOn>;
+  let stdout: ReturnType<typeof spyOn>;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "orx-logs-"));
     stderr = [];
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+    spyOn(process.stderr, "write").mockImplementation((chunk) => {
       stderr.push(String(chunk));
       return true;
     });
-    stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    mock.restore();
     rmSync(dir, { recursive: true, force: true });
   });
 

@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
 import { bash, denyReason, hookCommand, REPO, runHook, wiredCommands } from "../helpers/hooks";
 
 const settings = JSON.parse(readFileSync(`${REPO}/.claude/settings.json`, "utf8")) as {
@@ -59,7 +59,7 @@ describe("hook wiring in .claude/settings.json", () => {
     }
   });
 
-  it("allows no command guard-commands denies", { timeout: 30_000 }, async () => {
+  it("allows no command guard-commands denies", async () => {
     // An allow rule skips the prompt, not the hooks; one that names a denied command means the
     // two drifted apart. `*` stands for any argument.
     const commands = settings.permissions.allow
@@ -69,5 +69,5 @@ describe("hook wiring in .claude/settings.json", () => {
       const result = await runHook("PreToolUse", "guard-commands", bash(command));
       expect(denyReason(result), command).toBeUndefined();
     }
-  });
+  }, 30_000);
 });
