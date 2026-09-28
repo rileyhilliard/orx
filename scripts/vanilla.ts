@@ -84,6 +84,7 @@ const REMOVE = [
   "src/tui/message-list.tsx",
   "src/tui/model-picker.tsx",
   "src/tui/picker.tsx",
+  "src/tui/printable.ts",
   "src/tui/tool-summary.ts",
   "tests/agent-approval.test.ts",
   "tests/agent-tools.test.ts",
