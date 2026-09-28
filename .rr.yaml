@@ -1,0 +1,114 @@
+# Road Runner project configuration: `rr <task>` syncs this checkout to a remote Mac and runs
+# the task there. Hosts are defined in ~/.rr/config.yaml. See https://github.com/rileyhilliard/rr
+#
+#   rr check          the full gate (lint, typecheck, test, e2e), like `bun run check`
+#   rr test           unit + TUI tests
+#   rr unit -- tests/cli-contract.test.ts -t "<name>"
+#   rr run "bun run orx -- doctor --json"
+
+version: 1
+
+# The Apple Silicon Macs. m1-linux is the production serving box and too thin to share with tests.
+hosts:
+  - m4-mini
+  - m1-mini
+
+# Never fall back to running locally: an all-hosts-locked run that silently ran here and exited
+# 0 reads as a passing remote run. Use `--local` (or the bun scripts directly) on purpose.
+local_fallback: false
+
+defaults:
+  # Every task installs from the lockfile first, so a changed bun.lock never runs against stale
+  # node_modules on the remote. lefthook isn't on the hosts and .git isn't synced, so
+  # `prepare` only prints that the git hooks weren't installed. Hosts need bun >= 1.4.2: older
+  # bun can't read bun.lock (lockfileVersion 2), and `--silent` would hide that error.
+  setup:
+    - >-
+      bun -e 'Bun.semver.satisfies(Bun.version, ">=1.4.2") || (console.error("rr: this host has
+      bun " + Bun.version + "; orx needs >= 1.4.2 (curl -fsSL https://bun.sh/install | bash -s
+      bun-v1.4.2)"), process.exit(1))'
+    - bun install --frozen-lockfile --silent
+  # Plain text for whoever reads the output or ~/.rr/logs, usually an agent: vitest and bun
+  # otherwise color their output even though the remote shell has no TTY.
+  env:
+    NO_COLOR: "1"
+    FORCE_COLOR: "0"
+
+sync:
+  # worktree_isolation stays at rr's default (on): each worktree syncs to its own remote dir, and rr
+  # removes it after the worktree is gone. A cold node_modules there costs about 2 s (bun's cache is
+  # warm). Run rr from the worktree root, and commit .rr.yaml: in a worktree without one, rr finds
+  # the main checkout's (worktrees live under it, in .claude/worktrees/) and tests main's code.
+
+  # A custom list replaces rr's defaults, so the ones that apply are repeated here. .gitignore is
+  # applied too (dist/, logs/, .env, .orx/, ...). No trailing slash on .git or node_modules: in a
+  # worktree .git is a file. .claude/ is synced, unlike rr's default, because tests/hooks tests
+  # the hooks and settings.json; only its machine-local parts stay here.
+  exclude:
+    - .git
+    - node_modules
+    - .DS_Store
+    - "*.log"
+    - .claude/worktrees/
+    - .claude/settings.local.json
+
+  preserve:
+    - node_modules/
+
+  flags:
+    - --delete
+
+lock:
+  enabled: true
+  timeout: 5m
+  wait_timeout: 1m
+  stale: 10m
+
+# Tasks mirror the package.json scripts; see AGENTS.md for what each one does.
+tasks:
+  check:
+    description: Full gate (lint, typecheck, unit + TUI tests, build + e2e)
+    run: bun run check
+
+  # Steps, not `bun run test`: that script chains two runners, so an argument would land on the
+  # TUI runner. rr rejects arguments to a multi-step task; scope with `rr unit` or `rr tui`.
+  test:
+    description: Unit tests (vitest) then TUI tests (bun test); takes no arguments
+    steps:
+      - name: unit
+        run: bun run test:unit
+      - name: tui
+        run: bun run test:tui
+
+  unit:
+    description: vitest; pass a file and/or -t after --
+    run: bun run test:unit
+
+  # `bun run test:tui <file>` would run the whole directory plus the file, so a path argument
+  # replaces ./tests/tui. With only flags (`rr tui -- -t name`) ./tests/tui stays: a bare
+  # `bun test -t name` would also pick up the vitest files.
+  tui:
+    description: TUI tests; pass ./tests/tui/<file> and/or -t <name> after -- to scope
+    run: bash -c 'case "$1" in ""|-*) set -- ./tests/tui "$@" ;; esac; bun test "$@"' rr
+
+  e2e:
+    description: Build dist/orx and run the e2e suite against it
+    run: bun run e2e
+
+  lint:
+    description: biome check
+    run: bun run lint
+
+  typecheck:
+    description: tsc
+    run: bun run typecheck
+
+  coverage:
+    description: vitest with a v8 coverage report
+    run: bun run coverage
+
+  # Splits the gate across both hosts. Each subtask reruns `bun install` (fast when warm).
+  check-parallel:
+    description: lint, typecheck, test, and e2e as parallel subtasks across hosts
+    parallel: [lint, typecheck, test, e2e]
+    fail_fast: false

@@ -28,6 +28,9 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun run eval --models a,b` | `evals/cases.ts` against real models through orx's own programs. Needs a key, costs money, never in CI |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams. Needs a key |
 | `bun run clean` | Remove `dist/`, `coverage/`, `logs/` |
+| `rr check` / `rr test` / `rr unit -- <file> -t "<name>"` / `rr tui -- ./tests/tui/<file>` | The same scripts on a remote Mac (`.rr.yaml`: m4-mini, m1-mini), synced with rsync; see Remote runs below |
+
+Remote runs: `rr <task>` syncs the tree you run it from (in a worktree, its root) and runs the task on the first free host; each task checks bun >= 1.4.2 and runs `bun install --frozen-lockfile` first. `rr run "<one quoted command>"` runs anything else, e.g. `rr run 'eval "$(bun run --silent stub)" && bun run orx -- ask hi --json; bun run stub:stop'` (stop the stub in the same run). The remote has no `.git`, `.env`, or key. Pull files into a gitignored dir: `rr pull logs/orx.jsonl --dest logs/remote/` (without `--dest` they land in the repo root and sync back). Read the result event's `log_file` instead of rerunning, and don't pipe rr through `tail`.
 
 In Claude Code, `/check` runs the gate and fixes what fails, `/test` runs scoped tests then the suite, `/add-command`, `/add-service`, `/add-tool` scaffold those the way this repo does them, and `/feature` takes a feature from RFC to PR. Before committing a non-trivial change, have the `reviewer` agent review it; for design questions, use the `architect` agent.
 
