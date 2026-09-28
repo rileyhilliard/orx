@@ -44,7 +44,7 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 | `OPENROUTER_PROVIDER_SORT` | `price`, `throughput`, or `latency`; empty lets OpenRouter choose. |
 | `OPENROUTER_ALLOW_FALLBACKS` | Whether OpenRouter may use other providers for the same model (default `true`). |
 | `OPENROUTER_DATA_COLLECTION` / `OPENROUTER_ZDR` | `deny` / `true` restrict routing to providers that don't store prompts / keep zero data. |
-| `MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS` | Reply length (1024), tool-call steps per turn (5), and wall-clock limit per reply (120). |
+| `MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS` | Reply length (8192), model steps per turn (50; hitting it ends the turn with a note), and seconds a reply may go without a chunk from the model (120; time running tools doesn't count). |
 | `LOG_LEVEL`, `ORX_LOG_FORMAT`, `ORX_LOG_FILE` | Log level (`warn` by default; `--log-level` per run), `pretty` or `json` on stderr, and a file to also append JSON lines to. `NO_COLOR=1` turns off color and `FORCE_COLOR=1` forces it. |
 | `ORX_DATA_DIR` | Where chats are saved (default `$XDG_DATA_HOME/orx`, else `~/.local/share/orx`). |
 | `ORX_RELEASES_REPO`, `ORX_RELEASES_URL` | Where `orx update` looks for releases (default `rileyhilliard/orx` on `https://api.github.com`). |

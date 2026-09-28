@@ -23,7 +23,9 @@ export const MessageList = ({
           <>
             {message.tools.map((tool, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
-              <text key={i} fg={theme.tool}>{`→ ${tool.name}(${tool.input})`}</text>
+              <text key={i} fg={tool.status === "error" ? theme.error : theme.tool}>
+                {`→ ${tool.name}(${tool.input})${tool.status ? ` · ${tool.status}` : ""}`}
+              </text>
             ))}
             <text fg={theme.text}>
               {message.text || (streaming && index === messages.length - 1 ? "…" : "")}
@@ -35,6 +37,7 @@ export const MessageList = ({
                   : message.error.message}
               </text>
             ) : null}
+            {message.note ? <text fg={theme.muted}>{message.note}</text> : null}
             {message.usage ? <text fg={theme.faint}>{message.usage}</text> : null}
           </>
         )}

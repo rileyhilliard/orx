@@ -14,6 +14,10 @@ export const upstreamDetail = (error: AiError.AiError): string => {
 
 const CONTEXT_LENGTH = /context length|maximum context|too many tokens|context window/i;
 
+/** The provider rejected the request as longer than the model's context window. */
+export const isContextLengthError = (error: AiError.AiError) =>
+  error.reason._tag === "InvalidRequestError" && CONTEXT_LENGTH.test(error.reason.message);
+
 /**
  * An Effect AI failure as the user sees it. What a retry can't fix (a rejected key, a model
  * with no endpoints, another rejected request) is not retryable; no credits, rate limits, 5xx,

@@ -11,6 +11,15 @@ const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
       return { ...reply, text: reply.text + event.delta };
     case "tool":
       return { ...reply, tools: [...reply.tools, event.call] };
+    case "tool-result":
+      return {
+        ...reply,
+        tools: reply.tools.map((call) =>
+          call.id === event.id ? { ...call, status: event.isFailure ? "error" : "ok" } : call,
+        ),
+      };
+    case "note":
+      return { ...reply, note: event.message };
     case "done":
       return { ...reply, usage: event.usage };
     case "error":

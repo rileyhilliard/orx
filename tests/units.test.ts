@@ -47,6 +47,7 @@ const model = (id: string, name = id): ModelInfo => ({
   id,
   name,
   canonicalSlug: id,
+  supportsTools: true,
   provider: id.split("/")[0] ?? "",
   contextLength: 128_000,
   promptPrice: 0.000001,

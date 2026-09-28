@@ -30,6 +30,8 @@ export const openRouterSettings = (config: AppConfigShape) => ({
     ? { models: [...config.routing.fallbackModels] }
     : {}),
   provider: {
+    // Only endpoints that support every parameter sent, tools above all.
+    require_parameters: true,
     allow_fallbacks: config.routing.allowFallbacks,
     data_collection: config.routing.dataCollection,
     ...(Option.isSome(config.routing.providerSort)

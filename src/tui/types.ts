@@ -4,8 +4,12 @@
  * a message and whether retrying can help.
  */
 export interface UiToolCall {
+  /** Matches the call's `tool-result` event. */
+  readonly id?: string;
   readonly name: string;
   readonly input: string;
+  /** Running until its result arrives; a saved call is ok or error. */
+  readonly status?: "running" | "ok" | "error";
 }
 
 export interface UiMessage {
@@ -15,6 +19,8 @@ export interface UiMessage {
   /** Model, provider, tokens, cost (assistant replies only). */
   readonly usage?: string;
   readonly error?: UiError;
+  /** Why the reply stopped early without failing (the step cap, a repeated tool call). */
+  readonly note?: string;
 }
 
 export interface UiError {
@@ -25,6 +31,8 @@ export interface UiError {
 export type UiEvent =
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "tool"; readonly call: UiToolCall }
+  | { readonly type: "tool-result"; readonly id: string; readonly isFailure: boolean }
+  | { readonly type: "note"; readonly message: string }
   | { readonly type: "done"; readonly usage: string }
   | { readonly type: "error"; readonly error: UiError };
 

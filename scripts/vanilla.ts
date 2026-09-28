@@ -55,6 +55,7 @@ const REMOVE = [
   "src/commands/mcp.ts",
   "src/commands/models.ts",
   "src/core/chat.ts",
+  "src/core/context.ts",
   "src/core/export.ts",
   "src/core/extract.ts",
   "src/core/files.ts",
@@ -76,6 +77,7 @@ const REMOVE = [
   "tests/mcp.test.ts",
   "tests/openrouter-replay.test.ts",
   "tests/recording.test.ts",
+  "tests/turn-history.test.ts",
   "tests/script-layer.test.ts",
 ];
 
