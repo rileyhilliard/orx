@@ -1,14 +1,14 @@
-import { Effect, Option, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import type { AskEvent } from "~/schemas";
-import { Prompt } from "~/schemas";
+import { Prompt, ToolFailure } from "~/schemas";
 import { newChat, sendMessage, type TurnEvent } from "../core/chat";
 import { noteLine, usageLine } from "../core/format";
 import { decodeInput } from "../core/input";
 import { resolveModel, resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { readPipedStdin } from "../core/stdin";
-import { errorBody } from "../errors";
+import { BadInput, errorBody } from "../errors";
 import { Llm } from "../services/Llm";
 import { Output } from "../services/Output";
 import { PERMISSION_MODES } from "../services/permissions";
@@ -31,6 +31,21 @@ const permissionMode = Flag.Literals("permission-mode", PERMISSION_MODES).pipe(
   Flag.withDefault("default"),
 );
 
+const decodeToolFailure = Schema.decodeUnknownOption(ToolFailure);
+
+/** A tool-result for a call Permissions denied, as its `permission-denied` event. */
+const permissionDenied = (event: Extract<TurnEvent, { type: "tool-result" }>) =>
+  Option.filter(decodeToolFailure(event.output), (failure) => failure.denied === true).pipe(
+    Option.map(
+      (failure): AskEvent => ({
+        type: "permission-denied",
+        id: event.id,
+        tool: event.name,
+        message: failure.message,
+      }),
+    ),
+  );
+
 /**
  * One-shot, pipe-friendly: streams the reply to stdout, a usage line to stderr, and saves the
  * exchange as a chat (`orx export <id>`). With --json, NDJSON AskEvents on stdout. With
@@ -50,6 +65,12 @@ export const ask = Command.make(
   ({ words, json, model, cwd, agent, permissionMode }) =>
     Effect.gen(function* () {
       const out = yield* Output;
+      if (!agent && Option.isSome(cwd)) {
+        return yield* new BadInput({ message: "--cwd needs --agent" });
+      }
+      if (!agent && permissionMode !== "default") {
+        return yield* new BadInput({ message: "--permission-mode needs --agent" });
+      }
       yield* (yield* Llm).ready;
       const piped = yield* readPipedStdin;
       const text = yield* decodeInput(Prompt)(
@@ -76,6 +97,12 @@ export const ask = Command.make(
               provider: reply.provider,
               finishReason: reply.finishReason ?? "unknown",
               usage: reply.usage ?? { inputTokens: 0, outputTokens: 0 },
+            });
+          }
+          if (event.type === "tool-result" && event.isFailure) {
+            return Option.match(permissionDenied(event), {
+              onNone: () => emit(event),
+              onSome: (denied) => Effect.andThen(emit(denied), emit(event)),
             });
           }
           return emit(event);

@@ -23,6 +23,16 @@ export const AskEvent = Schema.Union([
     output: Schema.Unknown,
     isFailure: Schema.Boolean,
   }),
+  /**
+   * A tool call Permissions refused (with `--agent`, whatever would ask the user; see
+   * `--permission-mode`). `id` is the call's; its `tool-result` follows with the same message.
+   */
+  Schema.Struct({
+    type: Schema.Literal("permission-denied"),
+    id: Schema.String,
+    tool: Schema.String,
+    message: Schema.String,
+  }),
   /** Why a turn ended early without failing (the step cap, a repeated tool call). */
   Schema.Struct({ type: Schema.Literal("note"), message: Schema.String }),
   Schema.Struct({

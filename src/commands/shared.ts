@@ -18,8 +18,8 @@ export const modelFlag = Flag.String("model").pipe(
 export const newChatId = Effect.sync(() => Schema.decodeSync(ChatId)(crypto.randomUUID()));
 
 /**
- * `--cwd <dir>`: the workspace root instead of the directory orx started in. Parsed on `orx`
- * and `orx ask`; the handlers don't use it yet.
+ * `--cwd <dir>`: the workspace root instead of the directory orx started in, for `orx` (the
+ * coding session) and `orx ask --agent`.
  */
 export const cwdFlag = Flag.String("cwd").pipe(
   Flag.withDescription("Work in this directory instead of the current one"),

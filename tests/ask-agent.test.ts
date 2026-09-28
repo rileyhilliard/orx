@@ -76,6 +76,39 @@ describe("orx ask --agent", () => {
     expect(JSON.stringify(edit?.output)).toContain("interactive");
   });
 
+  it("reports a denied call as a permission-denied event before its tool-result", async () => {
+    const dir = workspace();
+    stub.toolCalls = readThenEdit(dir);
+    const run = await runCli(["ask", "fix it", "--agent", "--cwd", dir, "--json"], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    expect(run.exitCode).toBe(0);
+    const events = ndjson(run.stdout) as Array<{ type: string; id?: string; name?: string }>;
+    const denied = events.filter((e) => e.type === "permission-denied");
+    const editCall = events.find((e) => e.type === "tool-call" && e.name === "edit");
+    expect(denied).toEqual([
+      {
+        type: "permission-denied",
+        id: editCall?.id,
+        tool: "edit",
+        message: expect.stringContaining("edit needs an interactive session"),
+      },
+    ]);
+    const deniedAt = events.indexOf(denied[0] as (typeof events)[number]);
+    expect(events[deniedAt + 1]).toMatchObject({ type: "tool-result", id: editCall?.id });
+  });
+
+  it("refuses --cwd and --permission-mode without --agent", async () => {
+    const env = { OPENROUTER_BASE_URL: stub.baseUrl };
+    const cwd = await runCli(["ask", "hi", "--cwd", workspace()], { env });
+    expect(cwd.exitCode).toBe(2);
+    expect(cwd.stderr).toContain("--cwd needs --agent");
+    const mode = await runCli(["ask", "hi", "--permission-mode", "yolo"], { env });
+    expect(mode.exitCode).toBe(2);
+    expect(mode.stderr).toContain("--permission-mode needs --agent");
+    expect(stub.chatRequests).toHaveLength(0);
+  });
+
   it("refuses a model that can't call tools with exit 2", async () => {
     const models = stub.models;
     stub.models = [{ id: "acme/no-tools", name: "Acme: No Tools", tools: false }];

@@ -30,7 +30,8 @@ export const openRouterSettings = (config: AppConfigShape) => ({
     ? { models: [...config.routing.fallbackModels] }
     : {}),
   provider: {
-    // Only endpoints that support every parameter sent, tools above all.
+    // Only endpoints that support every parameter sent. Every request orx makes needs this:
+    // chat turns send tools (plain `ask` too: currentTime), extract sends a JSON response format.
     require_parameters: true,
     allow_fallbacks: config.routing.allowFallbacks,
     data_collection: config.routing.dataCollection,
