@@ -189,12 +189,6 @@ export const outcomeOf = (exit: Exit.Exit<unknown, unknown>): Outcome => {
     };
   }
   if (isAppError(failure)) return { kind: "failed", error: failure, body: errorBody(failure) };
-  // Code that can't fail (a finalizer, like saving the chat) dies with an AppError instead.
-  const died = cause.reasons
-    .filter(Cause.isDieReason)
-    .map((r) => r.defect)
-    .find(isAppError);
-  if (died !== undefined) return { kind: "failed", error: died, body: errorBody(died) };
   return { kind: "defect", cause, body: INTERNAL };
 };
 

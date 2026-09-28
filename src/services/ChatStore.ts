@@ -2,15 +2,12 @@ import { join } from "node:path";
 import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { type ChatId, StoredChat } from "~/schemas";
 import { Paths } from "../config";
-import { PermissionDenied } from "../errors";
 
 export interface ChatStoreShape {
   readonly get: (id: ChatId) => Effect.Effect<Option.Option<StoredChat>>;
   /**
-   * Dies when the chat can't be written: with PermissionDenied (exit 6, naming the data dir)
-   * when the dir isn't writable, else with an error naming the file. It dies rather than
-   * fails because it runs as the turn's finalizer, which can't fail; outcomeOf reads an
-   * AppError defect like a failure.
+   * Dies when the chat can't be written, with an error that names the data dir (permission
+   * denied) or the file. It runs as the turn's finalizer, which can't fail.
    */
   readonly save: (chat: StoredChat) => Effect.Effect<void>;
   /** Every saved chat, newest first. Unreadable files are skipped (and logged). */
@@ -61,11 +58,12 @@ const makeFileStore = Effect.gen(function* () {
       }).pipe(
         Effect.catch((error) =>
           Effect.die(
-            error._tag === "PlatformError" && error.reason._tag === "PermissionDenied"
-              ? new PermissionDenied({
-                  message: `Can't save the chat: ${dir} isn't writable (permission denied). Fix its permissions or set ORX_DATA_DIR to a writable directory.`,
-                })
-              : new Error(`Saving chat ${chat.id} to ${fileFor(chat.id)} failed`, { cause: error }),
+            new Error(
+              error._tag === "PlatformError" && error.reason._tag === "PermissionDenied"
+                ? `Can't save chat ${chat.id}: ${dir} isn't writable (permission denied); fix its permissions or set ORX_DATA_DIR to a writable directory`
+                : `Saving chat ${chat.id} to ${fileFor(chat.id)} failed`,
+              { cause: error },
+            ),
           ),
         ),
       ),

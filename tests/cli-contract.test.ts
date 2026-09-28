@@ -237,19 +237,24 @@ describe("orx ask", () => {
     }
   });
 
-  it("exits 6 naming the data dir when the chat can't be saved there", async () => {
+  it("names the data dir in the logged defect when the chat can't be saved there", async () => {
     const dataDir = join(tempRoot(), "data");
     mkdirSync(dataDir, { mode: 0o555 });
     try {
       const run = await runCli(["ask", "hi", "--json"], {
         env: { OPENROUTER_BASE_URL: stub.baseUrl, ORX_DATA_DIR: dataDir },
       });
-      expect(run.exitCode).toBe(6);
+      // The save runs in the turn's finalizer, which can't fail with a typed error, so this
+      // is a defect (exit 1) whose log line says what to fix.
+      expect(run.exitCode).toBe(1);
       expect(ndjson(run.stdout).at(-1)).toMatchObject({
         type: "error",
-        error: { tag: "PermissionDenied", retryable: false },
+        error: { tag: "InternalError" },
       });
-      expect(JSON.parse(run.stderr).error.message).toContain(dataDir);
+      const defect = run.logs.find((r) => r.level === "error");
+      expect(JSON.stringify(defect)).toContain(
+        `${dataDir}/chats isn't writable (permission denied)`,
+      );
     } finally {
       chmodSync(dataDir, 0o755);
     }
