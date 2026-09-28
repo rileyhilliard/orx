@@ -9,7 +9,16 @@ import { Llm } from "../services/Llm";
 import { OpenRouterModels } from "../services/OpenRouterModels";
 import { type ApprovalEvent, Permissions } from "../services/permissions";
 import { ChatTools, type ChatToolsLive } from "../tools";
-import { ATTACHMENT_OPTIONS, budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
+import {
+  ATTACHMENT_OPTIONS,
+  budgetFor,
+  canElide,
+  ELIDE_ALL,
+  type Elision,
+  elide,
+  NOTHING_ELIDED,
+  withCacheBreakpoints,
+} from "./context";
 import { isContextLengthError, isRetryableUpstream, timedOut, toUpstreamError } from "./upstream";
 
 /** What the chat tools' handlers need (ChatToolsLive in the app, the same layer in tests). */
@@ -162,6 +171,8 @@ interface TurnState {
   pendingCalls: Map<string, { name: string; input: unknown }>;
   /** The last tool call's name and input, and how many times in a row it was made. */
   lastCall: { key: string; name: string; count: number } | undefined;
+  /** What the requests so far elided; later steps keep it (`prepare`). */
+  elision: Elision;
 }
 
 /** When the model last sent a part, and how many tool calls are running (not idle time). */
@@ -588,6 +599,7 @@ export const runTurn = <R = ChatToolHandlers, E = never>(options: TurnOptions<R,
         provider: undefined,
         pendingCalls: new Map(),
         lastCall: undefined,
+        elision: NOTHING_ELIDED,
       });
       const collected = yield* Ref.make<StepResult>({ parts: [], finishReason: "unknown" });
       const startedAt = yield* Clock.currentTimeMillis;
@@ -597,19 +609,25 @@ export const runTurn = <R = ChatToolHandlers, E = never>(options: TurnOptions<R,
       // an async iterator's return) ends the stream with a Success exit, not an interruption.
       const finished = yield* Ref.make(false);
 
-      /** The prompt as sent: old tool outputs elided to fit, and cache breakpoints. */
+      /**
+       * The prompt as sent: old tool outputs elided to fit, and cache breakpoints. What earlier
+       * steps elided stays elided (TurnState), so the prefix the provider cached is sent again
+       * unchanged until the prompt crosses the limit once more.
+       */
       const prepare = (prompt: Prompt.Prompt, harder: boolean) =>
         Effect.gen(function* () {
           let sent = prompt;
           if (canElide(prompt)) {
-            const budget = harder ? 0 : budgetFor(yield* contextLength);
+            const budget = harder ? ELIDE_ALL : budgetFor(yield* contextLength);
             if (budget !== undefined) {
-              const result = elide(prompt, budget);
+              const { elision } = yield* Ref.get(state);
+              const result = elide(prompt, budget, elision);
               if (result.elided > 0) {
                 yield* Effect.logInfo("Elided old tool outputs").pipe(
                   Effect.annotateLogs({ elided: result.elided, harder }),
                 );
               }
+              yield* Ref.update(state, (s) => ({ ...s, elision: result.elision }));
               sent = result.prompt;
             }
           }

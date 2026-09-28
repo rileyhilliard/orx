@@ -7,6 +7,11 @@ import { Prompt } from "effect/unstable/ai";
 
 /** Elide once the estimated prompt passes this share of the model's context window. */
 export const ELIDE_AT = 0.6;
+/**
+ * ...down to this share, so the next steps have room to grow before the elided set has to
+ * change again (each change rewrites an early message, which the provider's cache then misses).
+ */
+export const ELIDE_TO = 0.4;
 /** Tool outputs and attachments up to this many characters are never elided. */
 export const ELIDE_MIN_CHARS = 2000;
 /** The tool results of the last this-many model steps are never elided. */
@@ -127,27 +132,63 @@ const candidatesOf = (prompt: Prompt.Prompt) => {
 export const canElide = (prompt: Prompt.Prompt) => candidatesOf(prompt).candidates.length > 0;
 
 /**
- * Replaces tool outputs and older messages' `@` attachments over ELIDE_MIN_CHARS with a stub,
- * oldest first, until the estimate is at or under `budgetTokens` (0 elides every candidate).
- * Never the last PROTECTED_STEPS steps' results, NEVER_ELIDED tools', or the last user
- * message's attachments. Returns the prompt unchanged when nothing is elided.
+ * What a turn has elided so far: tool results by call id, and user messages' attachments by
+ * message index (a turn's prompt only grows at the end, so indices hold). The turn keeps it
+ * across steps, so an output stays elided and the prompt's prefix stays byte-identical.
+ */
+export interface Elision {
+  readonly tools: ReadonlySet<string>;
+  readonly messages: ReadonlySet<number>;
+}
+
+export const NOTHING_ELIDED: Elision = { tools: new Set(), messages: new Set() };
+
+/** When to elide more (the estimate is over `limit` tokens), and down to how many (`target`). */
+export interface ElideBudget {
+  readonly limit: number;
+  readonly target: number;
+}
+
+/** Every candidate: the retry after the provider rejected the prompt as too long. */
+export const ELIDE_ALL: ElideBudget = { limit: 0, target: 0 };
+
+const isElided = (elision: Elision, candidate: Candidate) =>
+  candidate.kind === "tool"
+    ? elision.tools.has(candidate.id)
+    : elision.messages.has(candidate.message);
+
+/**
+ * Replaces tool outputs and older messages' `@` attachments over ELIDE_MIN_CHARS with a stub.
+ * What `previous` elided stays elided. Only when the estimate is still over `budget.limit` are
+ * more elided, oldest first, until it is at or under `budget.target`. Never the last
+ * PROTECTED_STEPS steps' results, NEVER_ELIDED tools', or the last user message's attachments.
+ * Returns the whole elision (for the next step) and how many it added; the prompt is unchanged
+ * when nothing is elided.
  */
 export const elide = (
   prompt: Prompt.Prompt,
-  budgetTokens: number,
-): { readonly prompt: Prompt.Prompt; readonly elided: number } => {
+  budget: ElideBudget,
+  previous: Elision = NOTHING_ELIDED,
+): { readonly prompt: Prompt.Prompt; readonly elision: Elision; readonly elided: number } => {
   const { candidates, params } = candidatesOf(prompt);
   let estimate = estimateTokens(prompt);
-  const tools = new Set<string>();
-  const messages = new Set<number>();
   for (const candidate of candidates) {
-    if (estimate <= budgetTokens) break;
-    if (candidate.kind === "tool") tools.add(candidate.id);
-    else messages.add(candidate.message);
-    estimate -= Math.floor(candidate.chars / 4);
+    if (isElided(previous, candidate)) estimate -= Math.floor(candidate.chars / 4);
   }
-  const elided = tools.size + messages.size;
-  if (elided === 0) return { prompt, elided: 0 };
+  const tools = new Set(previous.tools);
+  const messages = new Set(previous.messages);
+  if (estimate > budget.limit) {
+    for (const candidate of candidates) {
+      if (estimate <= budget.target) break;
+      if (isElided(previous, candidate)) continue;
+      if (candidate.kind === "tool") tools.add(candidate.id);
+      else messages.add(candidate.message);
+      estimate -= Math.floor(candidate.chars / 4);
+    }
+  }
+  const elision: Elision = { tools, messages };
+  const elided = tools.size + messages.size - previous.tools.size - previous.messages.size;
+  if (tools.size + messages.size === 0) return { prompt, elision, elided: 0 };
   const replaced = prompt.content.map((message, index) => {
     if (message.role === "user" && messages.has(index)) {
       return Prompt.makeMessage("user", {
@@ -179,12 +220,17 @@ export const elide = (
       options: message.options,
     });
   });
-  return { prompt: Prompt.fromMessages(replaced), elided };
+  return { prompt: Prompt.fromMessages(replaced), elision, elided };
 };
 
-/** The token budget for a model's window, or undefined when the window isn't known. */
-export const budgetFor = (contextLength: number | null | undefined) =>
-  contextLength ? Math.floor(contextLength * ELIDE_AT) : undefined;
+/** The elide budget for a model's window, or undefined when the window isn't known. */
+export const budgetFor = (contextLength: number | null | undefined): ElideBudget | undefined =>
+  contextLength
+    ? {
+        limit: Math.floor(contextLength * ELIDE_AT),
+        target: Math.floor(contextLength * ELIDE_TO),
+      }
+    : undefined;
 
 const ephemeral = { openrouter: { cacheControl: { type: "ephemeral" as const } } };
 

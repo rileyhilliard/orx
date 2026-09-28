@@ -48,18 +48,18 @@ const FILES = ["a.txt", "b.txt", "c.txt", "d.txt"];
  * A workspace with four files of about 8,600 characters each as `read` returns them (about
  * 2,150 estimated tokens each), so three of them pass 60% of a 10,000-token window.
  */
-const workspace = () => {
+const workspace = (files = FILES, lines = 80) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "orx-context-")));
-  for (const name of FILES) {
+  for (const name of files) {
     const line = `${name} `.repeat(20);
-    writeFileSync(join(root, name), `${Array.from({ length: 80 }, () => line).join("\n")}\n`);
+    writeFileSync(join(root, name), `${Array.from({ length: lines }, () => line).join("\n")}\n`);
   }
   return root;
 };
 
 /** One step per file read, each its own model step, then a closing text step. */
-const readEachFile = () => [
-  ...FILES.map((path) => ({ toolCalls: [{ name: "read", arguments: JSON.stringify({ path }) }] })),
+const readEachFile = (files = FILES) => [
+  ...files.map((path) => ({ toolCalls: [{ name: "read", arguments: JSON.stringify({ path }) }] })),
   { text: "Read them all." },
 ];
 
@@ -136,6 +136,41 @@ describe("the context window in a turn", () => {
     for (const [index, name] of FILES.entries()) {
       expect(outputs[index]).toContain(`${name} ${name}`);
       expect(outputs[index]).not.toContain("elided");
+    }
+  });
+
+  it("elides down to 40% once past 60%, then reuses that set, so the next steps send an identical prefix", async () => {
+    // Eight files of about 1,000 estimated tokens each: one more per step.
+    const files = Array.from({ length: 8 }, (_, i) => `f${i + 1}.txt`);
+    const root = workspace(files, 36);
+    stub.steps = readEachFile(files);
+    await inSession(root, send("read every file", "acme/small"));
+
+    // Each request's tool results, `e` elided and `f` full, oldest first.
+    const shapes = stub.chatRequests.map((request) =>
+      toolResults(request)
+        .map((result) => (result.endsWith(":elided") ? "e" : "f"))
+        .join(""),
+    );
+    // Crossing 60% elides several at once (down to 40%), not one more per step; the next steps
+    // reuse the set, and only crossing 60% again extends it.
+    expect(shapes).toEqual([
+      "",
+      "f",
+      "ff",
+      "fff",
+      "ffff",
+      "eeeff",
+      "eeefff",
+      "eeeffff",
+      "eeeeeeff",
+    ]);
+    // A step that elides nothing new starts with exactly the messages the one before it sent,
+    // so the provider's prompt cache keeps hitting.
+    const messages = stub.chatRequests.map((r) => (r as { messages: WireMessage[] }).messages);
+    for (const index of [6, 7]) {
+      const previous = messages[index - 1] ?? [];
+      expect(messages[index]?.slice(0, previous.length)).toEqual(previous);
     }
   });
 
