@@ -4,6 +4,7 @@ import { Tool } from "effect/unstable/ai";
 import { ToolFailure, WriteInput } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
+import { WRITE_MAX_DIFF_CHARS } from "./limits";
 import { ensureResolvesTo, freshnessFailure, permit, platformFailure, readUtf8 } from "./permit";
 
 export const Write = Tool.make("write", {
@@ -91,11 +92,12 @@ export const writeFile = ({ path: input, content }: WriteInput) =>
         yield* fileState.record(path, bytes).pipe(Effect.mapError(failedWith));
         const lines =
           content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
-        // An overwrite returns its diff, as edit does; a new file's diff would only repeat
-        // the content the model just sent.
-        return exists
-          ? `Overwrote ${shown} (${lines} lines)\n${diff}`
-          : `Created ${shown} (${lines} lines)`;
+        // An overwrite returns its diff, as edit does, unless it would flood the context; a new
+        // file's diff would only repeat the content the model just sent.
+        if (!exists) return `Created ${shown} (${lines} lines)`;
+        return diff.length > WRITE_MAX_DIFF_CHARS
+          ? `Overwrote ${shown} (${lines} lines; the diff is too large to show)`
+          : `Overwrote ${shown} (${lines} lines)\n${diff}`;
       }),
     );
   });

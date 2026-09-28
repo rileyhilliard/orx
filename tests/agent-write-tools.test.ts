@@ -20,6 +20,7 @@ import { type PermissionMode, Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { makeOutputBuffer, runBash } from "~/tools/bash";
 import { editFile, replaceIn, stripLineNumbers } from "~/tools/edit";
+import { WRITE_MAX_DIFF_CHARS } from "~/tools/limits";
 import { readFile } from "~/tools/read";
 import { writeFile } from "~/tools/write";
 import { ndjson, runCli } from "./helpers/cli";
@@ -300,6 +301,17 @@ describe("write", () => {
       "Overwrote a.txt (1 lines)\n--- a.txt\n+++ a.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
     );
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("new\n");
+  });
+
+  it("leaves out an overwrite's diff when it's too large to return", async () => {
+    const root = fileIn("a.txt", "old\n");
+    const content = "x".repeat(WRITE_MAX_DIFF_CHARS);
+    const result = await run(
+      root,
+      Effect.flatMap(readFile({ path: "a.txt" }), () => writeFile({ path: "a.txt", content })),
+    );
+    expect(result.value).toBe("Overwrote a.txt (1 lines; the diff is too large to show)");
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe(content);
   });
 
   it("refuses to overwrite a file that wasn't read or went stale", async () => {

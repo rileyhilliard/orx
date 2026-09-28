@@ -25,3 +25,6 @@ export const BASH_DEFAULT_TIMEOUT_MS = 120_000;
 export const BASH_MAX_TIMEOUT_MS = 600_000;
 /** `bash` keeps at most this many characters of output: the first and last halves. */
 export const BASH_MAX_OUTPUT_CHARS = 30_000;
+
+/** `write` leaves an overwrite's diff out of its result when the diff is longer than this. */
+export const WRITE_MAX_DIFF_CHARS = 30_000;
