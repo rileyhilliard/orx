@@ -3,8 +3,8 @@
 // lint time; this hook stops them before the write, with the fix in the reason.
 //
 //   Bun, bun:*, @effect/platform-bun, @opentui/*, the Bun global
-//                             only in src/bin.ts and src/tui/**: everything else runs under
-//                             vitest on Node, through Effect's FileSystem, Path, Stdio, HttpClient
+//                             only in src/bin.ts and src/tui/**: everything else is platform-free
+//                             and gets Effect's FileSystem, Path, Stdio, HttpClient from src/bin.ts
 //   process.env               only in src/config.ts (Effect Config) and src/bin.ts (the DEV clear)
 //   console.*                 nowhere in src/: results go through Output, diagnostics through
 //                             Effect.log*; a stray stdout line corrupts `--json`
@@ -80,12 +80,12 @@ function reasonsFor(file: string, lines: string[]): string[] {
   const reasons: string[] = [];
   if (!bunSide && has(PLATFORM_IMPORT)) {
     reasons.push(
-      "imports Bun or OpenTUI outside src/bin.ts and src/tui/. This code runs under vitest on Node: use Effect's FileSystem, Path, Stdio, or HttpClient (BunServices is provided in src/bin.ts, NodeServices in tests). A command that needs the TUI loads it with importTui (src/commands/load-tui.ts), a dynamic import of src/tui/launch.tsx.",
+      "imports Bun or OpenTUI outside src/bin.ts and src/tui/. The rest of src/ is platform-free: use Effect's FileSystem, Path, Stdio, or HttpClient (BunServices is provided in src/bin.ts, and in tests by tests/helpers/cli.ts). A command that needs the TUI loads it with importTui (src/commands/load-tui.ts), a dynamic import of src/tui/launch.tsx.",
     );
   }
   if (!bunSide && has(BUN_GLOBAL)) {
     reasons.push(
-      "uses the Bun global outside src/bin.ts and src/tui/. This code runs under vitest on Node: use the Effect platform services instead.",
+      "uses the Bun global outside src/bin.ts and src/tui/. The rest of src/ is platform-free: use the Effect platform services instead.",
     );
   }
   if (file !== "config.ts" && file !== "bin.ts" && has(PROCESS_ENV)) {
@@ -110,7 +110,7 @@ function reasonsFor(file: string, lines: string[]): string[] {
   }
   if (!file.startsWith("tui/") && importsTui(file, lines)) {
     reasons.push(
-      "statically imports src/tui/ from outside it. That loads OpenTUI on every run and in every vitest file that imports it: load it with importTui from src/commands/load-tui.ts (a dynamic import), as src/commands/ui.ts does, and put shared types outside src/tui/.",
+      "statically imports src/tui/ from outside it. That loads OpenTUI on every run and in every test file that imports it: load it with importTui from src/commands/load-tui.ts (a dynamic import), as src/commands/ui.ts does, and put shared types outside src/tui/.",
     );
   }
   if (has(ZOD_IMPORT)) {

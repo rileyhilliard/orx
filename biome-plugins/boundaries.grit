@@ -1,6 +1,6 @@
 // Repo boundaries from .claude/rules/src/ that a pattern can check. Messages name the rule to read.
-// Only src/bin.ts and src/tui/** may touch Bun or OpenTUI: everything else runs under vitest on
-// Node, so it goes through Effect's FileSystem, Path, Stdio, and HttpClient instead.
+// Only src/bin.ts and src/tui/** may touch Bun or OpenTUI: everything else is platform-free and
+// goes through Effect's FileSystem, Path, Stdio, and HttpClient, which src/bin.ts provides.
 language js
 
 or {
@@ -13,7 +13,7 @@ or {
       and {
         $src <: r"[\"'](?:bun|bun:[^\"']*|@effect/platform-bun[^\"']*|@opentui/[^\"']*)[\"']",
         $filename <: not r".*/src/(?:bin\.ts|tui/.*)",
-        register_diagnostic(span=$src, message="Bun or OpenTUI import outside src/bin.ts and src/tui/: this code runs under vitest on Node. Use Effect's FileSystem, Path, Stdio, or HttpClient. See .claude/rules/src/cli.md, Platform boundary.")
+        register_diagnostic(span=$src, message="Bun or OpenTUI import outside src/bin.ts and src/tui/: the rest of src/ is platform-free. Use Effect's FileSystem, Path, Stdio, or HttpClient. See .claude/rules/src/cli.md, Platform boundary.")
       },
       and {
         $src <: r"[\"'](?:zod|zod/[^\"']*|@effect/schema[^\"']*)[\"']",
@@ -27,7 +27,7 @@ or {
       }
     }
   },
-  // A static import of src/tui/ from outside it loads OpenTUI on every run and in vitest. A dynamic
+  // A static import of src/tui/ from outside it loads OpenTUI on every run and in every test that imports it. A dynamic
   // import("../tui/launch") (importTui in src/commands/load-tui.ts) is the way in, so only
   // JsModuleSource counts.
   JsModuleSource() as $src where {
@@ -69,7 +69,7 @@ or {
   `Bun.$x` as $b where {
     $filename <: r".*/src/.*",
     $filename <: not r".*/src/(?:bin\.ts|tui/.*)",
-    register_diagnostic(span=$b, message="The Bun global outside src/bin.ts and src/tui/: this code runs under vitest on Node. See .claude/rules/src/cli.md, Platform boundary.")
+    register_diagnostic(span=$b, message="The Bun global outside src/bin.ts and src/tui/: the rest of src/ is platform-free. See .claude/rules/src/cli.md, Platform boundary.")
   },
   or {
     JsStringLiteralExpression(),
