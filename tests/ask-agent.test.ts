@@ -76,6 +76,19 @@ describe("orx ask --agent", () => {
     expect(JSON.stringify(edit?.output)).toContain("interactive");
   });
 
+  it("refuses a model that can't call tools with exit 2", async () => {
+    const models = stub.models;
+    stub.models = [{ id: "acme/no-tools", name: "Acme: No Tools", tools: false }];
+    const run = await runCli(
+      ["ask", "hi", "--agent", "--cwd", workspace(), "--model", "acme/no-tools"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    stub.models = models;
+    expect(run.exitCode).toBe(2);
+    expect(run.stderr).toContain("doesn't support tool calling");
+    expect(stub.chatRequests).toHaveLength(0);
+  });
+
   it("gives plain ask no workspace tools", async () => {
     const run = await runCli(["ask", "hi", "--json"], {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },

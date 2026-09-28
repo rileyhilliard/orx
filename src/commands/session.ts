@@ -3,7 +3,7 @@ import { Flag } from "effect/unstable/cli";
 import { ChatId } from "~/schemas";
 import { loadChat, newChat } from "../core/chat";
 import { decodeInput } from "../core/input";
-import { resolveModel } from "../core/models";
+import { resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { NotInteractive } from "../errors";
 import { importTui } from "./load-tui";
@@ -60,10 +60,10 @@ export const runSession = ({
     const requested = Option.getOrUndefined(model);
     const initial = Option.isSome(resume)
       ? yield* decodeInput(ChatId)(resume.value).pipe(Effect.flatMap(loadChat))
-      : newChat(yield* newChatId, yield* resolveModel(requested));
+      : newChat(yield* newChatId, yield* resolveToolModel(requested));
     const start =
       requested && Option.isSome(resume)
-        ? { ...initial, model: yield* resolveModel(requested) }
+        ? { ...initial, model: yield* resolveToolModel(requested) }
         : initial;
     const { launchChat } = yield* importTui;
     yield* launchChat(start, session).pipe(Effect.provide(session.layer));

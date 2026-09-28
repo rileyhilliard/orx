@@ -5,7 +5,7 @@ import { Prompt } from "~/schemas";
 import { newChat, sendMessage, type TurnEvent } from "../core/chat";
 import { noteLine, usageLine } from "../core/format";
 import { decodeInput } from "../core/input";
-import { resolveModel } from "../core/models";
+import { resolveModel, resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { readPipedStdin } from "../core/stdin";
 import { errorBody } from "../errors";
@@ -55,7 +55,9 @@ export const ask = Command.make(
       const text = yield* decodeInput(Prompt)(
         [words.join(" "), piped].filter((part) => part && part.trim() !== "").join("\n\n"),
       );
-      const modelId = yield* resolveModel(Option.getOrUndefined(model));
+      const modelId = yield* (agent ? resolveToolModel : resolveModel)(
+        Option.getOrUndefined(model),
+      );
       const chat = newChat(yield* newChatId, modelId);
       const emit = (event: AskEvent) => out.json(event);
 
