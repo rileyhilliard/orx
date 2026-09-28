@@ -187,12 +187,11 @@ describe("orx ask --agent", () => {
     ]);
   });
 
-  it("gives plain ask no workspace tools", async () => {
+  it("gives plain ask no tools", async () => {
     const run = await runCli(["ask", "hi", "--json"], {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(0);
-    const request = stub.chatRequests[0] as { tools?: Array<{ function: { name: string } }> };
-    expect(request.tools?.map((t) => t.function.name)).toEqual(["currentTime"]);
+    expect(stub.chatRequests[0]).not.toHaveProperty("tools");
   });
 });

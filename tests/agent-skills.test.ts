@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ndjson, runCli, tempRoot } from "./helpers/cli";
+import { askEvents, runCli, tempRoot } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 // A user-level skill (~/.config/orx/skills/<name>/) through a whole agent turn: the model sees
@@ -63,7 +63,7 @@ describe("a user-level skill in an agent turn", () => {
     expect(system).toContain("release");
     expect(system).toContain("Cut a release of this project");
 
-    const results = (ndjson(run.stdout) as ToolResult[]).filter((e) => e.type === "tool-result");
+    const results = (askEvents(run.stdout) as ToolResult[]).filter((e) => e.type === "tool-result");
     const byOutput = (text: string) => results.find((r) => JSON.stringify(r.output).includes(text));
     expect(results.find((r) => r.name === "skill")).toMatchObject({ isFailure: false });
     expect(JSON.stringify(results.find((r) => r.name === "skill")?.output)).toContain(

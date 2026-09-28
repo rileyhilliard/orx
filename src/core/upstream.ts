@@ -143,7 +143,7 @@ export const toUpstreamError = (error: AiError.AiError): UpstreamUnavailable => 
 
 /**
  * Whether trying the same request again can succeed, by the same rules as the message the
- * user sees: every automatic retry (a turn's step, extract) decides with this.
+ * user sees: a turn's step retry decides with this.
  */
 export const isRetryableUpstream = (error: AiError.AiError): boolean =>
   toUpstreamError(error).retryable;

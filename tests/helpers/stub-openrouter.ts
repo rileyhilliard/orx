@@ -162,9 +162,8 @@ const readBody = (req: IncomingMessage) =>
 
 /**
  * A local stand-in for the OpenRouter API: GET /models and streaming POST /chat/completions.
- * Tests, e2e, and `bun run stub` point orx at it through OPENROUTER_BASE_URL. A request with
- * `stream: false` (structured output, `orx extract`) gets one JSON completion of
- * `completion.text`. Port 0 (the default) picks a free port.
+ * Tests, e2e, and `bun run stub` point orx at it through OPENROUTER_BASE_URL. Port 0 (the
+ * default) picks a free port.
  */
 export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => {
   const state = {
@@ -259,28 +258,6 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
       const usageJson = usage
         ? { ...usage, total_tokens: usage.prompt_tokens + usage.completion_tokens }
         : undefined;
-      if (body.stream !== true) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify({
-            id: "gen-stub-1",
-            object: "chat.completion",
-            created: 1,
-            system_fingerprint: "stub",
-            model,
-            provider,
-            choices: [
-              {
-                index: 0,
-                message: { role: "assistant", content: text },
-                finish_reason: "stop",
-              },
-            ],
-            usage: usageJson,
-          }),
-        );
-        return;
-      }
       const partial = state.hangAfter ?? state.dropAfter;
       if (partial !== undefined) {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });

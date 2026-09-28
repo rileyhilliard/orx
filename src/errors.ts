@@ -43,12 +43,6 @@ export class UpstreamUnavailable extends Schema.TaggedError<UpstreamUnavailable>
   { message: Schema.String, retryable: Schema.Boolean, detail: Schema.optional(Schema.String) },
 ) {}
 
-/** The model's structured output didn't decode against its schema. Exit 5. */
-export class InvalidModelOutput extends Schema.TaggedError<InvalidModelOutput>()(
-  "InvalidModelOutput",
-  { message: Schema.String },
-) {}
-
 /** A file orx must write isn't writable (a root-owned install dir for `update`). Exit 6. */
 export class PermissionDenied extends Schema.TaggedError<PermissionDenied>()("PermissionDenied", {
   message: Schema.String,
@@ -70,7 +64,6 @@ export type AppError =
   | UnknownModel
   | NotInteractive
   | UpstreamUnavailable
-  | InvalidModelOutput
   | PermissionDenied
   | TuiUnavailable;
 
@@ -83,7 +76,6 @@ export const APP_ERROR_TAGS: ReadonlySet<string> = new Set<AppError["_tag"]>([
   "UnknownModel",
   "NotInteractive",
   "UpstreamUnavailable",
-  "InvalidModelOutput",
   "PermissionDenied",
   "TuiUnavailable",
 ]);
@@ -109,8 +101,6 @@ export const exitCodeFor = (error: AppError): number => {
       return 3;
     case "UpstreamUnavailable":
       return 4;
-    case "InvalidModelOutput":
-      return 5;
     case "PermissionDenied":
       return 6;
   }
@@ -128,9 +118,6 @@ export const retryableFor = (error: AppError): boolean => {
     case "PermissionDenied":
     case "TuiUnavailable":
       return false;
-    // The model may return valid output on another try.
-    case "InvalidModelOutput":
-      return true;
     case "UpstreamUnavailable":
       return error.retryable;
   }

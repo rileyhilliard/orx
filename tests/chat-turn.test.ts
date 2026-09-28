@@ -27,6 +27,22 @@ beforeEach(() => {
   stub.steps = [];
 });
 
+/** `ask --agent --json` in a fresh workspace, where the workspace tools run without asking. */
+const agentAsk = (prompt: string, env: Record<string, string> = {}) =>
+  runCli(
+    [
+      "ask",
+      prompt,
+      "--agent",
+      "--cwd",
+      realpathSync(mkdtempSync(join(tmpdir(), "orx-turn-"))),
+      "--json",
+    ],
+    { env: { OPENROUTER_BASE_URL: stub.baseUrl, ...env } },
+  );
+
+const glob = (pattern: unknown) => ({ name: "glob", arguments: JSON.stringify({ pattern }) });
+
 describe("a chat turn", () => {
   it("times out a stalled stream after MAX_STREAM_SECONDS and saves the partial reply", async () => {
     stub.completion = { ...stub.completion, text: "one two three four" };
@@ -87,11 +103,8 @@ describe("a chat turn", () => {
   });
 
   it("stops the tool loop at MAX_TOOL_STEPS", async () => {
-    stub.replay(["tool.1", "tool.1", "tool.1"]);
-    const run = await runCli(["ask", "time?", "--json"], {
-      env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_TOOL_STEPS: "2" },
-    });
-    stub.replay([]);
+    stub.toolCalls = [glob("*.ts"), glob("*.md"), glob("*.json")];
+    const run = await agentAsk("find files", { MAX_TOOL_STEPS: "2" });
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(2);
     const events = askEvents(run.stdout);
@@ -103,11 +116,9 @@ describe("a chat turn", () => {
   });
 
   it("ends the turn with a note when the model repeats one call with the same input", async () => {
-    const same = { name: "currentTime", arguments: '{"timeZone":"UTC"}' };
+    const same = glob("*.ts");
     stub.toolCalls = [same, same, same, same];
-    const run = await runCli(["ask", "time?", "--json"], {
-      env: { OPENROUTER_BASE_URL: stub.baseUrl },
-    });
+    const run = await agentAsk("find files");
     expect(run.exitCode).toBe(0);
     // The third identical call still runs; the model isn't prompted a fourth time.
     expect(stub.chatRequests).toHaveLength(3);
@@ -115,18 +126,15 @@ describe("a chat turn", () => {
     expect(events.filter((e) => e.type === "tool-result")).toHaveLength(3);
     expect(events.at(-2)).toMatchObject({
       type: "note",
-      message: "Stopped: the model called currentTime with the same input 3 times in a row.",
+      message: "Stopped: the model called glob with the same input 3 times in a row.",
     });
     expect(events.at(-1)).toMatchObject({ type: "done", finishReason: "tool-calls" });
   });
 
   it("keeps going when a repeated call's input changes", async () => {
-    const utc = { name: "currentTime", arguments: '{"timeZone":"UTC"}' };
-    const paris = { name: "currentTime", arguments: '{"timeZone":"Europe/Paris"}' };
-    stub.toolCalls = [utc, utc, paris, utc];
-    const run = await runCli(["ask", "time?", "--json"], {
-      env: { OPENROUTER_BASE_URL: stub.baseUrl },
-    });
+    const ts = glob("*.ts");
+    stub.toolCalls = [ts, ts, glob("*.md"), ts];
+    const run = await agentAsk("find files");
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(5);
     const events = askEvents(run.stdout);
@@ -168,10 +176,8 @@ describe("a chat turn", () => {
   });
 
   it("returns a tool's bad input to the model instead of failing the turn", async () => {
-    stub.toolCalls = [{ name: "currentTime", arguments: '{"timeZone":"Paris"}' }];
-    const run = await runCli(["ask", "time in Paris?", "--json"], {
-      env: { OPENROUTER_BASE_URL: stub.baseUrl },
-    });
+    stub.toolCalls = [glob(5)];
+    const run = await agentAsk("find files");
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(2);
     const second = stub.chatRequests[1] as { messages: Array<{ role: string; content: unknown }> };

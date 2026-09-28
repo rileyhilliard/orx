@@ -1,6 +1,6 @@
 import { OpenRouterLanguageModel } from "@effect/ai-openrouter";
-import { Cause, Clock, Duration, Effect, Exit, type Layer, Option, Ref, Stream } from "effect";
-import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
+import { Cause, Clock, Duration, Effect, Exit, Option, Ref, Stream } from "effect";
+import { AiError, LanguageModel, Prompt, Response, Toolkit } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
 import { loadConfig } from "../config";
 import { isAppError, NotFound, type PermissionDenied, UpstreamUnavailable } from "../errors";
@@ -8,7 +8,6 @@ import { ChatStore } from "../services/ChatStore";
 import { Llm } from "../services/Llm";
 import { OpenRouterModels } from "../services/OpenRouterModels";
 import { type ApprovalEvent, Permissions } from "../services/permissions";
-import { ChatTools, type ChatToolsLive } from "../tools";
 import {
   ATTACHMENT_OPTIONS,
   budgetFor,
@@ -21,9 +20,6 @@ import {
 } from "./context";
 import { isContextLengthError, isRetryableUpstream, timedOut, toUpstreamError } from "./upstream";
 
-/** What the chat tools' handlers need (ChatToolsLive in the app, the same layer in tests). */
-export type ChatToolHandlers = Layer.Success<typeof ChatToolsLive>;
-
 /**
  * The tools a turn offers, with their handlers: a `Toolkit` (it is an Effect that needs its
  * handler layer, `R`). Tools must use `failureMode: "return"`, so a failing tool is a result
@@ -32,8 +28,8 @@ export type ChatToolHandlers = Layer.Success<typeof ChatToolsLive>;
 // biome-ignore lint/suspicious/noExplicitAny: WithHandler is invariant in its tools; any toolkit fits.
 export type TurnToolkit<R> = Effect.Effect<Toolkit.WithHandler<any>, never, R>;
 
-/** The toolkit a turn uses unless the caller passes one. */
-export const defaultToolkit: TurnToolkit<ChatToolHandlers> = ChatTools;
+/** The toolkit a turn uses unless the caller passes one: none (plain `orx ask`). */
+export const defaultToolkit: TurnToolkit<never> = Toolkit.empty;
 
 /** The same tool with identical input this many times in a row ends the turn with a note. */
 export const MAX_REPEATED_CALLS = 3;
@@ -181,8 +177,8 @@ interface Activity {
   readonly running: number;
 }
 
-/** OpenRouter's provider and cost, from a finish part's metadata (extract reads it too). */
-export const readOpenRouter = (part: Response.FinishPart) => {
+/** OpenRouter's provider and cost, from a finish part's metadata. */
+const readOpenRouter = (part: Response.FinishPart) => {
   const openrouter = (part.metadata as Record<string, unknown> | undefined)?.openrouter as
     | { provider?: unknown; usage?: { cost?: unknown } }
     | undefined;
@@ -525,7 +521,7 @@ const toReply = (
   };
 };
 
-export interface TurnOptions<R = ChatToolHandlers, E = never> {
+export interface TurnOptions<R = never, E = never> {
   readonly history: ReadonlyArray<ChatMessage>;
   readonly modelId: string;
   /** The tools the model may call, and with them the handlers `R`. Default: `defaultToolkit`. */
@@ -563,13 +559,13 @@ const contextLengthOf = (modelId: string) =>
  * fails when the model sends nothing for MAX_STREAM_SECONDS (tool runs don't count). Logs one
  * `llm call` line per turn.
  */
-export const runTurn = <R = ChatToolHandlers, E = never>(options: TurnOptions<R, E>) =>
+export const runTurn = <R = never, E = never>(options: TurnOptions<R, E>) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const config = yield* loadConfig;
       const llm = yield* Llm;
       const model = yield* llm.languageModel(options.modelId);
-      // With no toolkit given, R is its default, ChatToolHandlers.
+      // With no toolkit given, R is its default, never.
       const toolkit = (options.toolkit ?? defaultToolkit) as TurnToolkit<R>;
       const cacheBreakpoints = ANTHROPIC_MODEL.test(options.modelId);
       // Anthropic: top-level `cache_control` puts a breakpoint on the last cacheable block, so
@@ -827,7 +823,7 @@ export const loadChat = (id: ChatId) =>
   });
 
 /** What `sendMessage` can change about the turn. */
-export interface SendOptions<R = ChatToolHandlers> {
+export interface SendOptions<R = never> {
   /** The tools the model may call. Default: `defaultToolkit`. */
   readonly toolkit?: TurnToolkit<R>;
   /** The system prompt. Default: SYSTEM_PROMPT from the config. */
@@ -849,7 +845,7 @@ export interface SendOptions<R = ChatToolHandlers> {
  * that ends before any text or tool call saves nothing: the chat stays as it was, and sending
  * the message again is the retry.
  */
-export const sendMessage = <R = ChatToolHandlers>(
+export const sendMessage = <R = never>(
   chat: StoredChat,
   text: string,
   modelId: string,

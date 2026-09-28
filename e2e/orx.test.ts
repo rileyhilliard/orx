@@ -114,36 +114,6 @@ describe("the binary's contract", () => {
   });
 });
 
-describe("orx mcp", () => {
-  it("answers piped requests with only JSON-RPC on stdout, then exits 0", async () => {
-    const requests = [
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "e2e", version: "0" },
-        },
-      },
-      { jsonrpc: "2.0", id: 2, method: "tools/list" },
-    ];
-    const { stdout, exitCode } = await run(["mcp"], {
-      stdin: `${requests.map((r) => JSON.stringify(r)).join("\n")}\n`,
-    });
-    expect(exitCode).toBe(0);
-    const frames = stdout
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { id: number; jsonrpc: string });
-    expect(frames.map((f) => [f.jsonrpc, f.id])).toEqual([
-      ["2.0", 1],
-      ["2.0", 2],
-    ]);
-  });
-});
-
 describe("orx (TUI session)", () => {
   it("streams a reply, shows usage, and quits on Ctrl+C with exit 0", async () => {
     const pty = spawnPty([BIN], { cols: 90, rows: 20, env: cleanEnv() });

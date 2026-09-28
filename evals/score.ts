@@ -39,7 +39,7 @@ export const score = (run: CaseRun, check: Check): ScoredRun => {
     return { ...run, verdict: "error", reason: run.error ?? "no outcome recorded" };
   }
   const { outcome } = run;
-  if (run.finishReason === "length" && outcome.text.trim() === "" && !outcome.contact) {
+  if (run.finishReason === "length" && outcome.text.trim() === "") {
     return { ...run, verdict: "truncated", reason: "hit the output cap before any text" };
   }
   const reason = check(outcome);

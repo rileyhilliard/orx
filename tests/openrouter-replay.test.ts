@@ -5,8 +5,13 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { ndjson, runCli } from "./helpers/cli";
+import { Stream } from "effect";
+import { runTurn } from "~/core/chat";
+import { runScript } from "../scripts/lib/script-layer";
+import { askEvents, runCli } from "./helpers/cli";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { FIXTURES_DIR, type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
+import { testToolkit } from "./helpers/tools";
 
 interface Chunk {
   model?: string;
@@ -51,7 +56,7 @@ describe.each([
     const run = await ask("hi");
     const expected = recorded("plain.1");
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     const text = events.filter((e) => e.type === "text").map((e) => e.delta);
     expect(text.join("")).toBe(expected.text);
     expect(events.at(-1)).toMatchObject({
@@ -66,16 +71,27 @@ describe.each([
   });
 
   it("runs the recorded tool call and sums usage over both requests", async () => {
+    // The recorder's tool turn offers the tests' currentTime tool, so this turn does too.
     stub.replay(["tool.1", "tool.2"], { chunkSize });
-    const run = await ask("What time is it in Tokyo?");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
+    const events = await runScript(
+      Stream.runCollect(
+        runTurn({
+          history: [{ role: "user", text: "What time is it in Tokyo?" }],
+          modelId: recorded("tool.1").model ?? "",
+          toolkit: testToolkit,
+        }),
+      ),
+    ).finally(restoreEnv);
     const [first, second] = [recorded("tool.1"), recorded("tool.2")];
-    expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
     expect(events.find((e) => e.type === "tool-call")).toMatchObject({ name: "currentTime" });
     expect(events.find((e) => e.type === "tool-result")).toMatchObject({ isFailure: false });
-    const done = events.at(-1) as { usage: { inputTokens: number; cost: number } };
-    expect(done).toMatchObject({ type: "done", finishReason: "stop" });
-    expect(done.usage.inputTokens).toBe(first.inputTokens + second.inputTokens);
-    expect(done.usage.cost).toBeCloseTo(first.cost + second.cost, 12);
+    const finish = events.at(-1);
+    if (finish?.type !== "finish") throw new Error(`the turn ended with ${finish?.type}`);
+    expect(finish.reply.finishReason).toBe("stop");
+    expect(finish.reply.usage?.inputTokens).toBe(first.inputTokens + second.inputTokens);
+    expect(finish.reply.usage?.cost).toBeCloseTo(first.cost + second.cost, 12);
   });
 });

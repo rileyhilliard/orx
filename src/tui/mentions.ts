@@ -16,7 +16,7 @@ const startsWord = (text: string, at: number) => at === 0 || "/._- ".includes(te
  * How many contiguous runs `query` splits into when matched left to right as a subsequence of
  * `text`, or undefined when it doesn't match. Fewer runs is a tighter match. With `atWords`, a
  * run may only start at the start of a word (after `/`, `.`, `_`, `-`), so `stapp` matches
- * `src/tui/app.tsx` but `pack` doesn't match `template/vanilla/.claude/hooks/`.
+ * `src/tui/app.tsx` but `pack` doesn't match `template/cache/hooks/`.
  */
 const subsequenceRuns = (query: string, text: string, atWords = false) => {
   let i = 0;

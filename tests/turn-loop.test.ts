@@ -5,9 +5,10 @@ import { runTurn, type TurnEvent } from "~/core/chat";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
 import { AssistantMessage, type ChatMessage } from "~/schemas";
 import { runScript } from "../scripts/lib/script-layer";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
 import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
+import { testToolkit } from "./helpers/tools";
 
 let stub: StubOpenRouter;
 beforeAll(async () => {
@@ -59,6 +60,7 @@ const turn = (
     runTurn({
       history,
       modelId: options.modelId ?? "openai/gpt-test",
+      toolkit: testToolkit,
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       onEnd: (reply) => Effect.sync(() => replies.push(reply)),
     }).pipe(
@@ -111,7 +113,7 @@ describe("an error after the stream started", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(4);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.filter((e) => e.type === "text").map((e) => e.delta)).toEqual(["Partial answer"]);
     expect(events.at(-1)).toMatchObject({ type: "error", error: { retryable: true } });
     // Text had gone out, so it wasn't retried.
@@ -136,7 +138,7 @@ describe("an error after the stream started", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(4);
-    expect(ndjson(run.stdout).at(-1)).toMatchObject({
+    expect(askEvents(run.stdout).at(-1)).toMatchObject({
       type: "error",
       error: {
         retryable: false,
@@ -162,7 +164,10 @@ describe("an error after the stream started", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(4);
-    expect(ndjson(run.stdout).at(-1)).toMatchObject({ type: "error", error: { retryable: true } });
+    expect(askEvents(run.stdout).at(-1)).toMatchObject({
+      type: "error",
+      error: { retryable: true },
+    });
     expect(run.logs.find((r) => r.msg === "llm call")).toMatchObject({
       errorTag: "UpstreamUnavailable",
     });
@@ -174,7 +179,7 @@ describe("an error after the stream started", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(4);
-    expect(ndjson(run.stdout).at(-1)).toMatchObject({ type: "error" });
+    expect(askEvents(run.stdout).at(-1)).toMatchObject({ type: "error" });
   });
 });
 
@@ -185,7 +190,7 @@ describe("a reply that ends early", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_OUTPUT_TOKENS: "64" },
     });
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.at(-2)).toEqual({
       type: "note",
       message:
@@ -200,7 +205,7 @@ describe("a reply that ends early", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(0);
-    expect(ndjson(run.stdout).at(-2)).toEqual({
+    expect(askEvents(run.stdout).at(-2)).toEqual({
       type: "note",
       message: "The provider filtered the reply.",
     });
@@ -300,8 +305,9 @@ describe("request settings per turn", () => {
     const run = await runCli(["ask", "hi", "--json"], {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
-    const done = ndjson(run.stdout).at(-1);
-    expect(request(0).session_id).toBe(done?.chatId);
+    const done = askEvents(run.stdout).at(-1);
+    if (done?.type !== "done") throw new Error(`ask ended with ${done?.type}`);
+    expect(request(0).session_id).toBe(done.chatId);
   });
 });
 

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "orx": "bun scripts/orx-dev.ts",
+    "demo": "bun scripts/demo.ts",
     "stub": "bun scripts/stub.ts start",
     "stub:stop": "bun scripts/stub.ts stop",
     "tui:capture": "bun scripts/tui-capture.ts",
@@ -24,7 +25,6 @@
     "e2e": "bun scripts/build.ts && bun test ./e2e",
     "eval": "bun evals/run.ts",
     "record:openrouter": "bun scripts/record-openrouter.ts",
-    "vanilla": "bun scripts/vanilla.ts",
     "check": "bun run lint && bun run typecheck && bun run test && bun run e2e",
     "clean": "rm -rf dist coverage logs",
     "prepare": "bun scripts/prepare.ts"

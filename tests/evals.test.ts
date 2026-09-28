@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type CodingCase, cases, type Outcome } from "../evals/cases";
+import { type Check, cases, type Outcome } from "../evals/cases";
 import {
   type CaseRun,
   formatModelSummaries,
@@ -30,44 +30,44 @@ const outcome = (overrides: Partial<Outcome> = {}): Outcome => ({
 
 const run = (overrides: Partial<CaseRun> = {}): CaseRun => ({
   model: "acme/cheap-model",
-  caseId: "tokyo-time",
+  caseId: "rename-across-files",
   latencyMs: 1234,
   finishReason: "stop",
   ...overrides,
 });
 
-const tokyo = caseById("tokyo-time").check;
+/** A stand-in check, so scoring is tested apart from any case. */
+const said: Check = ({ text }) => (text.includes("renamed") ? undefined : "didn't say renamed");
 
 describe("score", () => {
   it("passes a run whose outcome satisfies the check", () => {
-    const toolCalls = [{ name: "currentTime", input: { timeZone: "Asia/Tokyo" } }];
-    expect(score(run({ outcome: outcome({ toolCalls }) }), tokyo)).toMatchObject({
+    expect(score(run({ outcome: outcome({ text: "renamed it" }) }), said)).toMatchObject({
       verdict: "pass",
     });
   });
 
   it("fails with the check's reason otherwise", () => {
-    expect(score(run({ outcome: outcome({ text: "It's noon." }) }), tokyo)).toMatchObject({
+    expect(score(run({ outcome: outcome({ text: "Done." }) }), said)).toMatchObject({
       verdict: "fail",
-      reason: "didn't call currentTime with Asia/Tokyo",
+      reason: "didn't say renamed",
     });
   });
 
   it("reports an empty reply cut off by the output cap as truncated, not failed", () => {
-    const scored = score(run({ finishReason: "length", outcome: outcome() }), tokyo);
+    const scored = score(run({ finishReason: "length", outcome: outcome() }), said);
     expect(scored.verdict).toBe("truncated");
   });
 
   it("still judges a reply that hit the cap after producing text", () => {
     const scored = score(
-      run({ finishReason: "length", outcome: outcome({ text: "It is currently" }) }),
-      tokyo,
+      run({ finishReason: "length", outcome: outcome({ text: "I will" }) }),
+      said,
     );
     expect(scored.verdict).toBe("fail");
   });
 
   it("reports a failed model call as an error with its message", () => {
-    expect(score(run({ error: "The model failed to respond." }), tokyo)).toMatchObject({
+    expect(score(run({ error: "The model failed to respond." }), said)).toMatchObject({
       verdict: "error",
       reason: "The model failed to respond.",
     });
@@ -75,12 +75,10 @@ describe("score", () => {
 });
 
 describe("summarize", () => {
-  const scored = (verdictRun: CaseRun) => score(verdictRun, tokyo);
+  const scored = (verdictRun: CaseRun) => score(verdictRun, said);
   const pass = scored(
     run({
-      outcome: outcome({
-        toolCalls: [{ name: "currentTime", input: { timeZone: "Asia/Tokyo" } }],
-      }),
+      outcome: outcome({ text: "renamed" }),
     }),
   );
   const truncated = scored(run({ finishReason: "length", outcome: outcome() }));
@@ -107,12 +105,10 @@ describe("summarizeByModel", () => {
   const scoredRun = (overrides: Partial<CaseRun>) =>
     score(
       run({
-        outcome: outcome({
-          toolCalls: [{ name: "currentTime", input: { timeZone: "Asia/Tokyo" } }],
-        }),
+        outcome: outcome({ text: "renamed" }),
         ...overrides,
       }),
-      tokyo,
+      said,
     );
 
   it("rolls up passes, total cost, and median latency per model, in first-seen order", () => {
@@ -153,7 +149,7 @@ describe("formatTable", () => {
           provider: "Together",
           servedModel: "acme/other-model",
         }),
-        tokyo,
+        said,
       ),
     ]);
     const [header, row, , reason] = table.split("\n");
@@ -162,7 +158,7 @@ describe("formatTable", () => {
     );
     expect(row?.split(/\s{2,}/)).toEqual([
       "acme/cheap-model",
-      "tokyo-time",
+      "rename-across-files",
       "fail",
       "stop",
       "1.2s",
@@ -171,16 +167,14 @@ describe("formatTable", () => {
       "Together",
       "acme/other-model",
     ]);
-    expect(reason).toBe(
-      "  acme/cheap-model tokyo-time: fail, didn't call currentTime with Asia/Tokyo",
-    );
+    expect(reason).toBe("  acme/cheap-model rename-across-files: fail, didn't say renamed");
   });
 
   it("leaves served empty when OpenRouter served the requested model", () => {
     const table = formatTable([
       score(
         run({ outcome: outcome(), provider: "Together", servedModel: "acme/cheap-model" }),
-        tokyo,
+        said,
       ),
     ]);
     const row = table.split("\n")[1];
@@ -188,33 +182,8 @@ describe("formatTable", () => {
   });
 });
 
-describe("case checks", () => {
-  it("reply-ok accepts ok with or without punctuation and rejects anything longer", () => {
-    const check = caseById("reply-ok").check;
-    expect(check(outcome({ text: " OK.\n" }))).toBeUndefined();
-    expect(check(outcome({ text: "ok, sure thing" }))).toMatch(/expected "ok"/);
-  });
-
-  it("no-tool-for-trivia fails when a tool is called even with the right answer", () => {
-    const check = caseById("no-tool-for-trivia").check;
-    expect(check(outcome({ text: "Paris" }))).toBeUndefined();
-    const toolCalls = [{ name: "currentTime", input: { timeZone: "Europe/Paris" } }];
-    expect(check(outcome({ text: "Paris", toolCalls }))).toMatch(/tool/);
-  });
-
-  it("extract checks name every wrong field and accept a case difference", () => {
-    const check = caseById("extract-missing-fields").check;
-    const contact = { name: "grace hopper", email: null, phone: null, company: null };
-    expect(check(outcome({ contact }))).toBeUndefined();
-    expect(check(outcome({ contact: { ...contact, company: "Navy", phone: "555" } }))).toBe(
-      'wrong phone ("555"), company ("Navy")',
-    );
-    expect(check(outcome())).toBe("no contact returned");
-  });
-});
-
 describe("the rename-across-files coding case", () => {
-  const rename = caseById("rename-across-files") as CodingCase;
+  const rename = caseById("rename-across-files");
   const renamed = Object.fromEntries(
     Object.entries(rename.files).map(([path, text]) => [
       path,

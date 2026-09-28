@@ -136,17 +136,6 @@ export const resolveModel = (requested: string | undefined) =>
   );
 
 /**
- * `resolveModel` for plain `ask`, and whether to offer the model its tools: not when the list
- * says it can't call them, since OpenRouter finds no endpoint for a request with tools then.
- * The default model isn't looked up (that would add a models fetch to every ask) and gets them.
- */
-export const resolveChatModel = (requested: string | undefined) =>
-  Effect.map(
-    lookUpModel(requested, { lookUpDefault: false, without: () => "using the model as given" }),
-    ({ modelId, info }) => ({ modelId, tools: info?.supportsTools ?? true }),
-  );
-
-/**
  * `resolveModel` for the coding agent (the session and `ask --agent`), which needs tool
  * calling: a model whose `supported_parameters` lack `tools` is UnknownModel (exit 2) with the
  * reason, the default model included. When the models list is unavailable (logged as a

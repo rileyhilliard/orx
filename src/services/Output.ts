@@ -22,7 +22,7 @@ export interface OutputShape {
 
 /**
  * The only thing in orx that writes to stdout. Results go here; logs, progress, and errors go
- * to stderr (the logger, and bin.ts for the final error), so `orx ... | jq` and `orx mcp` get
+ * to stderr (the logger, and bin.ts for the final error), so `orx ... | jq` and `ask --json` get
  * a clean stream. A closed pipe (`orx models | head -1`) ends the run quietly with exit 0.
  */
 const make = Effect.gen(function* () {

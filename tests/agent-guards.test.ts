@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PermissionMode } from "~/services/permissions";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 // The permission rules as the real tools apply them, through `orx ask --agent`: whatever the
@@ -52,7 +52,7 @@ type Event = { type: string; id?: string; name?: string; tool?: string; message?
 
 /** Each tool call's name with whether it ran, was denied by Permissions, or failed otherwise. */
 const outcomes = (stdout: string) => {
-  const events = ndjson(stdout) as Event[];
+  const events = askEvents(stdout) as Event[];
   const denied = new Set(events.filter((e) => e.type === "permission-denied").map((e) => e.id));
   return events
     .filter((e) => e.type === "tool-result")
@@ -126,7 +126,9 @@ describe("permission rules through the real tools", () => {
     const run = await askAgent(dir, "plan");
     expect(run.exitCode).toBe(0);
     expect(outcomes(run.stdout).sort()).toEqual(["bash:denied", "edit:denied", "read:ok"]);
-    const denials = (ndjson(run.stdout) as Event[]).filter((e) => e.type === "permission-denied");
+    const denials = (askEvents(run.stdout) as Event[]).filter(
+      (e) => e.type === "permission-denied",
+    );
     for (const denial of denials) expect(denial.message).toContain("plan mode");
     expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("draft\n");
     expect(existsSync(join(dir, "made-by-bash"))).toBe(false);

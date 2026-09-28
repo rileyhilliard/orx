@@ -13,7 +13,6 @@ import {
   defectOf,
   exitCodeFor,
   InvalidConfig,
-  InvalidModelOutput,
   NotConfigured,
   NotFound,
   NotInteractive,
@@ -41,7 +40,6 @@ describe("exit codes", () => {
         [new UpstreamUnavailable({ message: "", retryable: true }), 4, true],
         [new UpstreamUnavailable({ message: "", retryable: false }), 4, false],
       ],
-      InvalidModelOutput: [[new InvalidModelOutput({ message: "" }), 5, true]],
       PermissionDenied: [[new PermissionDenied({ message: "" }), 6, false]],
     };
     expect(Object.keys(table).sort()).toEqual([...APP_ERROR_TAGS].sort());

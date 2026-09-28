@@ -24,7 +24,6 @@ export const FALLBACK_DEFAULT_MODEL = "openai/gpt-6-luna";
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful, concise assistant running in a terminal.",
   "Answer in plain language; use Markdown only when it helps.",
-  "When the user asks about the current time somewhere, call the currentTime tool instead of guessing.",
 ].join(" ");
 
 /** Where `orx update` and install.sh look for releases. Pending: set before the first tag. */

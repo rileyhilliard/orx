@@ -1,4 +1,4 @@
-import { Effect, type FileSystem, Layer, type Path } from "effect";
+import { Effect, type FileSystem, type Path } from "effect";
 import { Toolkit } from "effect/unstable/ai";
 import type { ChildProcessSpawner } from "effect/unstable/process";
 import { ToolFailure } from "~/schemas";
@@ -9,16 +9,12 @@ import { Bash, runBash } from "./bash";
 import { Edit, editFile } from "./edit";
 import { Glob, globFiles } from "./glob";
 import { Grep, grepFiles, hasRipgrep } from "./grep";
-import { ChatToolsLive, CurrentTime } from "./index";
 import { catchToolDefect } from "./permit";
 import { Read, readFile } from "./read";
 import { Write, writeFile } from "./write";
 
-/**
- * The coding agent's tools. Separate from ChatTools on purpose: `orx mcp` serves ChatTools,
- * and file and shell tools over MCP would bypass the agent's approval gate.
- */
-export const AgentTools = Toolkit.make(Read, Glob, Grep, Write, Edit, Bash, CurrentTime);
+/** The coding agent's tools. Every one that changes something asks Permissions first. */
+export const AgentTools = Toolkit.make(Read, Glob, Grep, Write, Edit, Bash);
 
 const guard = (name: string) => catchToolDefect(name, (message) => new ToolFailure({ message }));
 
@@ -30,7 +26,8 @@ type AgentServices =
   | FileState
   | Permissions;
 
-const FileToolsLive = Toolkit.make(Read, Glob, Grep, Write, Edit, Bash).toLayer(
+/** Handlers for AgentTools. Needs the platform services, a Workspace, a FileState, and Permissions. */
+export const AgentToolsLive = AgentTools.toLayer(
   Effect.gen(function* () {
     // Handlers can't require services, so the ones the tools need are captured here.
     const context = yield* Effect.context<AgentServices>();
@@ -51,6 +48,3 @@ const FileToolsLive = Toolkit.make(Read, Glob, Grep, Write, Edit, Bash).toLayer(
     };
   }),
 );
-
-/** Handlers for AgentTools. Needs the platform services, a Workspace, a FileState, and Permissions. */
-export const AgentToolsLive = Layer.mergeAll(ChatToolsLive, FileToolsLive);

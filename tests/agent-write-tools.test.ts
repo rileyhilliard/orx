@@ -23,7 +23,8 @@ import { editFile, replaceIn, stripLineNumbers } from "~/tools/edit";
 import { WRITE_MAX_DIFF_CHARS } from "~/tools/limits";
 import { readFile } from "~/tools/read";
 import { writeFile } from "~/tools/write";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-write-tools-")));
@@ -454,7 +455,7 @@ describe("bash", () => {
       PAGER: "cat",
     });
 
-    process.env.OPENROUTER_API_KEY = "sk-or-leak-test";
+    stubEnv("OPENROUTER_API_KEY", "sk-or-leak-test");
     try {
       const root = tempDir();
       const result = await run(
@@ -464,7 +465,7 @@ describe("bash", () => {
       );
       expect(result.value).toBe("key= pager=cat\n(exit code 0)");
     } finally {
-      delete process.env.OPENROUTER_API_KEY;
+      restoreEnv();
     }
   });
 
@@ -512,7 +513,7 @@ describe("parallel edits in one step", () => {
     expect(readFileSync(join(root, "math.js"), "utf8")).toBe(
       "export const add = (a, b) => a + b + 0;\nexport const one = 2;\n",
     );
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     const results = events.filter((e) => e.type === "tool-result");
     expect(results.map((r) => [r.name, r.isFailure])).toEqual([
       ["read", false],

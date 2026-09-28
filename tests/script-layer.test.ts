@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Option, Stream } from "effect";
 import { newChat, runTurn, sendMessage } from "~/core/chat";
-import { extractContact } from "~/core/extract";
 import { LoggerLayer } from "~/runtime";
 import type { ChatId } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
@@ -69,8 +68,8 @@ describe("script layer", () => {
         { role: "system", content: [{ type: "text", text: "Be terse." }] },
         { role: "user" },
       ],
-      tools: [{ type: "function", function: { name: "currentTime" } }],
     });
+    expect(stub.chatRequests[0]).not.toHaveProperty("tools");
   });
 
   it("keeps chats in memory, not in the data dir", async () => {
@@ -85,20 +84,6 @@ describe("script layer", () => {
     );
     expect(Option.getOrThrow(saved).messages).toHaveLength(2);
     expect(existsSync(join(dir, "data"))).toBe(false);
-  });
-
-  it("reports extract's cost and served model, which evals show", async () => {
-    stub.completion = {
-      ...stub.completion,
-      model: "openai/gpt-test-2026",
-      text: JSON.stringify({ name: "Ada", email: null, phone: null, company: null }),
-    };
-    const result = await runScript(extractContact("Ada", "openai/gpt-test"));
-    expect(result).toEqual({
-      contact: { name: "Ada", email: null, phone: null, company: null },
-      usage: { inputTokens: 12, outputTokens: 5, cost: 0.00042 },
-      model: "openai/gpt-test-2026",
-    });
   });
 
   it("logs to stderr only, even with ORX_LOG_FILE set", async () => {

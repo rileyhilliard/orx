@@ -6,7 +6,6 @@ import { Llm } from "./services/Llm";
 import { OpenRouterModels } from "./services/OpenRouterModels";
 import { Output } from "./services/Output";
 import { Releases } from "./services/Releases";
-import { ChatToolsLive } from "./tools";
 
 /**
  * Every app service. Platform services (FileSystem, Path, Stdio, HttpClient, and the CLI's
@@ -19,7 +18,6 @@ export const AppLayer = Layer.mergeAll(
   OpenRouterModels.layer,
   ChatStore.layer,
   Releases.layer,
-  ChatToolsLive,
   Output.layer,
 ).pipe(Layer.provideMerge(AppConfig.layer), Layer.provideMerge(Paths.layer));
 

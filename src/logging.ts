@@ -178,7 +178,7 @@ export const TerminalLogging = Context.Reference<boolean>("orx/TerminalLogging",
   defaultValue: () => true,
 });
 
-/** Every log line goes to stderr: stdout carries only results (and MCP frames in `orx mcp`). */
+/** Every log line goes to stderr: stdout carries only results. */
 const write = (line: string) => {
   process.stderr.write(`${line}\n`);
 };

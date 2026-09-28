@@ -10,6 +10,7 @@ import { ChatStore } from "~/services/ChatStore";
 import { runScript } from "../scripts/lib/script-layer";
 import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
+import { testToolkit } from "./helpers/tools";
 
 let stub: StubOpenRouter;
 beforeAll(async () => {
@@ -42,6 +43,7 @@ describe("turn history", () => {
           const first: ChatMessage[] = [{ role: "user", text: "time?" }];
           yield* Stream.runDrain(
             runTurn({
+              toolkit: testToolkit,
               history: first,
               modelId: "openai/gpt-test",
               onEnd: (reply) => Effect.sync(() => replies.push(reply)),
@@ -54,6 +56,7 @@ describe("turn history", () => {
           );
           yield* Stream.runDrain(
             runTurn({
+              toolkit: testToolkit,
               history: [...first, saved, { role: "user", text: "again" }],
               modelId: "openai/gpt-test",
             }),
@@ -98,6 +101,7 @@ describe("turn history", () => {
           const first: ChatMessage[] = [{ role: "user", text: "time?" }];
           yield* Stream.runDrain(
             runTurn({
+              toolkit: testToolkit,
               history: first,
               modelId: "openai/gpt-test",
               onEnd: (reply) => Effect.sync(() => replies.push(reply)),
@@ -108,8 +112,12 @@ describe("turn history", () => {
             Schema.encodeSync(codec)(replies[0] as AssistantMessage),
           );
           const history = [...first, saved, { role: "user" as const, text: "again" }];
-          yield* Stream.runDrain(runTurn({ history, modelId: "openai/gpt-test" }));
-          yield* Stream.runDrain(runTurn({ history, modelId: "acme/cheap-model" }));
+          yield* Stream.runDrain(
+            runTurn({ toolkit: testToolkit, history, modelId: "openai/gpt-test" }),
+          );
+          yield* Stream.runDrain(
+            runTurn({ toolkit: testToolkit, history, modelId: "acme/cheap-model" }),
+          );
         }),
       );
     } finally {

@@ -1,24 +1,20 @@
 /**
  * `bun run eval [--models a,b,c]`: runs every case in evals/cases.ts against each model
- * (default OPENROUTER_MODEL), one call at a time, through orx's own programs: `runTurn` for
- * chat cases (the same prompts, tools, and limits as `orx ask`), `extractContact` for
- * extract cases, and the CLI itself (`ask --agent --permission-mode acceptEdits --json`) in a
- * temporary workspace for coding cases. Prints a table and a line per model, writes evals/results/<timestamp>.json,
- * and exits non-zero if any case failed or errored, or none passed. Calls the real API, so it
- * needs a key and costs money (about $0.001 for two cheap models with the default cases).
+ * (default OPENROUTER_MODEL), one at a time, through the CLI itself (`ask --agent
+ * --permission-mode acceptEdits --json`) in a temporary workspace. Prints a table and a line
+ * per model, writes evals/results/<timestamp>.json, and exits non-zero if any case failed or
+ * errored, or none passed. Calls the real API, so it needs a key and costs money.
  */
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { parseArgs } from "node:util";
-import { Cause, Effect, Exit, ManagedRuntime, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, ManagedRuntime, Option, Schema } from "effect";
 import { loadConfig } from "~/config";
-import { runTurn } from "~/core/chat";
-import { extractContact } from "~/core/extract";
 import { UpstreamUnavailable } from "~/errors";
 import { AskEvent } from "~/schemas";
-import { makeScriptLayer, type ScriptServices } from "../scripts/lib/script-layer";
-import { type CodingCase, cases, type EvalCase } from "./cases";
+import { makeScriptLayer } from "../scripts/lib/script-layer";
+import { cases, type EvalCase } from "./cases";
 import {
   type CaseRun,
   formatModelSummaries,
@@ -32,52 +28,8 @@ import {
 /** Everything a CaseRun records except which model and case it was and how long it took. */
 type Result = Omit<CaseRun, "model" | "caseId" | "latencyMs" | "error">;
 
-/**
- * A chat turn the way `orx ask` makes one (tools run, up to MAX_TOOL_STEPS), read from its
- * `finish` event. runTurn bounds it by MAX_STREAM_SECONDS, so a hung case can't stall the run.
- */
-const runChat = (modelId: string, input: string) =>
-  Effect.gen(function* () {
-    const finish = yield* runTurn({ history: [{ role: "user", text: input }], modelId }).pipe(
-      Stream.filter((event) => event.type === "finish"),
-      Stream.runLast,
-    );
-    if (Option.isNone(finish)) return yield* Effect.die("the turn ended without a finish event");
-    const { reply } = finish.value;
-    return {
-      outcome: {
-        text: reply.text,
-        toolCalls: reply.tools.map(({ name, input }) => ({ name, input })),
-      },
-      finishReason: reply.finishReason,
-      inputTokens: reply.usage?.inputTokens,
-      outputTokens: reply.usage?.outputTokens,
-      cost: reply.usage?.cost,
-      provider: reply.provider,
-      servedModel: reply.model,
-    } satisfies Result;
-  });
-
-/**
- * Extract has its own timeout and retries (src/core/extract.ts). Its result carries tokens,
- * cost, and the served model; no provider (the chat path has none either, see AGENTS.md).
- */
-const runExtract = (modelId: string, input: string) =>
-  extractContact(input, modelId).pipe(
-    Effect.map(
-      (result) =>
-        ({
-          outcome: { text: "", toolCalls: [], contact: result.contact },
-          inputTokens: result.usage.inputTokens,
-          outputTokens: result.usage.outputTokens,
-          cost: result.usage.cost,
-          servedModel: result.model,
-        }) satisfies Result,
-    ),
-  );
-
 const ROOT = join(import.meta.dirname, "..");
-/** A coding case's whole turn, tools included; past this the case is an error. */
+/** A case's whole turn, tools included; past this the case is an error. */
 const CODING_TIMEOUT_MS = 10 * 60 * 1000;
 
 const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(AskEvent));
@@ -97,12 +49,12 @@ const readTree = (root: string): Record<string, string> => {
 };
 
 /**
- * A coding case: writes its files to a temporary workspace, runs `orx ask --agent
+ * One case: writes its files to a temporary workspace, runs `orx ask --agent
  * --permission-mode acceptEdits --json` there from source (so the model can edit without an
  * approval prompt and bash is still denied), then records the files and runs the case's test.
  * The chat is saved to a temporary data dir, so the eval leaves nothing behind.
  */
-const runCoding = (modelId: string, evalCase: CodingCase): Result => {
+const runCoding = (modelId: string, evalCase: EvalCase): Result => {
   const workspace = mkdtempSync(join(tmpdir(), "orx-eval-"));
   const data = mkdtempSync(join(tmpdir(), "orx-eval-data-"));
   try {
@@ -194,12 +146,7 @@ const describeError = (error: unknown): string => {
 };
 
 const runCase = async (model: string, evalCase: EvalCase): Promise<ScoredRun> => {
-  const program: Effect.Effect<Result, unknown, ScriptServices> =
-    evalCase.kind === "coding"
-      ? Effect.try({ try: () => runCoding(model, evalCase), catch: (error) => error })
-      : evalCase.kind === "chat"
-        ? runChat(model, evalCase.input)
-        : runExtract(model, evalCase.input);
+  const program = Effect.try({ try: () => runCoding(model, evalCase), catch: (error) => error });
   const startedAt = Date.now();
   const exit = await runtime.runPromiseExit(program);
   const base = { model, caseId: evalCase.id, latencyMs: Date.now() - startedAt };

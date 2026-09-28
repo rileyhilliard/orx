@@ -11,10 +11,10 @@ import { AppLayer } from "~/runtime";
 import type { ChatId } from "~/schemas";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
-import { ChatTools } from "~/tools";
 import { makeBridge } from "~/tui/launch";
 import type { ChatBridge, UiEvent } from "~/tui/types";
 import { type StubOpenRouter, startStubOpenRouter } from "../helpers/stub-openrouter";
+import { testToolkit } from "../helpers/tools";
 
 // The bridge's own copy of the chat, which the next turn sends as history: it follows what each
 // turn saved, without reading the chat back from disk.
@@ -57,14 +57,14 @@ const withBridge = async <A>(use: (bridge: ChatBridge) => Promise<A>) => {
     Effect.gen(function* () {
       const { bridge } = yield* makeBridge(newChat(chatId, "openai/gpt-test"), () => {}, {
         root,
-        toolkit: ChatTools,
+        toolkit: testToolkit,
         systemPrompt: "You are a test.",
         listFiles: Effect.succeed([]),
         attachFiles: () => Effect.succeed(""),
       });
       return yield* Effect.promise(() => use(bridge));
     }).pipe(
-      // The session's own services; the chat tools here never ask.
+      // The session's own services; the test tool never asks.
       Effect.provide(Layer.mergeAll(FileState.layer, Permissions.layer())),
       Effect.provide(layer),
       Effect.provide(Logger.layer([Logger.make((entry) => logs.push(toRecord(toEntry(entry))))])),

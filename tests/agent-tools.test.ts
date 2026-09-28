@@ -474,10 +474,9 @@ describe("AgentTools", () => {
     expect(JSON.stringify(errors[0]?.message)).toContain("read");
   });
 
-  it("offers the file tools, bash, and currentTime", () => {
+  it("offers the file tools and bash", () => {
     expect(Object.keys(AgentTools.tools).sort()).toEqual([
       "bash",
-      "currentTime",
       "edit",
       "glob",
       "grep",

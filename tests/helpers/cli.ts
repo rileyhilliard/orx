@@ -162,7 +162,7 @@ export const runCli = async (
 };
 
 /** stdout as NDJSON. */
-export const ndjson = (stdout: string) =>
+const ndjson = (stdout: string) =>
   stdout
     .split("\n")
     .filter((line) => line !== "")

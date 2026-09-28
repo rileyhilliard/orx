@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { AiError } from "effect/unstable/ai";
 import { toUpstreamError } from "~/core/upstream";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
 import {
   type CompletionFailure,
   type StubOpenRouter,
@@ -24,7 +24,7 @@ const errorFor = async (failure: CompletionFailure) => {
   stub.failCompletions = failure;
   const run = await runCli(["ask", "hi", "--json"], { env: { OPENROUTER_BASE_URL: stub.baseUrl } });
   expect(run.exitCode).toBe(4);
-  return (ndjson(run.stdout).at(-1) as { error: { message: string; retryable: boolean } }).error;
+  return (askEvents(run.stdout).at(-1) as { error: { message: string; retryable: boolean } }).error;
 };
 
 // https://openrouter.ai/docs/api/reference/errors-and-debugging
@@ -95,7 +95,7 @@ describe("OpenRouter's HTTP errors, as the user sees them", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(4);
-    const last = ndjson(run.stdout).at(-1) as { error: { message: string; retryable: boolean } };
+    const last = askEvents(run.stdout).at(-1) as { error: { message: string; retryable: boolean } };
     expect(last.error.message).toMatch(/^No provider meets the routing settings/);
     expect(last.error.retryable).toBe(false);
   });
