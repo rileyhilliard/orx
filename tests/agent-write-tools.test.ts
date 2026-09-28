@@ -419,7 +419,9 @@ describe("bash", () => {
       "yolo",
     );
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(result.failure).toBe("before\n(timed out after 0.3 s; the command was killed)");
+    expect(result.failure).toBe(
+      "before\n(timed out after 0.3 s; the command was killed. Pass a larger timeout_ms (max 600000), or avoid starting servers or background processes that keep output open)",
+    );
   });
 
   it("runs with orx's secrets removed and git and pagers made non-interactive", async () => {

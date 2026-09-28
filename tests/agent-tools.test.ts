@@ -334,6 +334,21 @@ describe("grep with rg", () => {
     vi.unstubAllEnvs();
   });
 
+  it.skipIf(!rgInstalled)("keeps its matches and says which files it couldn't search", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "a.txt"), "needle\n");
+    writeFileSync(join(root, "locked.txt"), "needle\n");
+    chmodSync(join(root, "locked.txt"), 0o000);
+    try {
+      const result = await run(root, grepFiles({ pattern: "needle" }, true));
+      expect(result.value).toMatch(
+        /^a\.txt\n\(some files couldn't be searched: .*locked\.txt.*[Pp]ermission denied.*\)$/,
+      );
+    } finally {
+      chmodSync(join(root, "locked.txt"), 0o644);
+    }
+  });
+
   it.skipIf(!rgInstalled)("ignores RIPGREP_CONFIG_PATH, which could turn on --follow", async () => {
     const outside = tempDir();
     writeFileSync(join(outside, "leak.txt"), "needle outside\n");
