@@ -201,6 +201,27 @@ describe("FileState", () => {
     expect(Option.getOrThrow(states.stamp).size).toBe(3);
   });
 
+  it("calls a same-size rewrite stale even when the mtime matches what it recorded", async () => {
+    // A rewrite inside the filesystem's mtime resolution (Bun reports whole milliseconds) leaves
+    // the mtime and size as they were; only the content tells.
+    const root = tempDir();
+    const file = join(root, "a.txt");
+    writeFileSync(file, "one");
+    const changed = await run(
+      root,
+      Effect.gen(function* () {
+        const state = yield* FileState;
+        yield* state.record(file, new TextEncoder().encode("one"));
+        const stamp = Option.getOrThrow(yield* state.get(file));
+        writeFileSync(file, "two");
+        const same = new Date(stamp.mtimeMs);
+        utimesSync(file, same, same);
+        return yield* state.checkFresh(file);
+      }),
+    );
+    expect(changed).toBe("stale");
+  });
+
   it("starts empty on every build", async () => {
     const root = tempDir();
     const file = join(root, "a.txt");

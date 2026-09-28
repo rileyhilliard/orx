@@ -364,7 +364,7 @@ describe("orx (the session)", () => {
     expect(here.stdout).toBe("");
     expect(here.stderr).toContain(`ran in ${elsewhere}`);
     expect(here.stderr).toContain("--cwd");
-    // With --cwd the check passes; the run then stops at the TUI, which vitest can't start.
+    // With --cwd the check passes; the run then stops at the TUI, which runCli can't load.
     const chosen = await runCli(["--resume", id, "--cwd", elsewhere], {
       ...withStub(),
       root,
@@ -378,7 +378,14 @@ describe("orx (the session)", () => {
 });
 
 describe("orx doctor --tui", () => {
-  // vitest runs on Node, where OpenTUI's native FFI isn't available, so this path is certain.
+  it("reports a TUI that loads, with no error", async () => {
+    const run = await runCli(["doctor", "--tui", "--json"], { tui: "real" });
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ tui: { nativeLib: true, error: null } });
+    expect(run.stderr).toBe("");
+  });
+
+  // runCli's TUI can't load unless a test asks for the real one.
   it("reports the TUI failure, then exits 3 with a TuiUnavailable error on stderr", async () => {
     const run = await runCli(["doctor", "--tui", "--json"]);
     expect(run.exitCode).toBe(3);

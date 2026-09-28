@@ -62,10 +62,8 @@ const makeFileState = Effect.gen(function* () {
       Effect.gen(function* () {
         const stamp = stamps.get(path);
         if (stamp === undefined) return "not-read";
-        const info = yield* Effect.option(fs.stat(path));
-        if (Option.isNone(info)) return "stale";
-        if (mtimeOf(info.value) === stamp.mtimeMs && Number(info.value.size) === stamp.size)
-          return "ok";
+        // Always the content: a same-size rewrite inside the mtime's resolution (whole
+        // milliseconds on Bun) keeps the mtime and size, so they can't prove it unchanged.
         const content = yield* Effect.option(fs.readFile(path));
         return Option.isSome(content) && hashOf(content.value) === stamp.hash ? "ok" : "stale";
       }),

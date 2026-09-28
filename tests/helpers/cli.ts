@@ -15,6 +15,7 @@ import {
   Stream,
 } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
+import { TuiLoader } from "~/commands/load-tui";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
 import { main } from "~/main";
 import { AppLayer } from "~/runtime";
@@ -32,6 +33,11 @@ export interface RunOptions {
   /** Whether stdout is a terminal (default false, like a pipe). */
   readonly stdoutIsTerminal?: boolean;
   readonly host?: Partial<HostShape>;
+  /**
+   * The terminal UI: by default it can't load (TuiUnavailable), so a run never starts a
+   * renderer inside the test process; "real" loads it, for `doctor --tui`'s probe.
+   */
+  readonly tui?: "unavailable" | "real";
   /** A directory for config, data, and HOME. Defaults to a fresh temp dir per run. */
   readonly root?: string;
   /** stdout's reader has gone away: every write fails with EPIPE, as after `| head -1`. */
@@ -113,6 +119,9 @@ export const runCli = async (
       arch: "x64",
       ...options.host,
     }),
+    options.tui === "real"
+      ? TuiLoader.layer
+      : TuiLoader.layerUnavailable("The terminal UI couldn't load: runCli runs without one."),
   );
   const logger = Layer.mergeAll(
     Logger.layer([

@@ -2,6 +2,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
+import { TuiLoader } from "./commands/load-tui";
 import { main } from "./main";
 import { AppLayer, LoggerLayer } from "./runtime";
 import { Host } from "./services/Host";
@@ -19,6 +20,7 @@ const PlatformLayer = Layer.mergeAll(
     platform: process.platform,
     arch: process.arch,
   }),
+  TuiLoader.layer,
 );
 
 const program = main({
