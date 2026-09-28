@@ -32,7 +32,7 @@ If it's unclear which, ask before writing code.
 
 4. **Handler** in its own file under `src/tools/`, as an Effect that takes the decoded input and gets `Workspace`, `FileState`, `Permissions`, and platform services from the context:
    - resolve every path from the model with `Workspace.resolve` (never `resolveReadable`, which is for `read` alone) and show it with `Workspace.display`
-   - call `permit({ tool, summary, path, diff?, command? })` from `src/tools/permit.ts` before changing anything, and add a case for the tool to `decide` in `src/services/permissions.ts`: its `default` branch allows anything that isn't a secret path, which is right for reads and wrong for anything that mutates
+   - call `permit({ tool, summary, path, diff?, command? })` from `src/tools/permit.ts` before changing anything, and add a case for the tool to `decide` in `src/services/permissions.ts`: without one the tool fails closed (every call asks, plan mode denies it, and "always" isn't offered), so the case is what lets a read-only tool through or lets acceptEdits allow it
    - a tool that writes a file holds `FileState.withLock(path)` and checks `checkFresh` before and after the approval, then `ensureResolvesTo`, as `write` and `edit` do; a tool that reads contents respects `isSecretPath`
    - turn platform errors into `ToolFailure`s the model can act on (`platformFailure`)
 5. **Register it** in `AgentTools` and `FileToolsLive` in `src/tools/agent.ts`, wrapped with `guard("<name>")` like the others. Update the pinned tool names in `tests/agent-tools.test.ts`. If the model needs guidance on when to use it, add it to the agent's system prompt in `src/core/prompt.ts`.

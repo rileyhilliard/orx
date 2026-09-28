@@ -61,6 +61,14 @@ describe("permission rules", () => {
     expect(decide("acceptEdits", edit(".env"), none)).toBe("ask");
   });
 
+  it("asks for a tool it has no rule for, and denies it in plan mode", () => {
+    const fetch = { tool: "web_fetch", summary: "fetch example.com" };
+    expect(decide("default", fetch, none)).toBe("ask");
+    expect(decide("acceptEdits", fetch, none)).toBe("ask");
+    expect(decide("plan", fetch, none)).toEqual({ deny: expect.stringContaining("plan mode") });
+    expect(decide("yolo", fetch, none)).toBe("allow");
+  });
+
   it("allows a bash command the session always-allowed, exactly", () => {
     const allowed = new Set(["bun run test"]);
     expect(decide("default", bash("bun run test"), allowed)).toBe("allow");

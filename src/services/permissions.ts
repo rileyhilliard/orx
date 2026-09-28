@@ -118,14 +118,20 @@ export const decide = (
       return request.command !== undefined && allowedCommands.has(request.command)
         ? "allow"
         : "ask";
-    default:
-      // read, glob, grep: allowed inside the workspace, except credential-shaped files.
+    case "read":
+    case "glob":
+    case "grep":
+      // Allowed inside the workspace, except credential-shaped files.
       return secret ? "ask" : "allow";
+    default:
+      // A tool without a rule here fails closed: it asks, and plan mode denies it.
+      return mode === "plan" ? { deny: PLAN_DENIAL } : "ask";
   }
 };
 
 /**
- * Whether "always" is on offer. Not for a read (it would allow nothing more), a compound
+ * Whether "always" is on offer. Not for a read (it would allow nothing more), a tool without a
+ * rule in `decide` (there's nothing for "always" to remember), a compound
  * command, or a secret or protected path: "always" on an edit switches to acceptEdits, which
  * would still ask for those, so the answer would promise more than it does.
  */
@@ -134,12 +140,13 @@ const canAlwaysFor = (request: PermissionRequest) => {
     return false;
   }
   switch (request.tool) {
-    case "read":
-      return false;
+    case "write":
+    case "edit":
+      return true;
     case "bash":
       return request.command !== undefined && !isCompoundCommand(request.command);
     default:
-      return true;
+      return false;
   }
 };
 
