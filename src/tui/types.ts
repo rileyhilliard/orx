@@ -10,6 +10,10 @@ export interface UiToolCall {
   readonly input: string;
   /** Running until its result arrives; then ok, error, or denied (by the user or the mode). */
   readonly status?: UiToolStatus;
+  /** An agent tool call by what it touches (`edit src/x.ts`), shown while it runs. */
+  readonly target?: string;
+  /** The file an edit or write changes, for the reply's closing summary. */
+  readonly file?: string;
   /** Once finished, one line saying what it did (`read src/x.ts · 120 lines`). */
   readonly summary?: string;
   /** The diff an edit or write applied. */
@@ -27,6 +31,8 @@ export interface UiMessage {
   readonly error?: UiError;
   /** Why the reply stopped early without failing (the step cap, a repeated tool call). */
   readonly note?: string;
+  /** The user stopped the reply before it finished. */
+  readonly interrupted?: boolean;
 }
 
 export interface UiError {

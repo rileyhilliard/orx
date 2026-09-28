@@ -39,7 +39,7 @@ export const isBuiltin = (name: string): name is Builtin => BUILTINS.some((b) =>
  * docblock.
  */
 export const KEYS = [
-  ["Enter", "send, or run a /command"],
+  ["Enter", "send, run a command, pick"],
   ["@", "attach a file"],
   ["/", "commands and skills"],
   ["Up / Down", "move in a list or a diff"],
@@ -48,7 +48,8 @@ export const KEYS = [
   ["Backspace", "on an empty filter, close"],
   ["Esc", "close, or stop a reply"],
   ["Shift+Tab", "cycle the permission mode"],
-  ["y / a / n", "allow, always, deny"],
+  ["←/→", "move between the choices"],
+  ["y / a / n", "allow, always, or deny"],
   ["Ctrl+P", "pick a model"],
   ["Ctrl+E", "export as Markdown"],
   ["Ctrl+C", "quit"],

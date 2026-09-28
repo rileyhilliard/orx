@@ -8,7 +8,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { INTERRUPTED_RESULT, newChat } from "~/core/chat";
 import { prepareSession } from "~/core/session";
 import { AppLayer } from "~/runtime";
-import type { ChatId } from "~/schemas";
+import type { ChatId, StoredChat } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { Host } from "~/services/Host";
 import { App } from "~/tui/app";
@@ -119,13 +119,17 @@ const editWithAnswer = (home: string, work: string, key: "y" | "n" | "escape") =
         await screen.renderOnce();
         await screen.mockInput.typeText("add zero");
         screen.mockInput.pressEnter();
-        const panel = await waitForScreen(screen, (f) => f.includes("y allow"));
+        const panel = await waitForScreen(screen, (f) => f.includes("Enter pick"));
         // Nothing is written while the panel waits.
         expect(readFileSync(join(work, "math.js"), "utf8")).toBe(ORIGINAL);
         if (key === "escape") {
           screen.mockInput.pressEscape();
         } else {
-          await pressWhenArmed(screen, key, () => !screen.captureCharFrame().includes("y allow"));
+          await pressWhenArmed(
+            screen,
+            key,
+            () => !screen.captureCharFrame().includes("Enter pick"),
+          );
           // n opens an optional note for the model; Enter sends it empty.
           if (key === "n") screen.mockInput.pressEnter();
         }
@@ -133,7 +137,7 @@ const editWithAnswer = (home: string, work: string, key: "y" | "n" | "escape") =
           screen,
           (f) =>
             (key === "escape" || f.includes("Done editing.")) &&
-            !f.includes("y allow") &&
+            !f.includes("Enter pick") &&
             !f.includes("Replying"),
         );
         return { panel, done };
@@ -143,18 +147,40 @@ const editWithAnswer = (home: string, work: string, key: "y" | "n" | "escape") =
     }).pipe(Effect.provide(session.layer));
   }).pipe(Effect.provide(layer(home)), quiet, Effect.runPromise);
 
+/** The screen a session opens on with `chat` as its history, as `orx --resume` shows it. */
+const resumed = (home: string, work: string, chat: StoredChat) =>
+  Effect.gen(function* () {
+    const session = yield* prepareSession(Option.some(work));
+    return yield* Effect.gen(function* () {
+      const { bridge } = yield* makeBridge(chat, () => {}, session);
+      setup?.renderer.destroy();
+      setup = yield* Effect.promise(() =>
+        render(<App bridge={bridge} />, { width: 100, height: 40 }),
+      );
+      const screen = setup;
+      return yield* Effect.promise(async () => {
+        await screen.renderOnce();
+        return screen.captureCharFrame();
+      });
+    }).pipe(Effect.provide(session.layer));
+  }).pipe(Effect.provide(layer(home)), quiet, Effect.runPromise);
+
 describe("TUI closed loop, coding session", () => {
   it("shows the edit's diff for approval, and y writes it to disk", async () => {
     const { home, work } = project();
     stub.steps = readThenEdit();
     const { panel, done, saved } = await editWithAnswer(home, work, "y");
     expect(panel).toContain("Edit math.js");
+    // The call waiting on the panel is named by its file, not its raw input.
+    expect(panel).toContain("→ edit math.js · running");
+    expect(panel).not.toContain('"old_string"');
     expect(panel).toContain("-export const add = (a, b) => a + b;");
     expect(panel).toContain("+export const add = (a, b) => a + b + 0;");
     expect(readFileSync(join(work, "math.js"), "utf8")).toBe(
       "export const add = (a, b) => a + b + 0;\n",
     );
-    expect(done).not.toContain("y allow");
+    expect(done).not.toContain("Enter pick");
+    expect(done).toContain("Done · changed math.js");
     // The model saw the edit succeed: its next request carries a non-failed result.
     const third = stub.chatRequests.at(-1) as {
       messages: Array<{ role: string; content: unknown }>;
@@ -172,6 +198,8 @@ describe("TUI closed loop, coding session", () => {
         { name: "edit", isFailure: false },
       ],
     });
+    // Resumed, the finished reply still says what it changed.
+    expect(await resumed(home, work, Option.getOrThrow(saved))).toContain("Done · changed math.js");
   });
 
   it("leaves the file alone on n, and the model is told the user said no", async () => {
@@ -210,6 +238,10 @@ describe("TUI closed loop, coding session", () => {
         { name: "edit", isFailure: true, output: INTERRUPTED_RESULT },
       ],
     });
+    // Resumed, a stopped reply doesn't claim to be done.
+    const frame = await resumed(home, work, Option.getOrThrow(saved));
+    expect(frame).toContain("→ edit math.js");
+    expect(frame).not.toContain("Done ·");
   });
   it("forgets what the last chat read on /clear, so a write there needs a new read", async () => {
     const { home, work } = project();

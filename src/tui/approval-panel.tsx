@@ -3,6 +3,13 @@ import { theme } from "./theme";
 import { collapseLines } from "./tool-summary";
 import type { UiApproval } from "./types";
 
+/** What the panel offers, left to right; the first is picked when it opens. */
+export const approvalChoices = (approval: UiApproval) => [
+  { label: "Allow", decision: "yes" as const },
+  ...(approval.canAlways ? [{ label: "Always", decision: "always" as const }] : []),
+  { label: "Deny", decision: "no" as const },
+];
+
 const diffColor = (line: string) => (line.startsWith("+") ? theme.text : theme.muted);
 
 /** A finished call's diff, cut at DIFF_MAX_LINES: added lines bright, the rest muted. */
@@ -75,18 +82,23 @@ export const approvalRows = (approval: UiApproval, width: number) => {
 /**
  * A tool call waiting for the user, above the composer: what it does, then the rest of the
  * command or the whole diff, `rows` at a time from `offset` (app.tsx scrolls it with Up/Down
- * and PgUp/PgDn, and the footer says so). The keys are in the footer while it's open.
+ * and PgUp/PgDn, and the footer says so), then the choices with `choice` highlighted (Left/Right
+ * move it, Enter picks it). The keys are in the footer while it's open.
  */
 export const ApprovalPanel = ({
   head,
   body,
   offset,
   rows,
+  choices,
+  choice,
 }: {
   readonly head: ReadonlyArray<PanelRow>;
   readonly body: ReadonlyArray<PanelRow>;
   readonly offset: number;
   readonly rows: number;
+  readonly choices: ReadonlyArray<string>;
+  readonly choice: number;
 }) => (
   <box flexDirection="column" flexShrink={0} paddingLeft={1} paddingRight={1}>
     {[...head, ...body.slice(offset, offset + rows)].map((row, i) => (
@@ -100,5 +112,17 @@ export const ApprovalPanel = ({
         {`lines ${offset + 1}–${Math.min(offset + rows, body.length)} of ${body.length}`}
       </text>
     ) : null}
+    <box flexDirection="row" flexShrink={0} marginTop={1}>
+      {choices.map((label, i) => (
+        <text
+          key={label}
+          fg={i === choice ? theme.text : theme.muted}
+          {...(i === choice ? { bg: theme.selectedBg } : {})}
+          marginRight={2}
+        >
+          {` ${label} `}
+        </text>
+      ))}
+    </box>
   </box>
 );

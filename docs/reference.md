@@ -9,10 +9,10 @@ Environment variables win over the optional config file at `~/.config/orx/config
 | Variable | What it does |
 |---|---|
 | `OPENROUTER_API_KEY` | Required for anything that calls a model; without it, those commands exit 3. Set a credit limit on the key at openrouter.ai. |
-| `OPENROUTER_MODEL` | The default model (`openai/gpt-6-luna`). `--model` overrides it per run, and variants like `:online` work. |
+| `OPENROUTER_MODEL` | The default model (`z-ai/glm-5.3-flash`). `--model` overrides it per run, and variants like `:online` work. |
 | `OPENROUTER_BASE_URL` | OpenRouter's API base (default `https://openrouter.ai/api/v1`). The dev stub sets it. |
 | `SYSTEM_PROMPT` | Replaces the default system prompt. In the agent session it replaces the base instructions; the environment block and `AGENTS.md` memory still follow. |
-| `OPENROUTER_FALLBACK_MODELS` | Comma-separated model ids OpenRouter tries if the main one fails. |
+| `OPENROUTER_FALLBACK_MODELS` | Comma-separated model ids OpenRouter tries if the main one fails. None by default; `.env.example` sets `openai/gpt-6-luna,deepseek/deepseek-v4-flash`. |
 | `OPENROUTER_PROVIDER_SORT` | `price`, `throughput`, or `latency`. Empty lets OpenRouter choose. |
 | `OPENROUTER_ALLOW_FALLBACKS` | Whether OpenRouter may use other providers for the same model (default `true`). |
 | `OPENROUTER_DATA_COLLECTION` / `OPENROUTER_ZDR` | `deny` routes only to providers that don't store prompts; `true` routes only to providers with zero data retention. |

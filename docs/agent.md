@@ -19,9 +19,11 @@ What runs without asking depends on the permission mode:
 | `plan` | allowed | denied | denied |
 | `yolo` | allowed | allowed | allowed |
 
-Shift+Tab or `/mode` switches between the first three. `--dangerously-skip-permissions` starts in `yolo`.
+The session starts in `acceptEdits`, so edits in the workspace apply as the model makes them and you review them in the transcript and with `git diff`. Shift+Tab or `/mode` switches between the first three; `default` asks before every edit. `--dangerously-skip-permissions` starts in `yolo`.
 
-An approval shows the diff or the command: `y` allows it once, and `n` refuses with an optional note for the model. `a` (always) on an edit switches the session to `acceptEdits`; on a command it allows that exact command for the rest of the session.
+An approval shows the diff or the command, then the choices Allow, Always, and Deny. Allow is highlighted, so Enter allows it once; Left and Right move the highlight, and y, a, and n pick without moving it. Deny takes an optional note for the model. Always on an edit switches the session to `acceptEdits`; on a command it allows that exact command for the rest of the session.
+
+When a reply that used tools finishes, orx adds a line saying what changed, taken from the tool calls themselves: `Done · changed src/a.ts, src/b.ts · ran 1 command`.
 
 Two kinds of path always ask, in every mode except `yolo`:
 

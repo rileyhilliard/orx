@@ -14,7 +14,7 @@ import { TerminalLogging } from "../logging";
 import { FileState } from "../services/file-state";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
-import { summarizeTool, toolStatus } from "./tool-summary";
+import { describeCall, summarizeTool, toolStatus } from "./tool-summary";
 import type { ChatBridge, UiError, UiEvent, UiMessage } from "./types";
 
 /**
@@ -55,7 +55,7 @@ type LaunchServices =
   | FileState
   | FileSystem.FileSystem;
 
-const toUiMessage = (message: ChatMessage): UiMessage =>
+const toUiMessage = (message: ChatMessage, root: string): UiMessage =>
   message.role === "user"
     ? { role: "user", text: message.text, tools: [] }
     : {
@@ -64,10 +64,12 @@ const toUiMessage = (message: ChatMessage): UiMessage =>
         tools: message.tools.map((t) => ({
           name: t.name,
           input: JSON.stringify(t.input),
+          ...describeCall(t.name, t.input, root),
           status: toolStatus(t.output, t.isFailure),
           ...summarizeTool(t.name, t.input, t.output, t.isFailure),
         })),
         usage: usageLine(message),
+        ...(message.interrupted ? { interrupted: true } : {}),
       };
 
 /**
@@ -75,7 +77,7 @@ const toUiMessage = (message: ChatMessage): UiMessage =>
  * arrives, for the result's summary line; the caller gives each turn a fresh map.
  */
 const toUiEvent =
-  (inputs: Map<string, unknown>) =>
+  (inputs: Map<string, unknown>, root: string) =>
   (event: TurnEvent): ReadonlyArray<UiEvent> => {
     switch (event.type) {
       case "text":
@@ -89,6 +91,7 @@ const toUiEvent =
               id: event.id,
               name: event.name,
               input: JSON.stringify(event.input),
+              ...describeCall(event.name, event.input, root),
               status: "running",
             },
           },
@@ -208,7 +211,7 @@ export const makeBridge = <R = never, M = never>(
     const bridge: ChatBridge = {
       chatId: chat.id,
       initialModel: chat.model,
-      history: chat.messages.map(toUiMessage),
+      history: chat.messages.map((message) => toUiMessage(message, session.root)),
       // The chat keeps what was typed; the model also gets the `@path` files' contents,
       // saved beside the text as the message's attachments.
       send: (text, model) => {
@@ -228,7 +231,7 @@ export const makeBridge = <R = never, M = never>(
             }),
           ),
         ).pipe(
-          Stream.flatMap((event) => Stream.fromIterable(toUiEvent(inputs)(event))),
+          Stream.flatMap((event) => Stream.fromIterable(toUiEvent(inputs, session.root)(event))),
           Stream.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Stream.empty;
             const failed: UiEvent = { type: "error", error: toUiError(cause) };

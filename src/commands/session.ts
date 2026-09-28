@@ -56,8 +56,10 @@ export const runSession = ({
     }
     // No key or a broken config fails here, before the terminal UI takes the screen.
     yield* (yield* Llm).ready;
+    // Edits in the workspace apply without asking (Shift+Tab gets `default` back); commands,
+    // secret files, and protected paths still ask.
     const session = yield* prepareSession(cwd, {
-      mode: dangerouslySkipPermissions ? "yolo" : "default",
+      mode: dangerouslySkipPermissions ? "yolo" : "acceptEdits",
       headless: false,
     });
     const requested = Option.getOrUndefined(model);

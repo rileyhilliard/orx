@@ -1,6 +1,6 @@
 # orx
 
-orx is a coding agent for your terminal, like Claude Code, that runs on any OpenRouter model that can call tools. Start it in a project and ask for a change: the model searches and reads the code, proposes edits, and shows you each diff before it touches a file. Every reply ends with what it cost.
+orx is a coding agent for your terminal, like Claude Code, that runs on any OpenRouter model that can call tools. Start it in a project and ask for a change: the model searches and reads the code, edits it with each diff on screen, and asks before it runs any shell command. Every reply ends with what changed and what it cost.
 
 This page gets you from an API key to watching orx do a small refactor, in about five minutes.
 
@@ -23,7 +23,7 @@ bun install
 cp .env.example .env
 ```
 
-Open `.env` and paste your key after `OPENROUTER_API_KEY=`. That's the only line you need to change. `OPENROUTER_MODEL` picks the default model, and `openai/gpt-6-luna` is a cheap one that handles the demo fine.
+Open `.env` and paste your key after `OPENROUTER_API_KEY=`. That's the only line you need to change. The example already sets `OPENROUTER_MODEL` to `z-ai/glm-5.3-flash`, a cheap model that handles the demo well, with two fallbacks OpenRouter tries if it fails.
 
 Check that orx can see the key and reach OpenRouter:
 
@@ -58,13 +58,16 @@ Type this and press Enter:
 rename fmtPrice to formatPrice everywhere
 ```
 
-The model's tool calls go by one line each as it searches for the name and reads the files. When it wants to edit a file, orx stops and shows you the diff:
+The model's tool calls go by one line each as it searches for the name, reads the files, and edits them, with each edit's diff underneath. orx starts in `acceptEdits` mode (it says so in the bottom-right corner), so edits inside the project apply without stopping to ask. Shell commands still ask first.
 
-- `y` applies this edit.
-- `a` applies this edit and every later one in the session without asking.
-- `n` refuses, and you can type a note telling the model why.
+When it's done you get the model's own summary, then a line from orx listing the files it edited, then the cost:
 
-When it's done, the reply's last line shows the model, the tokens in and out, and the cost. Press Ctrl+C to quit, then look at what changed:
+```
+Done · changed src/money.ts, src/cart.ts, src/receipt.ts, README.md
+z-ai/glm-5.3-flash · 12313 in / 536 out · $0.001270
+```
+
+Press Ctrl+C to quit, then check the result yourself:
 
 ```bash
 git -C /path/from/bun-run-demo diff
@@ -76,8 +79,8 @@ git -C /path/from/bun-run-demo diff
 
 In the same session, or a fresh copy from `bun run demo`:
 
-- `write a script that prints a receipt for two teas at $2.50 each, then run it`. You'll approve the new file, then the command; shell commands always ask.
-- Shift+Tab cycles modes. `acceptEdits` stops asking about edits, and `plan` lets the model read but not change anything.
+- `write a script that prints a receipt for two teas at $2.50 each, then run it`. The script gets written, then orx stops and shows you the command with Allow, Always, and Deny under it. Allow is highlighted, so Enter runs it; ←/→ changes the choice. Deny lets you type a note telling the model why.
+- Shift+Tab cycles modes. `default` shows you each edit's diff and waits for your answer before applying it, and `plan` lets the model read but not change anything.
 - `@` picks a file to attach to your message, as in `explain @src/cart.ts`.
 - `/model` switches models mid-chat, and `/help` lists every command and key.
 

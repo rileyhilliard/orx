@@ -39,8 +39,9 @@ export const waitForScreen = async (
 };
 
 /**
- * Types `key` until `done`: the approval panel ignores y / a / n for its first APPROVAL_ARM_MS,
- * so a press lands once it's armed. Checks between presses so no extra key reaches the composer.
+ * Presses `key` (text to type, or "enter") until `done`: the approval panel ignores its keys for
+ * its first APPROVAL_ARM_MS, so a press lands once it's armed. Checks between presses so no
+ * extra key reaches the composer.
  */
 export const pressWhenArmed = async (setup: RenderSetup, key: string, done: () => boolean) => {
   const deadline = Date.now() + APPROVAL_ARM_MS + 3000;
@@ -48,7 +49,8 @@ export const pressWhenArmed = async (setup: RenderSetup, key: string, done: () =
     await setup.renderOnce();
     if (done()) return;
     if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
-    await setup.mockInput.typeText(key);
+    if (key === "enter") setup.mockInput.pressEnter();
+    else await setup.mockInput.typeText(key);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };

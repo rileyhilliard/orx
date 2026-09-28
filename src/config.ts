@@ -18,7 +18,7 @@ import type { LoggerOptions } from "./logging";
 import { ConfigFile } from "./schemas";
 
 /** Used when OPENROUTER_MODEL is empty or unset. Keep in step with .env.example. */
-export const FALLBACK_DEFAULT_MODEL = "openai/gpt-6-luna";
+export const FALLBACK_DEFAULT_MODEL = "z-ai/glm-5.3-flash";
 
 /** Used when SYSTEM_PROMPT is empty or unset. */
 export const DEFAULT_SYSTEM_PROMPT = [

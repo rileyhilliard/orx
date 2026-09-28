@@ -2,11 +2,17 @@ import { DiffLines } from "./approval-panel";
 import { clip } from "./picker";
 import { printable } from "./printable";
 import { theme } from "./theme";
+import { turnSummary } from "./tool-summary";
 import type { UiMessage, UiToolStatus } from "./types";
 
 /** A failed call is an error; a denied one was the user's (or the mode's) choice. */
 const toolColor = (status: UiToolStatus | undefined) =>
   status === "error" ? theme.error : status === "denied" ? theme.muted : theme.tool;
+
+const ClosingSummary = ({ tools }: { readonly tools: UiMessage["tools"] }) => {
+  const summary = turnSummary(tools);
+  return summary ? <text fg={theme.muted}>{printable(summary)}</text> : null;
+};
 
 /**
  * The conversation, newest at the bottom; sticks to the bottom while a reply streams. Text the
@@ -43,7 +49,7 @@ export const MessageList = ({
                       tool.summary
                         ? `→ ${tool.summary}`
                         : // The input can be a whole file's contents: 60 columns of it are enough.
-                          `→ ${tool.name}(${clip(tool.input, 60)})${status ? ` · ${status}` : ""}`,
+                          `→ ${tool.target ?? `${tool.name}(${clip(tool.input, 60)})`}${status ? ` · ${status}` : ""}`,
                     )}
                   </text>
                   {tool.diff ? <DiffLines diff={tool.diff} /> : null}
@@ -63,6 +69,10 @@ export const MessageList = ({
               </text>
             ) : null}
             {message.note ? <text fg={theme.muted}>{printable(message.note)}</text> : null}
+            {/* A finished reply that used tools says what it changed, whatever the model said. */}
+            {message.usage && !message.error && !message.note && !message.interrupted ? (
+              <ClosingSummary tools={message.tools} />
+            ) : null}
             {message.usage ? <text fg={theme.faint}>{message.usage}</text> : null}
           </>
         )}

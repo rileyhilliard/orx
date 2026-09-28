@@ -115,9 +115,10 @@ describe("the binary's contract", () => {
 });
 
 describe("orx (TUI session)", () => {
-  it("streams a reply, shows usage, and quits on Ctrl+C with exit 0", async () => {
+  it("starts in acceptEdits, streams a reply, shows usage, and quits on Ctrl+C with exit 0", async () => {
     const pty = spawnPty([BIN], { cols: 90, rows: 20, env: cleanEnv() });
-    await pty.waitFor((s) => s.includes("Ctrl+C quit"));
+    // Edits apply without asking by default; commands and protected paths still ask.
+    await pty.waitFor((s) => s.includes("Ctrl+C quit") && /acceptEdits\s*$/m.test(s));
     pty.write("hi");
     await pty.waitFor((s) => /\bhi\b/.test(s));
     pty.write("\r");

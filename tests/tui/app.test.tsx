@@ -389,7 +389,7 @@ describe("slash commands", () => {
     await screen(setup, (f) => !f.includes("Commands"));
     setup.mockInput.pressEnter();
     const frame = await screen(setup, (f) => f.includes("Ctrl+C     quit"));
-    expect(frame).toMatch(/Enter\s+send, or run a \/command\s+@\s+attach a file/);
+    expect(frame).toMatch(/Enter\s+send, run a command, pick\s+@\s+attach a file/);
     expect(frame).toContain("/quit    Quit orx");
     setup.mockInput.pressEscape();
     await screen(setup, (f) => !f.includes("Ctrl+C     quit"));
@@ -590,6 +590,14 @@ describe("the approval panel", () => {
    * A turn that yields `before`, waits for `release` (when given), asks for `request`, waits
    * for the answer, then finishes with `after`.
    */
+  /** The choices drawn on a background: the highlighted one. */
+  const highlighted = (setup: RenderSetup) =>
+    setup
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
+      .filter((span) => span.bg.toInts()[3] !== 0 && span.text.trim() !== "")
+      .map((span) => span.text.trim());
+
   const askingBridge = (
     request: UiApproval,
     after: ReadonlyArray<UiEvent> = [],
@@ -618,7 +626,7 @@ describe("the approval panel", () => {
     return fake;
   };
 
-  it("shows the command with y / a / n in the footer, and y allows it", async () => {
+  it("offers Allow, Always, and Deny with Allow picked, so Enter allows it", async () => {
     const { bridge, calls } = askingBridge(bashApproval, [
       { type: "text", delta: "tests pass" },
       { type: "done", usage: "u1" },
@@ -627,7 +635,58 @@ describe("the approval panel", () => {
     await setup.mockInput.typeText("run the tests");
     setup.mockInput.pressEnter();
     const panel = await screen(setup, (f) => f.includes("Run  bun test"));
-    expect(panel).toContain("y allow · a always · n deny · Esc stop");
+    expect(panel).toMatch(/Allow +Always +Deny/);
+    expect(panel).toContain("Waiting for your answer");
+    expect(panel).not.toContain("Replying");
+    expect(panel).toContain("Enter pick · ←→ choose · y / a / n · Esc stop");
+    expect(highlighted(setup)).toEqual(["Allow"]);
+    await pressWhenArmed(setup, "enter", () => calls.answers.length > 0);
+    await screen(setup, (f) => f.includes("tests pass"));
+    expect(calls.answers).toEqual([["approval-1", "yes"]]);
+  });
+
+  it("moves the pick with Left/Right: Enter on Always allows always, on Deny asks for a note", async () => {
+    const always = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
+    const first = await render(always.bridge);
+    await first.mockInput.typeText("run the tests");
+    first.mockInput.pressEnter();
+    await screen(first, (f) => f.includes("Run  bun test"));
+    await pressWhenArmed(first, "\u001b[C", () => highlighted(first).includes("Always"));
+    // What's highlighted is what Enter picks.
+    expect(highlighted(first)).toEqual(["Always"]);
+    await pressWhenArmed(first, "enter", () => always.calls.answers.length > 0);
+    expect(always.calls.answers).toEqual([["approval-1", "always"]]);
+    first.renderer.destroy();
+
+    // Without Always on offer, one step right is Deny, and it stops at the end.
+    const deny = askingBridge({ ...bashApproval, canAlways: false }, [
+      { type: "done", usage: "u1" },
+    ]);
+    const second = await render(deny.bridge);
+    await second.mockInput.typeText("run the tests");
+    second.mockInput.pressEnter();
+    const panel = await screen(second, (f) => f.includes("Run  bun test"));
+    expect(panel).toMatch(/Allow +Deny/);
+    expect(panel).not.toContain("Always");
+    await pressWhenArmed(second, "\u001b[C", () => highlighted(second).includes("Deny"));
+    second.mockInput.pressArrow("right");
+    await second.renderOnce();
+    expect(highlighted(second)).toEqual(["Deny"]);
+    await pressWhenArmed(second, "enter", () =>
+      second.captureCharFrame().includes("Enter deny with this note"),
+    );
+    expect(deny.calls.answers).toEqual([]);
+  });
+
+  it("shows the command, and y allows it without moving the pick", async () => {
+    const { bridge, calls } = askingBridge(bashApproval, [
+      { type: "text", delta: "tests pass" },
+      { type: "done", usage: "u1" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("run the tests");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("Run  bun test"));
     await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
     const done = await screen(setup, (f) => f.includes("tests pass"));
     expect(calls.answers).toEqual([["approval-1", "yes"]]);
@@ -636,17 +695,21 @@ describe("the approval panel", () => {
     expect(done).not.toContain("│ y");
   });
 
-  it("ignores y / a / n typed before the panel has been on screen long enough to read", async () => {
+  it("ignores y / a / n, Left/Right, and Enter typed before the panel has been on screen long enough to read", async () => {
     const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
     const setup = await render(bridge);
     await setup.mockInput.typeText("run the tests");
     setup.mockInput.pressEnter();
     await screen(setup, (f) => f.includes("Run  bun test"));
-    // Type-ahead: an "always" the user never chose.
+    // Type-ahead: an "always" the user never chose, a Right meant for the composer's cursor,
+    // and an Enter meant for the draft.
     await setup.mockInput.typeText("a");
+    await setup.mockInput.typeText("\u001b[C");
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     expect(calls.answers).toEqual([]);
-    await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
+    // Allow is still the pick: the early Right moved nothing.
+    await pressWhenArmed(setup, "enter", () => calls.answers.length > 0);
     expect(calls.answers).toEqual([["approval-1", "yes"]]);
   });
 
@@ -688,7 +751,7 @@ describe("the approval panel", () => {
     setup.mockInput.pressEnter();
     const panel = await screen(setup, (f) => f.includes("Edit src/a.ts"));
     expect(panel).toContain("+new");
-    expect(panel).toContain("y allow · n deny");
+    expect(panel).toContain("Enter pick · ←→ choose · y / n · Esc stop");
     await pressWhenArmed(setup, "n", () =>
       setup.captureCharFrame().includes("Enter deny with this note"),
     );
@@ -709,7 +772,7 @@ describe("the approval panel", () => {
     expect(calls.sent).toHaveLength(1);
   });
 
-  it("goes back from the note to y / a / n on Esc, keeping the draft", async () => {
+  it("goes back from the note to the choices on Esc, keeping the draft", async () => {
     const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
     const setup = await render(bridge);
     await setup.mockInput.typeText("run the tests");
@@ -719,7 +782,7 @@ describe("the approval panel", () => {
       setup.captureCharFrame().includes("Enter deny with this note"),
     );
     setup.mockInput.pressEscape();
-    await screen(setup, (f) => f.includes("y allow · a always · n deny"));
+    await screen(setup, (f) => f.includes("Enter pick · ←→ choose"));
     await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
     expect(calls.answers).toEqual([["approval-1", "yes"]]);
     // The reply is still going; Esc only left the note.
@@ -749,11 +812,17 @@ describe("the approval panel", () => {
     expect(top).not.toContain("\u001b");
     expect(top).toContain("↑↓ scroll");
     expect(top).toMatch(/lines 1–\d+ of 62/);
+    // The choices and the composer's footer stay on screen beside a long diff.
+    expect(top).toMatch(/Allow +Deny/);
+    expect(top).toContain("Esc stop");
     expect(top).not.toContain("+line 60");
     // PgDn, as a terminal sends it (the test keyboard has no name for it).
-    for (let i = 0; i < 6; i++) setup.mockInput.pressKey("\u001b[6~");
+    // More pages than the diff has: the last one stops at its end.
+    for (let i = 0; i < 8; i++) setup.mockInput.pressKey("\u001b[6~");
     const bottom = await screen(setup, (f) => f.includes("+line 60"));
     expect(bottom).toMatch(/lines \d+–62 of 62/);
+    expect(bottom).toMatch(/Allow +Deny/);
+    expect(bottom).toContain("Esc stop");
     // The summary stays in view while the diff scrolls.
     expect(bottom).toContain("Edit [2Jsrc/big.ts");
     setup.mockInput.pressArrow("up");
@@ -780,6 +849,67 @@ describe("the approval panel", () => {
     const frame = await screen(setup, (f) => f.includes("stopped") && !f.includes("Replying"));
     expect(frame).not.toContain("Run  bun test");
     expect(frame).toContain("@ files");
+  });
+
+  it("names a running call by what it touches, then closes the reply with what changed", async () => {
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const edit = { name: "edit", input: '{"path":"src/a.ts"}', target: "edit src/a.ts" };
+    const fake = fakeBridge([], {
+      send: () =>
+        (async function* () {
+          yield {
+            type: "tool",
+            call: { id: "t1", ...edit, file: "src/a.ts", status: "running" },
+          } satisfies UiEvent;
+          await finished;
+          yield {
+            type: "tool-result",
+            id: "t1",
+            status: "ok",
+            summary: "edit src/a.ts",
+          } satisfies UiEvent;
+          yield { type: "text", delta: "Renamed it." } satisfies UiEvent;
+          yield { type: "done", usage: "u5" } satisfies UiEvent;
+        })(),
+    });
+    const setup = await render(fake.bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const running = await screen(setup, (f) => f.includes("→ edit src/a.ts · running"));
+    expect(running).not.toContain('{"path"');
+    expect(running).not.toContain("Done ·");
+    finish();
+    const done = await screen(setup, (f) => f.includes("u5"));
+    expect(done).toContain("Done · changed src/a.ts");
+    expect(done.indexOf("Renamed it.")).toBeLessThan(done.indexOf("Done · changed"));
+  });
+
+  it("doesn't say done when the reply stopped early with a note", async () => {
+    const { bridge } = fakeBridge([
+      {
+        type: "tool",
+        call: {
+          id: "t1",
+          name: "edit",
+          input: "{}",
+          target: "edit a.ts",
+          file: "a.ts",
+          status: "running",
+        },
+      },
+      { type: "tool-result", id: "t1", status: "ok", summary: "edit a.ts" },
+      { type: "note", message: "Stopped after 50 model steps (MAX_TOOL_STEPS)." },
+      { type: "done", usage: "u6" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("u6"));
+    expect(frame).toContain("Stopped after 50 model steps");
+    expect(frame).not.toContain("Done ·");
   });
 
   it("shows a denied call apart from a failed one", async () => {
