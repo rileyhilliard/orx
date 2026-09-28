@@ -3,8 +3,7 @@
  * the same programs and OpenRouter settings the CLI uses.
  *
  * Differences from what src/bin.ts provides:
- * - Platform services are NodeServices, not BunServices, so the layer also runs under vitest
- *   on Node (tests/script-layer.test.ts). Scripts don't use the CLI's Host or stdio.
+ * - Scripts don't use the CLI's Host or stdio.
  * - Logging goes to stderr only: ORX_LOG_FILE is ignored, so a script never appends to it.
  * - The HTTP client can take a custom `fetch`, e.g. one that tees response bodies.
  * - Chats are fresh in-memory state: a script never writes to the data dir.
@@ -12,7 +11,7 @@
  * Config comes from the environment and the config file as usual (bun loads `.env` from the
  * working directory).
  */
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { logConfig } from "~/config";
@@ -41,7 +40,7 @@ const ScriptLoggerLayer = Layer.unwrap(
 /** Every app service, with platform services, config, and the stderr-only logger provided. */
 export const makeScriptLayer = (options: ScriptOptions = {}) => {
   const platform = Layer.mergeAll(
-    NodeServices.layer,
+    BunServices.layer,
     FetchHttpClient.layer,
     // FetchHttpClient reads this reference on every request.
     options.fetch
