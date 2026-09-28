@@ -111,7 +111,7 @@ export interface ChatBridge {
   readonly setMode: (mode: UiMode) => Promise<void>;
   /**
    * Calls `onMode` with the permission mode now and on every change (an "always" answer to an
-   * edit switches it too). Returns an unsubscribe. Without a session, never calls it.
+   * edit switches it too). Returns an unsubscribe.
    */
   readonly watchMode: (onMode: (mode: UiMode) => void) => () => void;
   /** Starts a new, empty chat on the same model (`/clear`); resolves to its id. */
