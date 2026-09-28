@@ -3,7 +3,7 @@ import { Cause, Clock, Duration, Effect, Exit, type Layer, Option, Ref, Stream }
 import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
 import { loadConfig } from "../config";
-import { isAppError, NotFound, UpstreamUnavailable } from "../errors";
+import { isAppError, NotFound, type PermissionDenied, UpstreamUnavailable } from "../errors";
 import { ChatStore } from "../services/ChatStore";
 import { Llm } from "../services/Llm";
 import { OpenRouterModels } from "../services/OpenRouterModels";
@@ -514,7 +514,7 @@ const toReply = (
   };
 };
 
-export interface TurnOptions<R = ChatToolHandlers> {
+export interface TurnOptions<R = ChatToolHandlers, E = never> {
   readonly history: ReadonlyArray<ChatMessage>;
   readonly modelId: string;
   /** The tools the model may call, and with them the handlers `R`. Default: `defaultToolkit`. */
@@ -526,8 +526,13 @@ export interface TurnOptions<R = ChatToolHandlers> {
    * provider, which keeps its prompt cache warm across steps and turns.
    */
   readonly sessionId?: string;
-  /** Called once with the reply as far as it got, including when the turn fails or is interrupted. */
-  readonly onEnd?: (reply: AssistantMessage) => Effect.Effect<void>;
+  /**
+   * Called once with the reply (the chat's save). A finished reply is handed over before the
+   * `finish` event goes out, so its failure fails the turn instead of following `finish`. A
+   * turn that doesn't finish (it failed, was interrupted, or its consumer stopped) hands over
+   * the reply as far as it got; a failure then is logged and never replaces the turn's outcome.
+   */
+  readonly onEnd?: (reply: AssistantMessage) => Effect.Effect<void, E>;
 }
 
 /** The model's context window from the models list, or undefined when it can't be known. */
@@ -547,7 +552,7 @@ const contextLengthOf = (modelId: string) =>
  * fails when the model sends nothing for MAX_STREAM_SECONDS (tool runs don't count). Logs one
  * `llm call` line per turn.
  */
-export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
+export const runTurn = <R = ChatToolHandlers, E = never>(options: TurnOptions<R, E>) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const config = yield* loadConfig;
@@ -714,7 +719,17 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
               durationMs: endedAt - startedAt,
             }),
           );
-          if (options.onEnd) yield* options.onEnd(reply);
+          // A finished reply was handed over before `finish`. This one didn't finish, so the
+          // turn already has its outcome (130, the upstream error); a failed save only logs.
+          if (!done && options.onEnd) {
+            yield* options
+              .onEnd(reply)
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("saving the reply of a turn that didn't finish failed", cause),
+                ),
+              );
+          }
         });
 
       // A tool waiting on the user's approval (Permissions, when the session has it) shows up
@@ -750,6 +765,14 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
               : Effect.void,
         ),
         Stream.mapError(toUpstreamError),
+        // The finished reply is saved before `finish` reaches the consumer: a failed save is
+        // the turn's failure, not an error after `ask --json` already said `done`.
+        // Uninterruptible, so Ctrl+C while it writes doesn't lose a reply that finished.
+        Stream.tap((event) =>
+          event.type === "finish" && options.onEnd
+            ? Effect.uninterruptible(options.onEnd(event.reply))
+            : Effect.void,
+        ),
         Stream.merge(approvals, { haltStrategy: "left" }),
         Stream.interruptWhen(watchdog),
         Stream.onExit((exit) =>
@@ -796,10 +819,12 @@ export interface SendOptions<R = ChatToolHandlers> {
 }
 
 /**
- * Sends one user message in a chat: runs the turn and saves the chat when it ends, with the
- * reply as far as it got (so Ctrl+C keeps the partial reply, marked interrupted). A turn that
- * ends before any text or tool call saves nothing: the chat stays as it was, and sending the
- * message again is the retry.
+ * Sends one user message in a chat: runs the turn and saves the chat. A finished reply is saved
+ * before the `finish` event, so a data dir that refuses the write fails the turn with
+ * `PermissionDenied`. A turn that doesn't finish saves the reply as far as it got (so Ctrl+C
+ * keeps the partial reply, marked interrupted), and a failure to save it is only logged. A turn
+ * that ends before any text or tool call saves nothing: the chat stays as it was, and sending
+ * the message again is the retry.
  */
 export const sendMessage = <R = ChatToolHandlers>(
   chat: StoredChat,
@@ -814,7 +839,7 @@ export const sendMessage = <R = ChatToolHandlers>(
         ? { role: "user", text, attachments: options.attachments }
         : { role: "user", text };
       const history: ReadonlyArray<ChatMessage> = [...chat.messages, message];
-      return runTurn<R>({
+      return runTurn<R, PermissionDenied>({
         history,
         modelId,
         ...(options.toolkit ? { toolkit: options.toolkit } : {}),

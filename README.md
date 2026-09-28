@@ -87,7 +87,7 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 | 3 | Not configured: no API key, a bad env var or config file value (the message names it), or the terminal UI can't load here |
 | 4 | OpenRouter or GitHub failed or timed out; `retryable` in the `--json` error says whether trying again can help |
 | 5 | The model's structured output didn't match the schema |
-| 6 | Permission denied writing a file (`orx update` into a directory you don't own) |
+| 6 | Permission denied writing a file (`orx update` into a directory you don't own, a chat into a data dir you can't write) |
 | 130 | Interrupted (Ctrl+C) |
 
 With `--json`, errors are `{"error":{"tag","message","retryable"}}` on stderr.

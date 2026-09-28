@@ -1,11 +1,13 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Logger, Schema, Stream } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { runTurn } from "~/core/chat";
+import { newChat, runTurn, sendMessage } from "~/core/chat";
 import { resolveToolModel } from "~/core/models";
-import type { AssistantMessage } from "~/schemas";
+import { type LogRecord, toEntry, toRecord } from "~/logging";
+import { type AssistantMessage, ChatId } from "~/schemas";
+import { ChatStore } from "~/services/ChatStore";
 import { runScript, type ScriptServices } from "../scripts/lib/script-layer";
 import { ndjson, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
@@ -226,6 +228,79 @@ describe("a chat turn", () => {
     }
     expect(ended).toHaveLength(1);
     expect(ended[0]).toMatchObject({ text: "one ", interrupted: true });
+  });
+});
+
+describe("a chat that can't be saved", () => {
+  /** A data dir nobody can write to, made writable again by `unlock`. */
+  const lockedDataDir = () => {
+    const dataDir = join(realpathSync(mkdtempSync(join(tmpdir(), "orx-locked-"))), "data");
+    mkdirSync(dataDir, { mode: 0o555 });
+    return { dataDir, unlock: () => chmodSync(dataDir, 0o755) };
+  };
+  const unwritable = (dataDir: string) => `${dataDir}/chats isn't writable (permission denied)`;
+
+  it("keeps the upstream failure's exit code, and logs why the partial reply wasn't saved", async () => {
+    const { dataDir, unlock } = lockedDataDir();
+    stub.completion = { ...stub.completion, text: "one two three four" };
+    stub.hangAfter = 2;
+    try {
+      const run = await runCli(["ask", "hi", "--json"], {
+        env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_STREAM_SECONDS: "1", ORX_DATA_DIR: dataDir },
+      });
+      expect(run.exitCode).toBe(4);
+      expect(ndjson(run.stdout).at(-1)).toMatchObject({
+        type: "error",
+        error: { tag: "UpstreamUnavailable" },
+      });
+      const errors = run.logs.filter((r) => r.level === "error");
+      expect(errors).toHaveLength(1);
+      expect(JSON.stringify(errors[0])).toContain(unwritable(dataDir));
+    } finally {
+      stub.completion = { ...stub.completion, text: "Hello from the stub." };
+      unlock();
+    }
+  });
+
+  it("still ends as interrupted on Ctrl+C, and logs why the partial reply wasn't saved", async () => {
+    const { dataDir, unlock } = lockedDataDir();
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    vi.stubEnv("ORX_DATA_DIR", dataDir);
+    stub.completion = { ...stub.completion, text: "one two three four" };
+    stub.hangAfter = 2;
+    const logs: LogRecord[] = [];
+    try {
+      const exit = await runScript(
+        Effect.gen(function* () {
+          const reached = yield* Deferred.make<void>();
+          const chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), "openai/gpt-test");
+          const fiber = yield* sendMessage(chat, "hi", "openai/gpt-test").pipe(
+            Stream.runForEach((event) =>
+              event.type === "text" ? Deferred.succeed(reached, undefined) : Effect.void,
+            ),
+            Effect.forkChild,
+          );
+          yield* Deferred.await(reached);
+          // What Ctrl+C does: bin.ts interrupts the running program.
+          yield* Fiber.interrupt(fiber);
+          return yield* Fiber.await(fiber);
+        }).pipe(
+          Effect.provide(ChatStore.layer),
+          Effect.provide(
+            Logger.layer([Logger.make((entry) => logs.push(toRecord(toEntry(entry))))]),
+          ),
+        ),
+      );
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+      const errors = logs.filter((r) => r.level === "error");
+      expect(errors).toHaveLength(1);
+      expect(JSON.stringify(errors[0])).toContain(unwritable(dataDir));
+    } finally {
+      stub.completion = { ...stub.completion, text: "Hello from the stub." };
+      vi.unstubAllEnvs();
+      unlock();
+    }
   });
 });
 
