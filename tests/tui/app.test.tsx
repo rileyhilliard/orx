@@ -286,13 +286,32 @@ describe("slash commands", () => {
     expect(frame).toContain("/help    List commands and keys");
   });
 
-  it("says when nothing matches, and Enter then does nothing", async () => {
+  it("says when nothing matches, and Enter then reports the unknown command", async () => {
     const setup = await render(fakeBridge([]).bridge);
     await openList(setup, "zzz");
     await screen(setup, (f) => f.includes("No matches"));
     setup.mockInput.pressEnter();
-    const frame = await screen(setup, (f) => f.includes("No matches"));
-    expect(frame).toContain("Commands");
+    const frame = await screen(setup, (f) => f.includes("Unknown command /zzz"));
+    expect(frame).not.toContain("Commands");
+  });
+
+  it("runs the highlighted command on Enter, with the filter's extra words as arguments", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup, "help");
+    await screen(setup, (f) => f.includes("▶ /help"));
+    setup.mockInput.pressEnter();
+    const help = await screen(
+      setup,
+      (f) => f.includes("Start a new chat") && !f.includes("Commands"),
+    );
+    expect(help).toContain("/quit    Quit orx");
+    expect(help).toMatch(/│ Message\s+│/);
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Start a new chat"));
+    await openList(setup, "mode plan");
+    await screen(setup, (f) => f.includes("▶ /mode"));
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => !f.includes("Commands") && /plan\s*$/m.test(f));
   });
 
   it("closes on Backspace in an empty filter and takes the / back", async () => {
@@ -386,7 +405,8 @@ describe("slash commands", () => {
     const setup = await render(bridge);
     await openList(setup, "pdf");
     await screen(setup, (f) => f.includes("▶ /pdf"));
-    setup.mockInput.pressEnter();
+    // Tab inserts the command to add arguments; Enter would run it bare.
+    setup.mockInput.pressTab();
     await screen(setup, (f) => !f.includes("Commands") && f.includes("/pdf "));
     await setup.mockInput.typeText("form.pdf");
     setup.mockInput.pressEnter();

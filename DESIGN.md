@@ -38,12 +38,12 @@ Slash command output (`/help`, an unknown command or mode) is a few unbordered l
 
 | Key | Does |
 | --- | --- |
-| Enter | Send the message, or run a `/command`; in a list, pick the highlighted item |
+| Enter | Send the message, or run a `/command`; in a list, pick the highlighted item (in the command list, run it; with nothing matching, report the unknown command) |
 | / | In an empty composer, open the command list (built-ins, custom commands, skills) |
 | @ | At the start of a word, open the file list; picking inserts `@path`, and on send the file is attached for the model |
 | Up / Down | Move the highlight in a list (typing a filter puts it back on the first match), or scroll an approval's diff |
 | PgUp / PgDn | Scroll an approval's diff a page at a time |
-| Tab | In a list, pick the highlighted item |
+| Tab | In a list, pick the highlighted item; in the command list, insert it into the composer to add arguments |
 | Backspace | In a list's empty filter, close it and delete the `/` or `@` that opened it |
 | y / a / n | With an approval open: allow, always allow (when offered), deny with an optional note |
 | Shift+Tab | Cycle the permission mode: default, acceptEdits, plan. yolo (`--dangerously-skip-permissions`) isn't in the cycle: Shift+Tab from yolo goes to default, and the keyboard can't go back, so a stray key can only take permissions away |

@@ -93,7 +93,8 @@ type Overlay = "model" | "commands" | "files";
 
 /**
  * The chat screen. Keys: Enter sends, `/` opens the command list and `@` the file list (Up/Down
- * move, Enter or Tab picks, Backspace in an empty filter backs out), Esc closes a list, leaves a
+ * move, Enter or Tab picks; in the command list Enter runs the command and Tab inserts it to
+ * add arguments; Backspace in an empty filter backs out), Esc closes a list, leaves a
  * deny note, dismisses /help, or stops a reply, in that order. With an approval open, y / a / n
  * answer it (once it has been visible APPROVAL_ARM_MS) and Up/Down, PgUp/PgDn scroll its diff.
  * Shift+Tab cycles the permission mode, Ctrl+P picks a model, Ctrl+E exports the chat as
@@ -461,9 +462,22 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
           showDescription
           load={loadCommandItems}
           toList={identity}
-          onPick={(name) => {
+          onPick={(name, typed) => {
+            // `mode plan` in the filter picks /mode; the words after the name are its arguments.
+            const [first = "", ...rest] = typed.trim().split(/\s+/);
+            closeOverlay();
+            setDraft("");
+            submit(`/${name}${first === name && rest.length > 0 ? ` ${rest.join(" ")}` : ""}`);
+          }}
+          onComplete={(name) => {
             setDraft(`/${name} `);
             closeOverlay();
+          }}
+          onNoMatch={(typed) => {
+            closeOverlay();
+            setDraft("");
+            // Reported as an unknown command, like typing it in full.
+            if (typed.trim() !== "") submit(`/${typed.trim()}`);
           }}
           onBack={backOut("/")}
         />

@@ -51,8 +51,9 @@ const isPickKey = (key: KeyEvent) =>
 
 /**
  * An overlay list just above the composer, sized to its content: type to filter, Up/Down to
- * move, Enter or Tab to pick the highlighted item, Backspace in an empty filter to back out
- * (`onBack`), Esc to close (app.tsx owns Esc). `load` runs once per open.
+ * move, Enter or Tab to pick the highlighted item (Tab calls `onComplete` when given), Enter
+ * with no match calls `onNoMatch` when given, Backspace in an empty filter backs out
+ * (`onBack`), Esc closes (app.tsx owns Esc). `load` runs once per open.
  */
 export const Picker = <T,>({
   title,
@@ -64,6 +65,8 @@ export const Picker = <T,>({
   load,
   toList,
   onPick,
+  onComplete,
+  onNoMatch,
   onBack,
   rankItems = rank,
 }: {
@@ -77,7 +80,12 @@ export const Picker = <T,>({
   readonly load: () => Promise<T>;
   /** Maps what `load` resolves to (kept out of `load` so the list shows in the same tick). */
   readonly toList: (loaded: T) => PickerList;
-  readonly onPick: (value: string) => void;
+  /** The highlighted item's value, and the filter as typed (a command's arguments follow it). */
+  readonly onPick: (value: string, typed: string) => void;
+  /** Tab on an item, when it should do something other than pick (insert a command to edit). */
+  readonly onComplete?: (value: string) => void;
+  /** Enter with nothing matching the filter. Without it, Enter does nothing. */
+  readonly onNoMatch?: (typed: string) => void;
   /** Backspace with nothing typed: close, and take back what opened the list. */
   readonly onBack: () => void;
   /** How the query filters and orders the items (default: `rank`). */
@@ -144,7 +152,10 @@ export const Picker = <T,>({
       const typed = input.current?.value ?? query;
       const picked =
         typed === query ? matches[selectedRef.current] : rankItems(items ?? [], typed)[0];
-      if (picked) onPick(picked.value);
+      if (picked === undefined) {
+        if (key.name !== "tab" && items !== undefined) onNoMatch?.(typed);
+      } else if (key.name === "tab" && onComplete) onComplete(picked.value);
+      else onPick(picked.value, typed);
     } else if (key.name === "backspace" && (input.current?.value ?? "") === "") {
       key.preventDefault();
       onBack();

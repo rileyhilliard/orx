@@ -44,7 +44,7 @@ export const KEYS = [
   ["/", "commands and skills"],
   ["Up / Down", "move in a list or a diff"],
   ["PgUp/PgDn", "page through a diff"],
-  ["Tab", "pick in a list"],
+  ["Tab", "insert a /command"],
   ["Backspace", "on an empty filter, close"],
   ["Esc", "close, or stop a reply"],
   ["Shift+Tab", "cycle the permission mode"],
