@@ -72,6 +72,10 @@ describe.concurrent("block-destructive denies", () => {
     ["bash <<EOF\nrm -rf ~\nEOF", ROOT],
     ["eval 'rm -rf ~'", ROOT],
     ["ssh host rm -rf /", ROOT],
+    ['rr exec "rm -rf ~"', ROOT],
+    ["rr run --host m1-mini --tail 20 'cd /tmp && rm -rf ~'", ROOT],
+    ['rr -q run "rm -rf ~"', ROOT],
+    ['rr --config .rr.yaml exec "rm -rf ~"', ROOT],
     ["ssh -p 2222 host 'cd /srv && rm -rf ~'", ROOT],
     // An unclosed quote means the quoting was misread: quotes are ignored (fail closed).
     ["echo 'oops; rm -rf ~", ROOT],
@@ -164,6 +168,7 @@ describe.concurrent("block-destructive allows", () => {
     "rm -rf node_modules",
     "rm -rf ./build",
     "ssh host -c aes128-ctr ls",
+    'rr run --host m1-mini "rm -rf dist && bun run build"',
     "git checkout -- src/file.ts",
     "git restore --staged .",
     "git push --force-with-lease",
@@ -328,6 +333,7 @@ describe("block-destructive checks the working tree before discarding", () => {
     for (const command of [
       "cd $SOMEWHERE && git reset --hard",
       "ssh host git reset --hard",
+      'rr exec "git reset --hard"',
       // An earlier command can change the tree before the reset runs.
       "git stash pop && git reset --hard",
       "mv a.txt b.txt && git reset --hard",

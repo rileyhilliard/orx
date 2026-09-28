@@ -6,7 +6,7 @@
 //
 // Commands that run other commands are followed: $( ), backticks, <( ), substitutions inside an
 // unquoted heredoc, bash/sh -c, eval, su -c, heredocs and pipes into a shell, ssh (and scripts
-// named like *ssh*), xargs, find -exec, docker/kubectl exec and run, and wrappers such as sudo,
+// named like *ssh*), rr run/exec, xargs, find -exec, docker/kubectl exec and run, and wrappers such as sudo,
 // env, timeout, nice. Input fed to a command (heredocs, a pipe from echo or a heredoc) travels with
 // it as `stdin`, including through ssh and docker exec, so a guard can read the SQL sent to psql.
 //
@@ -422,6 +422,17 @@ function joinDir(dir: string | null | undefined, target: string | undefined): st
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
 const SSH_VALUE_OPTIONS = "BbcDEeFIiJLlmOoPpQRSWw";
 const FIND_EXEC = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+const RR_VALUE_OPTIONS = new Set([
+  "--host",
+  "--tag",
+  "--cwd",
+  "--tail",
+  "--repeat",
+  "--probe-timeout",
+  "--pull",
+  "--pull-dest",
+  "--config",
+]);
 
 function opaque(ctx: Context): Command {
   return {
@@ -590,6 +601,24 @@ function follow(cmd: Command, depth: number, budget: Budget, out: Command[]): vo
     subsAfterOperand(at + 1, { remote: true, dir: null });
   } else if (name === "kubectl" && argv.includes("exec") && argv.includes("--")) {
     sub(argv.indexOf("--") + 1, { remote: true, dir: null });
+  } else if (name === "rr") {
+    // rr [global options] run|exec [options] "<command>": runs the command on a remote host, or
+    // here with --local. Global options (-q, --config <file>) may come before the subcommand.
+    let at = 1;
+    while (at < argv.length && (argv[at] as string).startsWith("-")) {
+      at += RR_VALUE_OPTIONS.has(argv[at] as string) ? 2 : 1;
+    }
+    if (argv[at] !== "run" && argv[at] !== "exec") return;
+    const words: string[] = [];
+    for (let k = at + 1; k < argv.length; k++) {
+      const a = argv[k] as string;
+      if (!a.startsWith("-")) words.push(a);
+      else if (RR_VALUE_OPTIONS.has(a)) k++;
+    }
+    const local = argv.some(
+      (a) => a === "--local" || (a.startsWith("--local=") && a !== "--local=false"),
+    );
+    if (words.length > 0) run(words.join(" "), local ? same : remote);
   }
 }
 

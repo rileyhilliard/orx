@@ -42,6 +42,12 @@ describe.concurrent("guard-commands denies", () => {
     ["bun add ink react", NOT_USED],
     ["bun install @modelcontextprotocol/sdk", NOT_USED],
     ["bun i x\ry zod", NOT_USED],
+    // rr runs the quoted command on a remote host (or here, with --local).
+    ['rr run "bun test"', BUN_TEST],
+    ['rr run --host m1-mini --cwd src "bun run test -t streams"', TEST_ARGS],
+    ["rr exec --local 'npm install'", PM],
+    ['rr -q --no-phases run "bun test"', BUN_TEST],
+    ["rr exec --local=true 'npm install'", PM],
   ])("%j", async (command, reason) => {
     expect(denyReason(await run(command))).toContain(reason);
   });
@@ -71,6 +77,8 @@ describe.concurrent("guard-commands allows", () => {
     // A test name holding the command it tests.
     'bun run test:unit tests/hooks -t "bun test"',
     "cat <<EOF\nbun test\nEOF",
+    'rr run --host m1-mini "bun run test:unit tests/config.test.ts -t streams"',
+    'rr unit -- tests/hooks -t "bun test"',
   ])("%j", async (command) => {
     const result = await run(command);
     expect(result.code).toBe(0);
