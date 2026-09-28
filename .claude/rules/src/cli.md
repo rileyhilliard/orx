@@ -37,7 +37,7 @@ stdout carries results only; `orx ... | jq` and `ask --json` consumers depend on
 
 ## Exit codes
 
-`exitCodeForOutcome` in `src/errors.ts` is the only mapping: 0 ok, `--help`, and quitting the session (bare `orx`, which starts the TUI) with Ctrl+C; 1 defect; 2 usage (`CliError`), `BadInput`, `NotFound`, `UnknownModel`, `NotInteractive`; 3 `NotConfigured`, `InvalidConfig`, `TuiUnavailable` (the TUI couldn't load; `doctor --tui` reports why); 4 `UpstreamUnavailable`; 6 `PermissionDenied` (5 is retired, from the removed `orx extract`); 130 interrupted by a signal. They are documented in the README; changing one is a breaking change for scripts. A new tagged error needs a case in `exitCodeFor` and `retryableFor` (both exhaustive) and a test that asserts its code through `runCli`.
+`exitCodeForOutcome` in `src/errors.ts` is the only mapping: 0 ok, `--help`, and quitting the session (bare `orx`, which starts the TUI) with Ctrl+C; 1 defect; 2 usage (`CliError`), `BadInput`, `NotFound`, `UnknownModel`, `NotInteractive`; 3 `NotConfigured`, `InvalidConfig`, `TuiUnavailable` (the TUI couldn't load; `doctor --tui` reports why); 4 `UpstreamUnavailable`; 6 `PermissionDenied` (5 is retired, from the removed `orx extract`); 130 interrupted by a signal. They are documented in `docs/reference.md`; changing one is a breaking change for scripts. A new tagged error needs a case in `exitCodeFor` and `retryableFor` (both exhaustive) and a test that asserts its code through `runCli`.
 
 ## Logging per invocation
 

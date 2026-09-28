@@ -18,7 +18,7 @@ If the request is ambiguous (what goes in, what comes out on stdout and with `--
    - a usage error (missing argument, bad flag): exit 2, stdout empty
    - the program with `runTest` (`tests/helpers/effect.ts`, the TestClock) if it has time-based or retry behavior
    - the stub OpenRouter or stub releases for any HTTP it does, so no test touches the network
-5. **Docs**: the command and its exit codes in the README Commands section, the architecture map in `AGENTS.md` if a new file or directory appeared.
+5. **Docs**: the command in the README if a new user would reach for it, its exit codes in `docs/reference.md`, the architecture map in `AGENTS.md` if a new file or directory appeared.
 6. `/check`, then run it for real: `bun run stub`, export its env, `bun run orx -- <name> ...` with and without `--json`, and read `logs/orx.jsonl` for its `command` line. If only the compiled binary could break it, add one step to `e2e/`.
 
 Keep the command thin. Don't add flags, config, or output formats the request didn't ask for; say what you left out instead.

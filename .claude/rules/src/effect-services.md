@@ -26,7 +26,7 @@ Everything outside `src/tui/` and `src/bin.ts` is plain Effect with no platform 
 - Every env var is read in `src/config.ts` through Effect Config; empty counts as unset (`optionalString`). The key is `Config.Redacted`. Only `config.ts` and `src/bin.ts` (which clears `DEV`) touch `process.env`; the `guard-boundaries` hook denies it anywhere else.
 - `AppConfig.load` layers env over the optional `$XDG_CONFIG_HOME/orx/config.json` (`ConfigProvider.orElse(env, fromUnknown(file))`), decoded with the `ConfigFile` schema and `onExcessProperty: "error"`. The file can't hold the key: `ConfigFile` has no key field and is closed, so an `apiKey` in it is `InvalidConfig`, and `tests/config.test.ts` proves it never reaches a request. A new setting that belongs in the file goes in `ConfigFile` and `fileToEnv`.
 - Settings that must work with a broken file are read on their own, not through `AppConfig`: `releasesConfig` (update), `pathsConfig`, `logConfig`, `outputConfig`. A bad `LOG_LEVEL` falls back to the default instead of failing every command.
-- A new var goes in `config.ts`, `.env.example`, and the README table.
+- A new var goes in `config.ts`, `.env.example`, and the table in `docs/reference.md`.
 
 ## Errors and exit codes
 

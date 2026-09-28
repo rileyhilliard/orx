@@ -82,8 +82,9 @@ tests/              bun test; helpers/ (cli.ts runs main, effect.ts runTest, env
                     stub-openrouter.ts, stub-releases.ts); fixtures/openrouter/ recorded streams; tui/
                     (testRender, closed loop)
 e2e/                bun test against dist/orx
-docs/               harness.md; rfcs/RFC001-bootstrap-agent-harness/ (the coding agent's roadmap:
-                    README.md phase map, one file per phase, follow-ups.md)
+docs/               agent.md, reference.md, development.md (what the README links to), harness.md;
+                    rfcs/RFC001-bootstrap-agent-harness/ (the coding agent's roadmap: README.md phase
+                    map, one file per phase, follow-ups.md)
 ```
 
 Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs one handler. A handler decodes its input, runs one program from `core/`, and renders the result through `Output`. Config loads on first use (`loadConfig`), so `--help`, `--version`, `doctor`, and `update` work with a broken config file. For a chat turn, `core/chat.ts` streams one model step at a time through Effect AI, runs tool calls, and re-prompts until the model stops or `MAX_TOOL_STEPS`; the finished chat is saved before the `finish` event, and the stream's `onExit` logs one `llm call` line and saves a partial reply marked `interrupted` when the turn didn't finish.
@@ -91,11 +92,11 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 ## Conventions
 
 - stdout carries results only, and only through `Output`. Logs, notes (`Output.note`), and errors go to stderr. `main.ts` holds the CLI's own Console output (help, `--version`) and sends it to stdout on success, stderr on a usage error. Pipes depend on this: one stray stdout line corrupts `ask --json`.
-- Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig` / `TuiUnavailable`, 4 `UpstreamUnavailable`, 6 `PermissionDenied` (5 is retired: it was `orx extract`'s invalid output), 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the README table.
+- Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig` / `TuiUnavailable`, 4 `UpstreamUnavailable`, 6 `PermissionDenied` (5 is retired: it was `orx extract`'s invalid output), 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the exit code table in `docs/reference.md`.
 - `--json` makes results machine-readable (NDJSON `AskEvent`s for `ask`) and errors `{"error":{tag,message,retryable}}` on stderr.
 - Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else is platform-free: it uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, which `bin.ts` provides (`BunServices`). The session (bare `orx`) and `doctor` reach the TUI only by dynamic `import("../tui/launch")`.
 - TUI components never import `effect`; they get a `ChatBridge` (plain promises and async iterables) from `launch.tsx`. Colors come from `tui/theme.ts` only.
-- Only `src/config.ts` reads the environment (`bin.ts` also clears `DEV`, which would load OpenTUI's devtools). Empty values count as unset. A new var goes in `config.ts`, `.env.example`, and the README table; one the config file should also set goes in `schemas/config-file.ts` and `fileToEnv`.
+- Only `src/config.ts` reads the environment (`bin.ts` also clears `DEV`, which would load OpenTUI's devtools). Empty values count as unset. A new var goes in `config.ts`, `.env.example`, and the table in `docs/reference.md`; one the config file should also set goes in `schemas/config-file.ts` and `fileToEnv`.
 - Each service is a `Context.Service` class with static layers: `X.layer`, plus `X.layerMemory` where tests need fresh state.
 - Streaming model calls retry only before the first part is emitted (`step` in `core/chat.ts`); non-streaming calls (models list, releases) use Effect retry + timeout.
 - Chats are JSON files in `$ORX_DATA_DIR/chats/`, written to a temp file and renamed. Two processes saving one chat: the last write wins.
@@ -174,7 +175,8 @@ Steps only a human can do. Check here before reporting one of these as a problem
 
 | Need | Read |
 | --- | --- |
-| Install, configuration, exit codes, commands for humans | `README.md` |
+| Getting started with a key and the demo | `README.md` |
+| Configuration, `--json` output, exit codes, logs; the agent's tools, modes, and commands; dev commands and a code tour | `docs/reference.md`, `docs/agent.md`, `docs/development.md` |
 | Claude Code hooks, rules, commands, agents, settings | `.claude/README.md`, `.claude/rules/src/` |
 | Which layer catches which mistake, one `orx ask` turn as a diagram | `docs/harness.md` |
 | What the coding agent is building next, phase status, what phase 1 shipped | `docs/rfcs/RFC001-bootstrap-agent-harness/README.md` |

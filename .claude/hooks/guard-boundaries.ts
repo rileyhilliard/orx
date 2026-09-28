@@ -90,7 +90,7 @@ function reasonsFor(file: string, lines: string[]): string[] {
   }
   if (file !== "config.ts" && file !== "bin.ts" && has(PROCESS_ENV)) {
     reasons.push(
-      "reads process.env. Only src/config.ts reads the environment (Effect Config, empty counts as unset): add the variable there, to .env.example, and to the README table, and take it from AppConfig.",
+      "reads process.env. Only src/config.ts reads the environment (Effect Config, empty counts as unset): add the variable there, to .env.example, and to the table in docs/reference.md, and take it from AppConfig.",
     );
   }
   if (has(CONSOLE)) {

@@ -87,7 +87,7 @@ export const isAppError = (u: unknown): u is AppError =>
   typeof u._tag === "string" &&
   APP_ERROR_TAGS.has(u._tag);
 
-/** The documented exit codes (README, Commands). Exhaustive: a new error forces a decision. */
+/** The documented exit codes (docs/reference.md, Exit codes). Exhaustive: a new error forces a decision. */
 export const exitCodeFor = (error: AppError): number => {
   switch (error._tag) {
     case "BadInput":
@@ -154,7 +154,8 @@ export type Outcome =
 
 const INTERNAL: ErrorBody = {
   tag: "InternalError",
-  message: "Something went wrong inside orx. The log has the details (see README, Logs).",
+  message:
+    "Something went wrong inside orx. The log has the details (see docs/reference.md, Logs).",
   retryable: true,
 };
 
