@@ -1,8 +1,8 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { INTERRUPTED_RESULT, newChat, runTurn, sendMessage, type TurnEvent } from "~/core/chat";
 import { ChatId, type StoredChat } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
@@ -11,7 +11,9 @@ import { type PermissionMode, Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
 import { runScript } from "../scripts/lib/script-layer";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
+import { waitFor } from "./helpers/wait";
 
 // Stopping a turn while a tool is waiting (on the user's approval, or on a running command):
 // what the user, the saved chat, the next request, and the machine's process table see.
@@ -25,11 +27,11 @@ beforeEach(() => {
   stub.chatRequests.length = 0;
   stub.toolCalls = [];
   stub.steps = [];
-  vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-  vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-  vi.stubEnv("LOG_LEVEL", "error");
-  return () => vi.unstubAllEnvs();
+  stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+  stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+  stubEnv("LOG_LEVEL", "error");
 });
+afterEach(() => restoreEnv());
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-interrupt-")));
 
@@ -147,7 +149,7 @@ describe("stopping a turn while an approval is open", () => {
 
       const request = seen.find((e) => e.type === "approval-request");
       expect(request).toMatchObject({ tool: "bash", summary: "touch ran.txt" });
-      expect(leftover).toEqual({ type: "approval-cancelled", id: request?.id });
+      expect(leftover).toEqual<unknown>({ type: "approval-cancelled", id: request?.id });
       expect(existsSync(join(root, "ran.txt"))).toBe(false);
 
       // The saved reply is marked interrupted, and its bash call has the synthetic result.
@@ -205,7 +207,7 @@ describe("stopping a turn while bash runs", () => {
       const root = tempDir();
       stub.steps = [{ toolCalls: [{ name: "bash", arguments: JSON.stringify({ command }) }] }];
       const pidsWritten = () =>
-        vi.waitFor(
+        waitFor(
           () => {
             for (const name of ["shell.pid", "child.pid", "grandchild.pid"]) {
               expect(Number.isNaN(pidIn(root, name))).toBe(false);
@@ -229,7 +231,7 @@ describe("stopping a turn while bash runs", () => {
       expect(seen.map((e) => e.type)).toContain("tool-call");
       const pids = ["shell.pid", "child.pid", "grandchild.pid"].map((name) => pidIn(root, name));
       // The kill is SIGTERM, then SIGKILL after two seconds for anything that ignored it.
-      await vi.waitFor(
+      await waitFor(
         () => {
           expect(pids.filter(alive)).toEqual([]);
         },

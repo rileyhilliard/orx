@@ -1,7 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { askEvents, runCli, tempRoot } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 

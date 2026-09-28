@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
   mkdirSync,
@@ -10,9 +11,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger, Stream } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GrepInput } from "~/schemas";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
@@ -22,6 +22,7 @@ import { globFiles } from "~/tools/glob";
 import { grepFiles, hasRipgrep } from "~/tools/grep";
 import { GLOB_MAX_RESULTS, READ_MAX_FILE_BYTES } from "~/tools/limits";
 import { readFile } from "~/tools/read";
+import { restoreEnv, stubEnv } from "./helpers/env";
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-tools-")));
 
@@ -30,12 +31,12 @@ const layerFor = (root: string) =>
     Workspace.layerTest(root),
     FileState.layer,
     Permissions.layerHeadless("default"),
-  ).pipe(Layer.provideMerge(NodeServices.layer));
+  ).pipe(Layer.provideMerge(BunServices.layer));
 
 /** Runs `effect` against a workspace at `root`; a tool failure comes back as `{ failure }`. */
 const run = <A, E extends { message: string }>(
   root: string,
-  effect: Effect.Effect<A, E, Workspace | FileState | Permissions | NodeServices.NodeServices>,
+  effect: Effect.Effect<A, E, Workspace | FileState | Permissions | BunServices.BunServices>,
 ) =>
   Effect.runPromise(
     effect.pipe(
@@ -218,7 +219,7 @@ describe("glob", () => {
   });
 });
 
-const rgInstalled = await Effect.runPromise(hasRipgrep.pipe(Effect.provide(NodeServices.layer)));
+const rgInstalled = await Effect.runPromise(hasRipgrep.pipe(Effect.provide(BunServices.layer)));
 // Locally the rg tests skip without rg; in CI (ci.yml and release.yml install it) a missing rg fails,
 // or the rg path of grep would go untested without anyone noticing.
 if (process.env.CI && !rgInstalled) {
@@ -336,7 +337,7 @@ describe.each([
 
 describe("grep with rg", () => {
   afterEach(() => {
-    vi.unstubAllEnvs();
+    restoreEnv();
   });
 
   it.skipIf(!rgInstalled)("keeps its matches and says which files it couldn't search", async () => {
@@ -361,7 +362,7 @@ describe("grep with rg", () => {
     const root = tempDir();
     writeFileSync(join(root, "a.txt"), "needle\n");
     symlinkSync(join(outside, "leak.txt"), join(root, "escape.txt"));
-    vi.stubEnv("RIPGREP_CONFIG_PATH", join(outside, "ripgreprc"));
+    stubEnv("RIPGREP_CONFIG_PATH", join(outside, "ripgreprc"));
     expect((await run(root, grepFiles({ pattern: "needle" }, true))).value).toBe("a.txt");
   });
 });
@@ -401,14 +402,14 @@ describe("AgentTools", () => {
   const handleAll = (
     root: string,
     calls: ReadonlyArray<readonly [string, Record<string, unknown>]>,
-    workspace: Layer.Layer<Workspace, never, NodeServices.NodeServices> = Workspace.layerTest(root),
+    workspace: Layer.Layer<Workspace, never, BunServices.BunServices> = Workspace.layerTest(root),
   ) => {
     const logs: Array<{ level: string; message: unknown }> = [];
     const services = Layer.mergeAll(
       workspace,
       FileState.layer,
       Permissions.layerHeadless("default"),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+    ).pipe(Layer.provideMerge(BunServices.layer));
     return Effect.runPromise(
       Effect.gen(function* () {
         const toolkit = yield* AgentTools;

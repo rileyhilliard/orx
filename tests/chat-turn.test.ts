@@ -1,8 +1,8 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Deferred, Effect, Exit, Fiber, Logger, Schema, Stream } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { newChat, runTurn, sendMessage } from "~/core/chat";
 import { resolveToolModel } from "~/core/models";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
@@ -10,6 +10,7 @@ import { type AssistantMessage, ChatId } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { runScript, type ScriptServices } from "../scripts/lib/script-layer";
 import { askEvents, runCli } from "./helpers/cli";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -200,9 +201,9 @@ describe("a chat turn", () => {
   });
 
   it("marks a reply interrupted when the consumer stops early, as the TUI does on Esc", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     stub.completion = { ...stub.completion, text: "one two three four" };
     stub.hangAfter = 2;
     const ended: AssistantMessage[] = [];
@@ -224,7 +225,7 @@ describe("a chat turn", () => {
       );
     } finally {
       stub.completion = { ...stub.completion, text: "Hello from the stub." };
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
     expect(ended).toHaveLength(1);
     expect(ended[0]).toMatchObject({ text: "one ", interrupted: true });
@@ -264,9 +265,9 @@ describe("a chat that can't be saved", () => {
 
   it("still ends as interrupted on Ctrl+C, and logs why the partial reply wasn't saved", async () => {
     const { dataDir, unlock } = lockedDataDir();
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("ORX_DATA_DIR", dataDir);
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("ORX_DATA_DIR", dataDir);
     stub.completion = { ...stub.completion, text: "one two three four" };
     stub.hangAfter = 2;
     const logs: LogRecord[] = [];
@@ -298,7 +299,7 @@ describe("a chat that can't be saved", () => {
       expect(JSON.stringify(errors[0])).toContain(unwritable(dataDir));
     } finally {
       stub.completion = { ...stub.completion, text: "Hello from the stub." };
-      vi.unstubAllEnvs();
+      restoreEnv();
       unlock();
     }
   });
@@ -310,10 +311,10 @@ describe("resolveToolModel", () => {
     { id: "acme/no-tools", name: "Acme: No Tools", tools: false },
   ];
   const resolve = async (requested: string | undefined, env: Record<string, string> = {}) => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
-    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
+    for (const [name, value] of Object.entries(env)) stubEnv(name, value);
     const saved = stub.models;
     stub.models = models;
     try {
@@ -328,7 +329,7 @@ describe("resolveToolModel", () => {
       );
     } finally {
       stub.models = saved;
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
   };
 

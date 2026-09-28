@@ -1,8 +1,8 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Stream } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { runTurn, type TurnEvent } from "~/core/chat";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
@@ -10,6 +10,7 @@ import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
 import type { ScriptServices } from "../scripts/lib/script-layer";
 import { runScript } from "../scripts/lib/script-layer";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -20,9 +21,9 @@ afterAll(() => stub.close());
 
 describe("an agent turn with approvals", () => {
   it("emits approval-request and runs the tool only after answer(yes)", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     stub.toolCalls = [{ name: "bash", arguments: JSON.stringify({ command: "echo approved" }) }];
     const root = realpathSync(mkdtempSync(join(tmpdir(), "orx-approval-")));
     const session = AgentToolsLive.pipe(
@@ -65,14 +66,14 @@ describe("an agent turn with approvals", () => {
       });
       expect(types.at(-1)).toBe("finish");
     } finally {
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
   });
 
   it("doesn't carry an approval request left over from a stopped turn into the next one", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     // Two parallel calls: the first asks, the second waits its turn to ask. Stopping the turn
     // leaves an approval-cancelled in the Permissions queue; the next turn must not show it.
     stub.steps = [
@@ -116,7 +117,7 @@ describe("an agent turn with approvals", () => {
       expect(second.map((e) => e.type)).toEqual(["text", "finish"]);
     } finally {
       stub.steps = [];
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
   });
 });

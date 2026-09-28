@@ -1,8 +1,8 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { newChat, sendMessage } from "~/core/chat";
 import { ChatId, type StoredChat } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
@@ -11,6 +11,7 @@ import { Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
 import { runScript, type ScriptServices } from "../scripts/lib/script-layer";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import {
   type StubModel,
   type StubOpenRouter,
@@ -33,13 +34,13 @@ beforeEach(() => {
   stub.steps = [];
   stub.failCompletions = undefined;
   stub.models = [...models, { id: "acme/small", name: "Acme: Small", context_length: 10_000 }];
-  vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-  vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-  vi.stubEnv("LOG_LEVEL", "error");
-  return () => {
-    stub.models = models;
-    vi.unstubAllEnvs();
-  };
+  stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+  stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+  stubEnv("LOG_LEVEL", "error");
+});
+afterEach(() => {
+  stub.models = models;
+  restoreEnv();
 });
 
 const FILES = ["a.txt", "b.txt", "c.txt", "d.txt"];

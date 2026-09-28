@@ -1,9 +1,9 @@
+import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Option } from "effect";
-import { describe, expect, it } from "vitest";
 import { listWorkspaceFiles, mentionAttachments, mentionTokens } from "~/core/mentions";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
@@ -14,7 +14,7 @@ const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-mentions-")))
 
 const run = <A, E>(
   root: string,
-  effect: Effect.Effect<A, E, Workspace | FileState | Permissions | NodeServices.NodeServices>,
+  effect: Effect.Effect<A, E, Workspace | FileState | Permissions | BunServices.BunServices>,
 ) =>
   Effect.runPromise(
     effect.pipe(
@@ -23,7 +23,7 @@ const run = <A, E>(
           Workspace.layerTest(root),
           FileState.layer,
           Permissions.layerHeadless("default"),
-        ).pipe(Layer.provideMerge(NodeServices.layer)),
+        ).pipe(Layer.provideMerge(BunServices.layer)),
       ),
     ),
   );

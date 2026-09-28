@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
 import { Permissions } from "~/services/permissions";
 import { permit } from "~/tools/permit";
 import { printable } from "~/tui/printable";

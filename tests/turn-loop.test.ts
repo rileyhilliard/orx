@@ -1,11 +1,12 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Cause, Effect, Exit, Logger, Option, Schema, Stream } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTurn, type TurnEvent } from "~/core/chat";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
 import { AssistantMessage, type ChatMessage } from "~/schemas";
 import { runScript } from "../scripts/lib/script-layer";
 import { ndjson, runCli } from "./helpers/cli";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   stub.completion = completion;
-  vi.unstubAllEnvs();
+  restoreEnv();
 });
 
 type WireMessage = {
@@ -41,9 +42,9 @@ type WireRequest = {
 const request = (index: number) => stub.chatRequests[index] as WireRequest;
 
 const useStub = (logLevel = "error") => {
-  vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-  vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-  vi.stubEnv("LOG_LEVEL", logLevel);
+  stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+  stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+  stubEnv("LOG_LEVEL", logLevel);
 };
 
 /** Runs one turn through the real programs, collecting its events, reply, and log records. */

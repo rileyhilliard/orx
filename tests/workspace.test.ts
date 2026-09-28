@@ -1,3 +1,4 @@
+import { describe, expect, it } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,9 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Option } from "effect";
-import { describe, expect, it } from "vitest";
 import { Paths } from "~/config";
 import { FileState } from "~/services/file-state";
 import { Workspace } from "~/services/workspace";
@@ -22,7 +22,7 @@ const run = <A, E>(root: string, effect: Effect.Effect<A, E, Workspace | FileSta
     effect.pipe(
       Effect.provide(
         Layer.mergeAll(Workspace.layerTest(root), FileState.layer).pipe(
-          Layer.provide(NodeServices.layer),
+          Layer.provide(BunServices.layer),
         ),
       ),
     ),
@@ -135,7 +135,7 @@ describe("Workspace.resolveRoot", () => {
             logFile: Option.none(),
           }),
         ),
-        Effect.provide(NodeServices.layer),
+        Effect.provide(BunServices.layer),
       ),
     );
 
