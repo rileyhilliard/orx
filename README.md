@@ -9,7 +9,7 @@ It's TypeScript on [Effect 4](https://effect.website) (CLI, Effect AI with `@eff
 You need bun 1.4.2 or newer and git. `rg` (ripgrep) is optional; `grep` falls back to a JS search without it.
 
 ```bash
-git clone <this repo> orx && cd orx
+git clone https://github.com/rileyhilliard/orx.git && cd orx
 bun install
 ```
 
