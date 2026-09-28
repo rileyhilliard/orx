@@ -110,7 +110,7 @@ function reasonsFor(file: string, lines: string[]): string[] {
   }
   if (!file.startsWith("tui/") && importsTui(file, lines)) {
     reasons.push(
-      "statically imports src/tui/ from outside it. That loads OpenTUI on every run and in every vitest file that imports it: load it with importTui from src/commands/load-tui.ts (a dynamic import), as src/commands/chat.ts does, and put shared types outside src/tui/.",
+      "statically imports src/tui/ from outside it. That loads OpenTUI on every run and in every vitest file that imports it: load it with importTui from src/commands/load-tui.ts (a dynamic import), as src/commands/session.ts does, and put shared types outside src/tui/.",
     );
   }
   if (has(ZOD_IMPORT)) {

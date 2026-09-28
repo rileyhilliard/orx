@@ -20,8 +20,9 @@ The installer picks the binary for your OS and CPU (macOS and Linux with glibc, 
 orx ask "what's a monad, in one sentence"
 git diff | orx ask "review this diff"        # piped stdin is appended to the prompt
 orx ask --json "time in Tokyo?" | jq -c .   # NDJSON: text, tool-call, tool-result, done | error
-orx                                          # Ctrl+P model, Ctrl+E export, Esc stop, Ctrl+C quit
+orx                                          # the coding agent, working in this directory
 orx --resume <id>                            # ids from `orx chats`
+orx ask --agent --permission-mode acceptEdits "rename fmtPrice to formatPrice"
 orx models gpt                               # search models, prices per million tokens
 orx extract "Ada Lovelace, ada@example.com, Analytical Engines Ltd"
 orx export <id> -o chat.md
@@ -29,6 +30,33 @@ claude mcp add orx -- orx mcp                # currentTime and extractContact as
 ```
 
 Every reply is saved as a chat (the id is printed after the reply, on stderr). Results go to stdout and everything else (usage lines, logs, errors) to stderr, so pipes only see the answer. When stdin isn't a terminal, `ask` and `extract` read it to the end, so in a `while read` loop or under a job runner whose stdin stays open, give them `< /dev/null`.
+
+## The coding agent
+
+Bare `orx` starts a session in the current directory (`--cwd <dir>` picks another, and is required to work in your home directory or `/`). The model gets `read`, `glob`, `grep`, `write`, `edit`, and `bash`, plus `skill`, and only models with tool calling are offered. File tools resolve every path inside the workspace, symlinks included, and refuse anything outside it. `bash` runs in the workspace with the API key scrubbed from its environment, but it is not sandboxed: an approved command can touch anything your user can.
+
+What runs without asking depends on the permission mode. Shift+Tab or `/mode` switches between the first three during a session.
+
+| Mode | Reads | Writes and edits | bash |
+|---|---|---|---|
+| `default` | allowed | ask | ask |
+| `acceptEdits` | allowed | allowed, except protected paths | ask |
+| `plan` | allowed | denied | denied |
+| `yolo` | allowed | allowed | allowed |
+
+Two kinds of path always ask, in every mode but `yolo`. Secret-shaped files (`.env*`, `*.pem`, `*.key`, `id_*`) ask before they're read or written; `@` doesn't attach them, and `grep` never searches them (it says how many it skipped). Protected paths ask before a write even in `acceptEdits`, because a later approved command would run or load them: anything under `.git/`, `.orx/commands/`, or `.orx/skills/`, and any `package.json`, `lefthook.yml`, `AGENTS.md`, or `CLAUDE.md`, compared without regard to case (`.GIT/config` is `.git/config` on macOS).
+
+An approval shows the command or the diff; `y` allows it, `a` allows it for the rest of the session (the same command again, or every edit by switching to `acceptEdits`), and `n` denies it with an optional note for the model. "Always" isn't offered for compound commands (`;`, `&&`, pipes, redirects, substitution) or for secret and protected paths. `--dangerously-skip-permissions` starts in `yolo`: nothing asks, file tools still stay in the workspace, and `bash` doesn't.
+
+`orx ask --agent` runs the same tools with no one to ask, so whatever would ask is denied and the model sees why. `--permission-mode` (default `default`, which denies every write, edit, and command) says what may run; `--cwd` and `--permission-mode` need `--agent`. With `--json`, a denied call emits `{"type":"permission-denied","id","tool","message"}` right before that call's `tool-result`.
+
+**Memory.** The system prompt includes `~/.config/orx/AGENTS.md`, then the `AGENTS.md` (or `CLAUDE.md` where there's none) of each directory from the git root down to the workspace, capped at 32 KiB.
+
+**Slash commands.** `/` lists the built-ins (`/help`, `/clear`, `/model`, `/mode`, `/export`, `/quit`), custom commands, and skills. A custom command is a Markdown file in `.orx/commands/` (or `~/.config/orx/commands/`); `/name args` sends its body with `$ARGUMENTS` replaced (or the arguments appended), and a `model:` line in its frontmatter runs that turn on another model. A skill is a directory in `.orx/skills/` (or `~/.config/orx/skills/`) with a `SKILL.md` whose frontmatter has `name` and `description`: the description goes in the system prompt, and the model loads the body with the `skill` tool when it needs it (`/name args` sends it as your message). The workspace's commands and skills win a name clash with yours.
+
+**@ mentions.** `@` opens a fuzzy file picker. Each `@path` in a message attaches that file (numbered lines, the first 2000) or that directory's listing for the model; the chat, `--resume`, and exports show only what you typed. When a long chat nears the model's context window, old tool outputs and older messages' attachments are replaced by a one-line stub.
+
+`/help` lists every key. Chats remember their workspace: `--resume` from a different directory exits 2 and names it, and an explicit `--cwd` chooses where to continue.
 
 ## Configuration
 
@@ -44,7 +72,7 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 | `OPENROUTER_PROVIDER_SORT` | `price`, `throughput`, or `latency`; empty lets OpenRouter choose. |
 | `OPENROUTER_ALLOW_FALLBACKS` | Whether OpenRouter may use other providers for the same model (default `true`). |
 | `OPENROUTER_DATA_COLLECTION` / `OPENROUTER_ZDR` | `deny` / `true` restrict routing to providers that don't store prompts / keep zero data. |
-| `MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS` | Reply length (8192), model steps per turn (50; hitting it ends the turn with a note), and seconds a reply may go without a chunk from the model (120; time running tools doesn't count). |
+| `MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS` | Reply length (8192 for every command), model steps per turn (50; hitting it ends the turn with a note), and seconds a reply may go without a chunk from the model (120; time running tools doesn't count). OpenRouter checks your credit against the input plus `max_tokens` before the call, so lower `MAX_OUTPUT_TOKENS` if you get a 402 "can only afford" error. |
 | `LOG_LEVEL`, `ORX_LOG_FORMAT`, `ORX_LOG_FILE` | Log level (`warn` by default; `--log-level` per run), `pretty` or `json` on stderr, and a file to also append JSON lines to. `NO_COLOR=1` turns off color and `FORCE_COLOR=1` forces it. |
 | `ORX_DATA_DIR` | Where chats are saved (default `$XDG_DATA_HOME/orx`, else `~/.local/share/orx`). |
 | `ORX_RELEASES_REPO`, `ORX_RELEASES_URL` | Where `orx update` looks for releases (default `rileyhilliard/orx` on `https://api.github.com`). |
@@ -55,7 +83,7 @@ Environment variables win over the optional config file, `~/.config/orx/config.j
 |---|---|
 | 0 | Success, including `--help` |
 | 1 | A bug in orx (the log has details) |
-| 2 | Bad usage or input: unknown flag, empty prompt, unknown model, unknown chat id, `chat` without a terminal |
+| 2 | Bad usage or input: unknown flag, empty prompt, unknown model, unknown chat id, bare `orx` without a terminal, `--resume` from another workspace |
 | 3 | Not configured: no API key, a bad env var or config file value (the message names it), or the terminal UI can't load here |
 | 4 | OpenRouter or GitHub failed or timed out; `retryable` in the `--json` error says whether trying again can help |
 | 5 | The model's structured output didn't match the schema |

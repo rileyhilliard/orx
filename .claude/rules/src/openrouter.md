@@ -39,6 +39,6 @@ One `llm call` log line from `finalize` in `runTurn`: requested model, served mo
 
 ## No key
 
-`OPENROUTER_API_KEY` is optional. Without it, `orx --help`, `--version`, `models`, `chats`, `export`, `doctor`, and `update` work; `ask`, `chat`, `extract`, and the model-backed MCP tools fail with `NotConfigured`. The test env has an empty key; `runCli` passes a dummy one, so pass `env: { OPENROUTER_API_KEY: "" }` to test the not-configured path.
+`OPENROUTER_API_KEY` is optional. Without it, `orx --help`, `--version`, `models`, `chats`, `export`, `doctor`, and `update` work; `ask`, `extract`, a turn in the session (bare `orx`, which shows the error in the TUI), and the model-backed MCP tools fail with `NotConfigured`. The test env has an empty key; `runCli` passes a dummy one, so pass `env: { OPENROUTER_API_KEY: "" }` to test the not-configured path.
 
 To drive the real CLI with no key and no spend, `bun run stub` starts the stub OpenRouter and stub releases servers and prints the env to export; `bun run stub:stop` stops them.

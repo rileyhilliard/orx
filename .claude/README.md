@@ -62,7 +62,7 @@ Each file in `rules/src/` loads only when the agent touches files matching its `
 | `cli.md` | `bin.ts`, `main.ts`, `cli.ts`, `commands/`, output and input helpers, errors: the stdout contract, exit codes, flags, the platform boundary |
 | `effect-ai.md` | the turn loop, tools, extract, `ask`, `mcp`: who owns the step loop, retry before the first part, tool schemas per provider |
 | `openrouter.md` | the provider, models list, chat, replay fixtures, the recorder: routing, usage and cost, the `llm call` log line |
-| `tui.md` | `src/tui/`, `commands/chat.ts`, `commands/load-tui.ts`, `tests/tui/`, `tui-capture`, `DESIGN.md`: the bridge, terminal and signal ownership, states, TUI tests |
+| `tui.md` | `src/tui/`, `commands/session.ts`, `commands/load-tui.ts`, `tests/tui/`, `tui-capture`, `DESIGN.md`: the bridge, terminal and signal ownership, states, TUI tests |
 | `distribution.md` | the build script, `install.sh`, `update`, `doctor`, releases, CI workflows, `e2e/`: compiled binaries, native libs, self-update |
 | `testing.md` | tests, `e2e/`, and the runner configs: the two runners, no network, where a test goes, required coverage, hook tests |
 | `verification.md` | `src/`, `tests/`, `e2e/`, `scripts/`: the done-check |

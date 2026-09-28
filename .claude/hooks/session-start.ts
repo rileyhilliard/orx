@@ -132,7 +132,7 @@ function openTuiNative(): void {
   const candidates = process.platform === "linux" ? [base, `${base}-musl`] : [base];
   if (candidates.some((name) => isDir(join("node_modules", name)))) return;
   say(
-    `node_modules/${base} is missing, so OpenTUI can't load its native library: orx chat, orx doctor --tui, and bun run test:tui fail on this machine. Run \`bun install\` (it installs the optional package for this platform); everything else works without it.`,
+    `node_modules/${base} is missing, so OpenTUI can't load its native library: bare orx, orx doctor --tui, and bun run test:tui fail on this machine. Run \`bun install\` (it installs the optional package for this platform); everything else works without it.`,
   );
 }
 

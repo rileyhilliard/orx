@@ -44,14 +44,23 @@ src/
                     one `command` log line. Platform-free, so vitest runs it (tests/helpers/cli.ts)
   cli.ts            the command tree
   commands/         one file per command, thin: decode -> one program -> render via Output.
-                    ask, chat, models, extract, chats, export, mcp, update, doctor; shared.ts flags
-  core/             programs: chat.ts (the turn loop, a Stream of TurnEvents), models.ts, extract.ts,
-                    export.ts, update.ts, upstream.ts (AiError -> UpstreamUnavailable), input.ts,
-                    format.ts (human output), stdin.ts, mcp-stdio.ts, commands.ts + skills.ts
-                    (custom commands and skills from .orx/ and ~/.config/orx/)
+                    session.ts (bare `orx`), ask, models, extract, chats, export, mcp, update,
+                    doctor; shared.ts flags
+  core/             programs: chat.ts (the turn loop, a Stream of TurnEvents), session.ts (builds a
+                    coding session: root, system prompt, tool layer), prompt.ts (system prompt,
+                    AGENTS.md memory), context.ts (eliding old tool outputs and attachments, cache
+                    breakpoints), mentions.ts (`@path` attachments), commands.ts + skills.ts (from
+                    .orx/ and ~/.config/orx/), models.ts, extract.ts, export.ts, update.ts,
+                    upstream.ts (AiError -> UpstreamUnavailable), input.ts, format.ts, stdin.ts,
+                    mcp-stdio.ts
   services/         Context.Service + static layers: Llm, OpenRouterModels (10 min cache), ChatStore
-                    (JSON files; layerMemory), Releases, Output (the only stdout writer), Host
-  tools/            Effect AI tools: ChatTools (chat + mcp), mcp.ts adds extractContact
+                    (JSON files; layerMemory), Releases, Output (the only stdout writer), Host; per
+                    session: Workspace (root, path containment, secret paths), FileState (what the
+                    model read, for stale-edit checks), Permissions (modes, approvals)
+  tools/            Effect AI tools: ChatTools (chat + mcp), mcp.ts adds extractContact; AgentTools
+                    (read, glob, grep, write, edit, bash; each asks Permissions through permit.ts) and
+                    SkillTools for the session. AgentTools stays out of ChatTools: `orx mcp` serves
+                    ChatTools, and file and shell tools there would bypass the approval gate
   schemas/          Effect Schema per domain, including the config file and the NDJSON events
   config.ts         every env var and the config file via Effect Config; Paths; logConfig
   errors.ts         tagged errors, exitCodeFor + retryableFor (exhaustive), outcomeOf
@@ -59,7 +68,9 @@ src/
   runtime.ts        AppLayer (every service; platform from outside), LoggerLayer
   tui/              Bun-only: launch.tsx (renderer + makeBridge: the only TUI file importing effect),
                     app.tsx, message-list, picker.tsx (shared list overlay) + model-picker,
-                    commands.ts (slash parsing, built-ins), types.ts (the bridge), theme.ts
+                    approval-panel, mentions.ts (the `@` picker's matching), tool-summary.ts (one
+                    line per tool call), commands.ts (slash parsing, built-ins, keys), types.ts (the
+                    bridge), theme.ts
 scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-server.ts, tui-capture.ts,
                     record-openrouter.ts, prepare.ts, vanilla.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
                     recording.ts)

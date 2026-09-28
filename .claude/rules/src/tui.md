@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/tui/**"
-  - "src/commands/chat.ts"
+  - "src/commands/session.ts"
   - "src/commands/load-tui.ts"
   - "tests/tui/**"
   - "scripts/tui-capture.ts"
@@ -17,7 +17,7 @@ The `orx` session TUI is OpenTUI (`@opentui/core` + `@opentui/react`, pinned exa
 - `src/tui/launch.tsx` is the only TUI file that imports `effect`. It captures `Effect.context()` and hands components a `ChatBridge` (`src/tui/types.ts`): plain data, promises (`listModels`, `exportMarkdown`), and an async iterable per turn (`send`, built with `Stream.toAsyncIterableWith(context)`). Errors arrive already mapped to `{ message, retryable }`, and the iterable yields an `error` event rather than throwing. Components never import `effect`, `~/core`, or `~/services` (the `guard-boundaries` hook and the Grit rule deny `effect` imports under `src/tui/` outside `launch.tsx`).
 - Something new a component needs goes on `ChatBridge` as a plain function, built in `launch.tsx` from an Effect program. Keep the types in `types.ts` free of Effect types.
 - Stopping a reply is `iterator.return()` on the turn's iterator: that stops the stream, `runTurn`'s `onExit` saves the partial reply, and the bridge reloads the saved chat. The stop arrives as a `Success` exit, not an interruption (see `effect-ai.md`), so a test should assert the saved reply is marked interrupted.
-- `commands/chat.ts` and `commands/doctor.ts` (for `--tui`) load the bridge through `importTui` in `commands/load-tui.ts`, a dynamic `import("../tui/launch")` that turns a load failure into `TuiUnavailable`, so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree. The `guard-boundaries` hook and the Grit rule deny one (type-only imports included, so shared types live outside `src/tui/`).
+- `commands/session.ts` (bare `orx`) and `commands/doctor.ts` (for `--tui`) load the bridge through `importTui` in `commands/load-tui.ts`, a dynamic `import("../tui/launch")` that turns a load failure into `TuiUnavailable`, so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree. The `guard-boundaries` hook and the Grit rule deny one (type-only imports included, so shared types live outside `src/tui/`).
 
 ## Terminal and signal ownership
 
