@@ -11,6 +11,7 @@ import { listModels } from "../core/models";
 import { expandSkill, loadSlash } from "../core/skills";
 import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
+import { FileState } from "../services/file-state";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
 import { summarizeTool, toolStatus } from "./tool-summary";
@@ -52,6 +53,7 @@ type LaunchServices =
   | Effect.Services<ReturnType<typeof loadSlash>>
   | Effect.Services<ReturnType<typeof expandSessionCommand>>
   | Permissions
+  | FileState
   | FileSystem.FileSystem;
 
 const toUiMessage = (message: ChatMessage): UiMessage =>
@@ -146,8 +148,9 @@ export const makeBridge = <R = never, M = never>(
     const context = yield* Effect.context<LaunchServices | R | M>();
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
-    // The session's approval gate.
+    // The session's approval gate, and what its model has read (a new chat starts unread).
     const permissions = yield* Permissions;
+    const fileState = yield* FileState;
     let chat = initial;
     // Commands and skills load once per session; the loader logs its warnings.
     const slash = yield* Effect.cached(
@@ -331,10 +334,13 @@ export const makeBridge = <R = never, M = never>(
       },
       newChat: () =>
         run(
-          Effect.sync(() => {
-            chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model, chat.cwd);
-            return chat.id;
-          }),
+          Effect.andThen(
+            fileState.reset,
+            Effect.sync(() => {
+              chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model, chat.cwd);
+              return chat.id;
+            }),
+          ),
         ),
     };
     return { bridge, stopTurns };

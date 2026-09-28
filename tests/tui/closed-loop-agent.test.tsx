@@ -211,4 +211,63 @@ describe("TUI closed loop, coding session", () => {
       ],
     });
   });
+  it("forgets what the last chat read on /clear, so a write there needs a new read", async () => {
+    const { home, work } = project();
+    stub.steps = [
+      { toolCalls: [{ name: "read", arguments: JSON.stringify({ path: "math.js" }) }] },
+      { text: "Read it." },
+      {
+        toolCalls: [
+          {
+            name: "write",
+            arguments: JSON.stringify({ path: "math.js", content: "overwritten\n" }),
+          },
+        ],
+      },
+      { text: "Tried." },
+    ];
+    await Effect.gen(function* () {
+      // yolo: nothing asks, so only the read-before-write check stands between the write and disk.
+      const session = yield* prepareSession(Option.some(work), { mode: "yolo", headless: false });
+      yield* Effect.gen(function* () {
+        const { bridge } = yield* makeBridge(
+          newChat(chatId, "openai/gpt-test", session.root),
+          () => {},
+          session,
+        );
+        setup = yield* Effect.promise(() =>
+          render(<App bridge={bridge} />, { width: 100, height: 40 }),
+        );
+        const screen = setup;
+        yield* Effect.promise(async () => {
+          await screen.renderOnce();
+          await screen.mockInput.typeText("read math.js");
+          screen.mockInput.pressEnter();
+          await waitForScreen(screen, (f) => f.includes("Read it.") && !f.includes("Replying"));
+          // `/` opens the command list; Esc leaves the `/` in the composer for the typed command.
+          await screen.mockInput.typeText("/");
+          await waitForScreen(screen, (f) => f.includes("Commands"));
+          screen.mockInput.pressEscape();
+          await waitForScreen(screen, (f) => !f.includes("Commands"));
+          await screen.mockInput.typeText("clear");
+          screen.mockInput.pressEnter();
+          await waitForScreen(
+            screen,
+            (f) => !f.includes("Read it.") && !f.includes("chat 1a2b3c4d"),
+          );
+          await screen.mockInput.typeText("overwrite math.js");
+          screen.mockInput.pressEnter();
+          await waitForScreen(screen, (f) => f.includes("Tried.") && !f.includes("Replying"));
+        });
+      }).pipe(Effect.provide(session.layer));
+    }).pipe(Effect.provide(layer(home)), quiet, Effect.runPromise);
+    expect(readFileSync(join(work, "math.js"), "utf8")).toBe(ORIGINAL);
+    const last = stub.chatRequests.at(-1) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const results = last.messages.filter((m) => m.role === "tool");
+    // The new chat's history has only the write's result, and it was refused.
+    expect(results).toHaveLength(1);
+    expect(JSON.stringify(results[0]?.content)).toContain("read it first");
+  });
 });
