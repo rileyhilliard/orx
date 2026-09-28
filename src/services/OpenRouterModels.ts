@@ -24,6 +24,7 @@ const WireModels = Schema.Struct({
       canonical_slug: Schema.optional(Schema.NullOr(Schema.String)),
       name: Schema.String,
       context_length: Schema.optional(Schema.NullOr(Schema.Number)),
+      supported_parameters: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
       pricing: Schema.Struct({ prompt: Schema.String, completion: Schema.String }),
     }),
   ),
@@ -36,6 +37,7 @@ const toModelInfo = (model: (typeof WireModels.Type)["data"][number]): ModelInfo
   name: model.name,
   provider: model.id.split("/")[0] ?? "other",
   contextLength: model.context_length ?? null,
+  supportsTools: model.supported_parameters?.includes("tools") ?? false,
   promptPrice: Number(model.pricing.prompt) || 0,
   completionPrice: Number(model.pricing.completion) || 0,
 });

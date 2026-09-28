@@ -9,13 +9,22 @@ import { ErrorBody } from "./errors";
  */
 export const AskEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), delta: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("tool-call"), name: Schema.String, input: Schema.Unknown }),
+  Schema.Struct({
+    type: Schema.Literal("tool-call"),
+    /** The call's id; its `tool-result` carries the same one. */
+    id: Schema.String,
+    name: Schema.String,
+    input: Schema.Unknown,
+  }),
   Schema.Struct({
     type: Schema.Literal("tool-result"),
+    id: Schema.String,
     name: Schema.String,
     output: Schema.Unknown,
     isFailure: Schema.Boolean,
   }),
+  /** Why a turn ended early without failing (the step cap, a repeated tool call). */
+  Schema.Struct({ type: Schema.Literal("note"), message: Schema.String }),
   Schema.Struct({
     type: Schema.Literal("done"),
     chatId: ChatId,

@@ -12,6 +12,8 @@ export const ModelInfo = Schema.Struct({
   /** The model author, from the id prefix (`openai/gpt-...` -> `openai`). */
   provider: Schema.String,
   contextLength: Schema.NullOr(Schema.Number),
+  /** Whether OpenRouter lists `tools` among the model's supported parameters (tool calling). */
+  supportsTools: Schema.Boolean,
   promptPrice: Schema.Number,
   completionPrice: Schema.Number,
 }).annotate({ identifier: "ModelInfo" });

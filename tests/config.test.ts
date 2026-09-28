@@ -79,7 +79,7 @@ describe("env", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_TOOL_STEPS: "", MAX_OUTPUT_TOKENS: "" },
     });
     expect(run.exitCode).toBe(0);
-    expect(lastRequest()).toMatchObject({ max_tokens: 1024 });
+    expect(lastRequest()).toMatchObject({ max_tokens: 8192 });
   });
 
   it("exits 3 on a bad value and names the variable", async () => {

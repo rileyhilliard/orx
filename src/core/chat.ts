@@ -1,44 +1,93 @@
 import { Cause, Clock, Duration, Effect, Exit, type Layer, Option, Ref, Stream } from "effect";
-import { AiError, LanguageModel, Prompt, type Response } from "effect/unstable/ai";
+import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
 import { loadConfig } from "../config";
 import { isAppError, NotFound, UpstreamUnavailable } from "../errors";
 import { ChatStore } from "../services/ChatStore";
 import { Llm } from "../services/Llm";
+import { OpenRouterModels } from "../services/OpenRouterModels";
 import { ChatTools, type ChatToolsLive } from "../tools";
+import { budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
+import { isContextLengthError, timedOut, toUpstreamError } from "./upstream";
 
-import { timedOut, toUpstreamError } from "./upstream";
-
-/** What the chat tools' handlers provide (ChatToolsLive in the app, the same layer in tests). */
-type ToolHandlers = Layer.Success<typeof ChatToolsLive>;
+/** What the chat tools' handlers need (ChatToolsLive in the app, the same layer in tests). */
+export type ChatToolHandlers = Layer.Success<typeof ChatToolsLive>;
 
 /**
- * What one chat turn emits, in order: text deltas and tool events as they happen, then one
- * `finish` with the whole reply (text, tools, usage summed over every step). `orx ask`
- * renders these as text or NDJSON; the TUI renders them as they stream.
+ * The tools a turn offers, with their handlers: a `Toolkit` (it is an Effect that needs its
+ * handler layer, `R`). Tools must use `failureMode: "return"`, so a failing tool is a result
+ * the model sees rather than a failed turn.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: WithHandler is invariant in its tools; any toolkit fits.
+export type TurnToolkit<R> = Effect.Effect<Toolkit.WithHandler<any>, never, R>;
+
+/** The toolkit a turn uses unless the caller passes one. */
+export const defaultToolkit: TurnToolkit<ChatToolHandlers> = ChatTools;
+
+/** The same tool with identical input this many times in a row ends the turn with a note. */
+export const MAX_REPEATED_CALLS = 3;
+
+/** The result the model sees for a tool call the user interrupted before it finished. */
+export const INTERRUPTED_RESULT = "Interrupted by the user before the tool finished.";
+
+/**
+ * What one chat turn emits, in order: text deltas and tool events as they happen, a `note` when
+ * the turn stops early without failing (the step cap, a repeated tool call), then one `finish`
+ * with the whole reply (text, tools, usage summed over every step). `orx ask` renders these as
+ * text or NDJSON; the TUI renders them as they stream.
  */
 export type TurnEvent =
   | { readonly type: "text"; readonly delta: string }
-  | { readonly type: "tool-call"; readonly name: string; readonly input: unknown }
+  | {
+      readonly type: "tool-call";
+      readonly id: string;
+      readonly name: string;
+      readonly input: unknown;
+    }
   | {
       readonly type: "tool-result";
+      readonly id: string;
       readonly name: string;
       readonly output: unknown;
       readonly isFailure: boolean;
     }
+  | { readonly type: "note"; readonly message: string }
   | { readonly type: "finish"; readonly reply: AssistantMessage };
 
+/** An assistant message worth sending: some text, or a tool call. Providers reject empty ones. */
+const isEmptyAssistant = (message: Prompt.Message) =>
+  message.role === "assistant" &&
+  message.content.every((part) => part.type === "text" && part.text === "");
+
 /**
- * Saved text only: tool calls stay in the stored chat for display and export, not the prompt.
- * An assistant message with no text is left out: some providers reject empty assistant content.
+ * The prompt for a chat: the system prompt, then each message. A reply with `steps` replays
+ * them verbatim (tool calls with their ids and results, reasoning details); a reply saved
+ * before steps existed replays its text. An assistant message with no text is left out: some
+ * providers reject empty assistant content.
  */
-export const toPrompt = (systemPrompt: string, history: ReadonlyArray<ChatMessage>) =>
-  Prompt.make([
-    { role: "system", content: systemPrompt },
-    ...history
-      .filter((message) => message.role === "user" || message.text !== "")
-      .map((message) => ({ role: message.role, content: message.text })),
-  ]);
+export const toPrompt = (systemPrompt: string, history: ReadonlyArray<ChatMessage>) => {
+  const messages: Prompt.Message[] = [Prompt.makeMessage("system", { content: systemPrompt })];
+  for (const message of history) {
+    if (message.role === "user") {
+      messages.push(
+        Prompt.makeMessage("user", {
+          content: [Prompt.makePart("text", { text: message.text })],
+        }),
+      );
+    } else if (message.steps !== undefined && message.steps.length > 0) {
+      for (const step of message.steps) {
+        messages.push(...step.content.filter((m) => !isEmptyAssistant(m)));
+      }
+    } else if (message.text !== "") {
+      messages.push(
+        Prompt.makeMessage("assistant", {
+          content: [Prompt.makePart("text", { text: message.text })],
+        }),
+      );
+    }
+  }
+  return Prompt.fromMessages(messages);
+};
 
 interface StepResult {
   readonly parts: ReadonlyArray<Response.AnyPart>;
@@ -48,12 +97,22 @@ interface StepResult {
 interface TurnState {
   text: string;
   tools: ToolStep[];
+  /** Completed model steps, as the next request replays them. */
+  steps: Prompt.Prompt[];
   inputTokens: number;
   outputTokens: number;
   cost: number | undefined;
   model: string | undefined;
   provider: string | undefined;
   pendingCalls: Map<string, { name: string; input: unknown }>;
+  /** The last tool call's name and input, and how many times in a row it was made. */
+  lastCall: { key: string; name: string; count: number } | undefined;
+}
+
+/** When the model last sent a part, and how many tool calls are running (not idle time). */
+interface Activity {
+  readonly at: number;
+  readonly running: number;
 }
 
 /** OpenRouter's provider and cost, from a finish part's metadata (extract reads it too). */
@@ -68,40 +127,115 @@ export const readOpenRouter = (part: Response.FinishPart) => {
 };
 
 /**
+ * A step's parts as the prompt the next request replays. For a step that was cut off, text or
+ * reasoning still streaming is closed, and every tool call without a result gets a synthetic
+ * failure (an unanswered tool call id fails the next request).
+ */
+export const stepPrompt = (parts: ReadonlyArray<Response.AnyPart>, interrupted: boolean) => {
+  if (!interrupted) return Prompt.fromResponseParts(parts);
+  const open = new Map<string, "text-end" | "reasoning-end">();
+  const calls = new Map<string, string>();
+  for (const part of parts) {
+    if (part.type === "text-start") open.set(part.id, "text-end");
+    if (part.type === "reasoning-start") open.set(part.id, "reasoning-end");
+    if (part.type === "text-end" || part.type === "reasoning-end") open.delete(part.id);
+    if (part.type === "tool-call") calls.set(part.id, part.name);
+    if (part.type === "tool-result") calls.delete(part.id);
+  }
+  const closed = [
+    ...parts,
+    ...[...open].map(
+      ([id, type]): Response.AnyPart =>
+        type === "text-end"
+          ? Response.makePart("text-end", { id })
+          : Response.makePart("reasoning-end", { id }),
+    ),
+  ];
+  const step = Prompt.fromResponseParts(closed);
+  if (calls.size === 0) return step;
+  return Prompt.concat(
+    step,
+    Prompt.fromMessages([
+      Prompt.makeMessage("tool", {
+        content: [...calls].map(([id, name]) =>
+          Prompt.makePart("tool-result", {
+            id,
+            name,
+            isFailure: true,
+            result: INTERRUPTED_RESULT,
+            providerExecuted: false,
+          }),
+        ),
+      }),
+    ]),
+  );
+};
+
+interface StepOptions<R> {
+  readonly model: LanguageModel.LanguageModel;
+  readonly toolkit: TurnToolkit<R>;
+  readonly prompt: Prompt.Prompt;
+  /** The prompt to retry with once if the provider says this one is too long. */
+  readonly shorter: Effect.Effect<Prompt.Prompt>;
+  readonly state: Ref.Ref<TurnState>;
+  readonly collected: Ref.Ref<StepResult>;
+  readonly activity: Ref.Ref<Activity>;
+}
+
+/**
  * One model step: streams the parts, records them into `state`, and emits TurnEvents. The step
  * is retried (twice, backing off from 500 ms) only while it hasn't emitted anything: once a part
- * reached the user, a retry would repeat it.
+ * reached the user, a retry would repeat it. A context-length rejection is retried once with a
+ * harder-elided prompt.
  */
-const step = (
-  model: LanguageModel.LanguageModel,
-  prompt: Prompt.Prompt,
-  state: Ref.Ref<TurnState>,
-  collected: Ref.Ref<StepResult>,
-) => {
-  const attempt = Effect.gen(function* () {
-    const emitted = yield* Ref.make(false);
-    yield* Ref.set(collected, { parts: [], finishReason: "unknown" });
-    const stream = LanguageModel.streamText({ prompt, toolkit: ChatTools }).pipe(
-      Stream.provideService(LanguageModel.LanguageModel, model),
-      Stream.tap((part) =>
-        Ref.update(collected, (result) => ({
-          parts: [...result.parts, part],
-          finishReason: part.type === "finish" ? part.reason : result.finishReason,
-        })),
-      ),
-      Stream.mapEffect((part) => toEvents(part, state)),
-      Stream.flattenIterable,
-      Stream.tap(() => Ref.set(emitted, true)),
+const step = <R>(options: StepOptions<R>) => {
+  const { model, toolkit, state, collected, activity } = options;
+  const touch = (running: (n: number) => number) =>
+    Effect.flatMap(Clock.currentTimeMillis, (at) =>
+      Ref.update(activity, (a) => ({ at, running: running(a.running) })),
     );
-    return { stream, emitted };
-  });
+  const attempt = (prompt: Prompt.Prompt) =>
+    Effect.gen(function* () {
+      const emitted = yield* Ref.make(false);
+      yield* Ref.set(collected, { parts: [], finishReason: "unknown" });
+      // The toolkit's type is erased (TurnToolkit), so the stream's is restated here.
+      const parts = LanguageModel.streamText({ prompt, toolkit }) as Stream.Stream<
+        Response.AnyPart,
+        AiError.AiError,
+        LanguageModel.LanguageModel | R
+      >;
+      const stream = parts.pipe(
+        Stream.provideService(LanguageModel.LanguageModel, model),
+        Stream.tap((part) =>
+          touch((n) =>
+            part.type === "tool-call"
+              ? n + 1
+              : part.type === "tool-result" && part.preliminary !== true
+                ? Math.max(0, n - 1)
+                : n,
+          ),
+        ),
+        Stream.tap((part) =>
+          Ref.update(collected, (result) => ({
+            parts: [...result.parts, part],
+            finishReason: part.type === "finish" ? part.reason : result.finishReason,
+          })),
+        ),
+        Stream.mapEffect((part) => toEvents(part, state)),
+        Stream.flattenIterable,
+        Stream.tap(() => Ref.set(emitted, true)),
+      );
+      return { stream, emitted };
+    });
 
   const run = (
+    prompt: Prompt.Prompt,
     retriesLeft: number,
     delay: Duration.Duration,
-  ): Stream.Stream<TurnEvent, AiError.AiError, ToolHandlers> =>
+    shortened: boolean,
+  ): Stream.Stream<TurnEvent, AiError.AiError, R> =>
     Stream.unwrap(
-      Effect.map(attempt, ({ stream, emitted }) =>
+      Effect.map(attempt(prompt), ({ stream, emitted }) =>
         stream.pipe(
           Stream.catchIf(
             (error): error is AiError.AiError => AiError.isAiError(error),
@@ -109,19 +243,23 @@ const step = (
               Stream.unwrap(
                 Effect.gen(function* () {
                   const started = yield* Ref.get(emitted);
+                  if (!started && !shortened && isContextLengthError(error)) {
+                    yield* Effect.logWarning("Prompt too long for the model; eliding and retrying");
+                    return run(yield* options.shorter, retriesLeft, delay, true);
+                  }
                   if (started || retriesLeft === 0 || !error.isRetryable) return Stream.fail(error);
                   yield* Effect.logWarning("Model call failed before any output; retrying", {
                     reason: error.reason._tag,
                   });
                   yield* Effect.sleep(delay);
-                  return run(retriesLeft - 1, Duration.times(delay, 2));
+                  return run(prompt, retriesLeft - 1, Duration.times(delay, 2), shortened);
                 }),
               ),
           ),
         ),
       ),
     );
-  return run(2, Duration.millis(500));
+  return run(options.prompt, 2, Duration.millis(500), false);
 };
 
 /** A response part as TurnEvents (most parts are bookkeeping and emit nothing). */
@@ -135,13 +273,18 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
       case "tool-call": {
         const pendingCalls = new Map(s.pendingCalls);
         pendingCalls.set(part.id, { name: part.name, input: part.params });
+        const key = `${part.name}\u0000${JSON.stringify(part.params)}`;
+        const count = s.lastCall?.key === key ? s.lastCall.count + 1 : 1;
         return [
-          [{ type: "tool-call", name: part.name, input: part.params }],
-          { ...s, pendingCalls },
+          [{ type: "tool-call", id: part.id, name: part.name, input: part.params }],
+          { ...s, pendingCalls, lastCall: { key, name: part.name, count } },
         ];
       }
       case "tool-result": {
-        const call = s.pendingCalls.get(part.id);
+        if (part.preliminary === true) return [[], s];
+        const pendingCalls = new Map(s.pendingCalls);
+        const call = pendingCalls.get(part.id);
+        pendingCalls.delete(part.id);
         const tool: ToolStep = {
           name: part.name,
           input: call?.input ?? null,
@@ -152,12 +295,13 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
           [
             {
               type: "tool-result",
+              id: part.id,
               name: part.name,
               output: part.encodedResult,
               isFailure: part.isFailure,
             },
           ],
-          { ...s, tools: [...s.tools, tool] },
+          { ...s, tools: [...s.tools, tool], pendingCalls },
         ];
       }
       case "finish": {
@@ -178,16 +322,33 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
     }
   });
 
-const toReply = (s: TurnState, finishReason: string, interrupted: boolean): AssistantMessage => {
+const toReply = (
+  s: TurnState,
+  finishReason: string,
+  interrupted: boolean,
+  partial: ReadonlyArray<Response.AnyPart>,
+): AssistantMessage => {
   const usage: Usage = {
     inputTokens: s.inputTokens,
     outputTokens: s.outputTokens,
     ...(s.cost === undefined ? {} : { cost: s.cost }),
   };
+  // A cut-off step is kept as far as it got; its unfinished tool calls count as failed.
+  const lastStep = interrupted && partial.length > 0 ? [stepPrompt(partial, true)] : [];
+  const steps = [...s.steps, ...lastStep].filter((step) => step.content.length > 0);
+  const unfinished: ToolStep[] = interrupted
+    ? [...s.pendingCalls.values()].map(({ name, input }) => ({
+        name,
+        input,
+        output: INTERRUPTED_RESULT,
+        isFailure: true,
+      }))
+    : [];
   return {
     role: "assistant",
     text: s.text,
-    tools: s.tools,
+    tools: [...s.tools, ...unfinished],
+    ...(steps.length > 0 ? { steps } : {}),
     ...(s.model === undefined ? {} : { model: s.model }),
     ...(s.provider === undefined ? {} : { provider: s.provider }),
     usage,
@@ -196,68 +357,145 @@ const toReply = (s: TurnState, finishReason: string, interrupted: boolean): Assi
   };
 };
 
-export interface TurnOptions {
+export interface TurnOptions<R = ChatToolHandlers> {
   readonly history: ReadonlyArray<ChatMessage>;
   readonly modelId: string;
+  /** The tools the model may call, and with them the handlers `R`. Default: `defaultToolkit`. */
+  readonly toolkit?: TurnToolkit<R>;
   /** Called once with the reply as far as it got, including when the turn fails or is interrupted. */
   readonly onEnd?: (reply: AssistantMessage) => Effect.Effect<void>;
 }
 
+/** The model's context window from the models list, or undefined when it can't be known. */
+const contextLengthOf = (modelId: string) =>
+  Effect.gen(function* () {
+    const models = yield* (yield* OpenRouterModels).list;
+    const base = modelId.split(":", 1)[0];
+    const model = models.find((m) => m.id === modelId) ?? models.find((m) => m.id === base);
+    return model?.contextLength ?? undefined;
+  }).pipe(Effect.orElseSucceed(() => undefined));
+
 /**
  * One chat turn: the model streams, calls tools, and is prompted again with their results
- * until it stops or MAX_TOOL_STEPS is reached. Effect AI resolves tool calls within a step
- * but has no step loop, so this is it. Logs one `llm call` line per turn.
+ * until it stops, MAX_TOOL_STEPS is reached, or it repeats one call MAX_REPEATED_CALLS times.
+ * Effect AI resolves tool calls within a step but has no step loop, so this is it. Before each
+ * step, old tool outputs are elided if the prompt nears the model's context window. The reply
+ * fails when the model sends nothing for MAX_STREAM_SECONDS (tool runs don't count). Logs one
+ * `llm call` line per turn.
  */
-export const runTurn = (options: TurnOptions) =>
+export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const config = yield* loadConfig;
       const llm = yield* Llm;
       const model = yield* llm.languageModel(options.modelId);
+      // With no toolkit given, R is its default, ChatToolHandlers.
+      const toolkit = (options.toolkit ?? defaultToolkit) as TurnToolkit<R>;
+      const cacheBreakpoints = options.modelId.startsWith("anthropic/");
+      const models = yield* OpenRouterModels;
+      const contextLength = yield* Effect.cached(
+        contextLengthOf(options.modelId).pipe(Effect.provideService(OpenRouterModels, models)),
+      );
       const state = yield* Ref.make<TurnState>({
         text: "",
         tools: [],
+        steps: [],
         inputTokens: 0,
         outputTokens: 0,
         cost: undefined,
         model: undefined,
         provider: undefined,
         pendingCalls: new Map(),
+        lastCall: undefined,
       });
       const collected = yield* Ref.make<StepResult>({ parts: [], finishReason: "unknown" });
       const startedAt = yield* Clock.currentTimeMillis;
+      const activity = yield* Ref.make<Activity>({ at: startedAt, running: 0 });
       const firstTokenAt = yield* Ref.make(Option.none<number>());
       // Complete only once `finish` went out: a consumer that stops early (the TUI's Esc, via
       // an async iterator's return) ends the stream with a Success exit, not an interruption.
       const finished = yield* Ref.make(false);
 
+      /** The prompt as sent: old tool outputs elided to fit, and cache breakpoints. */
+      const prepare = (prompt: Prompt.Prompt, harder: boolean) =>
+        Effect.gen(function* () {
+          let sent = prompt;
+          if (canElide(prompt)) {
+            const budget = harder ? 0 : budgetFor(yield* contextLength);
+            if (budget !== undefined) {
+              const result = elide(prompt, budget);
+              if (result.elided > 0) {
+                yield* Effect.logInfo("Elided old tool outputs").pipe(
+                  Effect.annotateLogs({ elided: result.elided, harder }),
+                );
+              }
+              sent = result.prompt;
+            }
+          }
+          return cacheBreakpoints ? withCacheBreakpoints(sent) : sent;
+        });
+
       const loop = (
         prompt: Prompt.Prompt,
         stepIndex: number,
-      ): Stream.Stream<TurnEvent, AiError.AiError, ToolHandlers> =>
-        step(model, prompt, state, collected).pipe(
-          Stream.concat(
-            Stream.unwrap(
-              Effect.gen(function* () {
-                const result = yield* Ref.get(collected);
-                if (
-                  result.finishReason === "tool-calls" &&
-                  stepIndex + 1 < config.limits.maxToolSteps
-                ) {
-                  return loop(
-                    Prompt.concat(prompt, Prompt.fromResponseParts(result.parts)),
-                    stepIndex + 1,
-                  );
-                }
-                const finish: TurnEvent = {
-                  type: "finish",
-                  reply: toReply(yield* Ref.get(state), result.finishReason, false),
-                };
-                return Stream.make(finish);
-              }),
+      ): Stream.Stream<TurnEvent, AiError.AiError, R> =>
+        Stream.unwrap(
+          Effect.map(prepare(prompt, false), (sent) =>
+            step({
+              model,
+              toolkit,
+              prompt: sent,
+              shorter: prepare(prompt, true),
+              state,
+              collected,
+              activity,
+            }).pipe(
+              Stream.concat(
+                Stream.unwrap(
+                  Effect.gen(function* () {
+                    const result = yield* Ref.get(collected);
+                    const done = Prompt.fromResponseParts(result.parts);
+                    const s = yield* Ref.updateAndGet(state, (s) => ({
+                      ...s,
+                      steps: [...s.steps, done],
+                    }));
+                    // The step is recorded; nothing of it is partial any more.
+                    yield* Ref.set(collected, { parts: [], finishReason: result.finishReason });
+                    let note: string | undefined;
+                    if (result.finishReason === "tool-calls") {
+                      if (s.lastCall !== undefined && s.lastCall.count >= MAX_REPEATED_CALLS) {
+                        note = `Stopped: the model called ${s.lastCall.name} with the same input ${s.lastCall.count} times in a row.`;
+                      } else if (stepIndex + 1 >= config.limits.maxToolSteps) {
+                        note = `Stopped after ${config.limits.maxToolSteps} model steps (MAX_TOOL_STEPS). Send a message to continue.`;
+                      } else {
+                        return loop(Prompt.concat(prompt, done), stepIndex + 1);
+                      }
+                    }
+                    const events: TurnEvent[] = note ? [{ type: "note", message: note }] : [];
+                    events.push({
+                      type: "finish",
+                      reply: toReply(s, result.finishReason, false, []),
+                    });
+                    return Stream.fromIterable(events);
+                  }),
+                ),
+              ),
             ),
           ),
         );
+
+      // Fails the turn once the model has sent nothing for the idle timeout while no tool runs.
+      const idleMs = Duration.toMillis(config.limits.streamIdleTimeout);
+      const watchdog = Effect.gen(function* () {
+        while (true) {
+          const { at, running } = yield* Ref.get(activity);
+          const now = yield* Clock.currentTimeMillis;
+          if (running === 0 && now - at >= idleMs) {
+            return yield* timedOut("The model reply");
+          }
+          yield* Effect.sleep(Duration.millis(running > 0 ? idleMs : idleMs - (now - at)));
+        }
+      });
 
       const finalize = (exit: Exit.Exit<unknown, unknown>, done: boolean) =>
         Effect.gen(function* () {
@@ -267,8 +505,8 @@ export const runTurn = (options: TurnOptions) =>
           const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
           const error = Option.getOrUndefined(failure);
           const s = yield* Ref.get(state);
-          const { finishReason } = yield* Ref.get(collected);
-          const reply = toReply(s, finishReason, interrupted);
+          const { finishReason, parts } = yield* Ref.get(collected);
+          const reply = toReply(s, finishReason, interrupted, parts);
           const ttft = yield* Ref.get(firstTokenAt);
           const endedAt = yield* Clock.currentTimeMillis;
           yield* Effect.logInfo("llm call").pipe(
@@ -281,6 +519,7 @@ export const runTurn = (options: TurnOptions) =>
               outputTokens: s.outputTokens,
               cost: s.cost ?? null,
               tools: s.tools.length,
+              steps: s.steps.length,
               aborted: interrupted && error === undefined,
               errorTag: isAppError(error) ? error._tag : null,
               errorDetail:
@@ -303,11 +542,7 @@ export const runTurn = (options: TurnOptions) =>
               : Effect.void,
         ),
         Stream.mapError(toUpstreamError),
-        Stream.interruptWhen(
-          Effect.sleep(config.limits.maxStreamDuration).pipe(
-            Effect.andThen(Effect.fail(timedOut("The model reply"))),
-          ),
-        ),
+        Stream.interruptWhen(watchdog),
         Stream.onExit((exit) => Effect.flatMap(Ref.get(finished), (done) => finalize(exit, done))),
       );
     }),
@@ -335,20 +570,32 @@ export const loadChat = (id: ChatId) =>
     return chat.value;
   });
 
+/** What `sendMessage` can change about the turn. */
+export interface SendOptions<R = ChatToolHandlers> {
+  /** The tools the model may call. Default: `defaultToolkit`. */
+  readonly toolkit?: TurnToolkit<R>;
+}
+
 /**
  * Sends one user message in a chat: runs the turn and saves the chat when it ends, with the
  * reply as far as it got (so Ctrl+C keeps the partial reply, marked interrupted). A turn that
  * ends before any text or tool call saves nothing: the chat stays as it was, and sending the
  * message again is the retry.
  */
-export const sendMessage = (chat: StoredChat, text: string, modelId: string) =>
+export const sendMessage = <R = ChatToolHandlers>(
+  chat: StoredChat,
+  text: string,
+  modelId: string,
+  options: SendOptions<R> = {},
+) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const store = yield* ChatStore;
       const history: ReadonlyArray<ChatMessage> = [...chat.messages, { role: "user", text }];
-      return runTurn({
+      return runTurn<R>({
         history,
         modelId,
+        ...(options.toolkit ? { toolkit: options.toolkit } : {}),
         onEnd: (reply) =>
           reply.interrupted && reply.text === "" && reply.tools.length === 0
             ? Effect.void

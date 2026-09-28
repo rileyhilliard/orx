@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Prompt as AiPrompt } from "effect/unstable/ai";
 
 /** A chat's id: a UUID, branded so it can't be swapped with other strings. */
 export const ChatId = Schema.String.annotate({
@@ -37,6 +38,12 @@ export const AssistantMessage = Schema.Struct({
   role: Schema.Literal("assistant"),
   text: Schema.String,
   tools: Schema.Array(ToolStep),
+  /**
+   * The reply as the model saw it, one Prompt per model step (`Prompt.fromResponseParts`): text,
+   * tool calls with their ids and provider metadata (reasoning details), and tool results.
+   * The next turn replays these verbatim. Chats saved before steps existed replay `text`.
+   */
+  steps: Schema.optional(Schema.Array(AiPrompt.Prompt)),
   /** The model that served the reply's last step (may differ from the requested one). */
   model: Schema.optional(Schema.String),
   /** The upstream provider OpenRouter routed to. */

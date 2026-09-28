@@ -49,7 +49,8 @@ export interface AppConfigShape {
   readonly limits: {
     readonly maxOutputTokens: number;
     readonly maxToolSteps: number;
-    readonly maxStreamDuration: Duration.Duration;
+    /** How long a reply may go without a chunk from the model (tool runs don't count). */
+    readonly streamIdleTimeout: Duration.Duration;
   };
   readonly modelsCacheTtl: Duration.Duration;
   readonly releases: {
@@ -155,9 +156,9 @@ export const appConfig: Config.Config<AppConfigShape> = Config.all({
     zdr: boolOr("OPENROUTER_ZDR", false),
   }),
   limits: Config.all({
-    maxOutputTokens: positiveInt("MAX_OUTPUT_TOKENS", 1024),
-    maxToolSteps: positiveInt("MAX_TOOL_STEPS", 5),
-    maxStreamDuration: positiveInt("MAX_STREAM_SECONDS", 120).pipe(Config.map(Duration.seconds)),
+    maxOutputTokens: positiveInt("MAX_OUTPUT_TOKENS", 8192),
+    maxToolSteps: positiveInt("MAX_TOOL_STEPS", 50),
+    streamIdleTimeout: positiveInt("MAX_STREAM_SECONDS", 120).pipe(Config.map(Duration.seconds)),
   }),
   modelsCacheTtl: Config.succeed(Duration.minutes(10)),
   releases: releasesConfig,

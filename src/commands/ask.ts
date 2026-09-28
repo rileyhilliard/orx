@@ -10,7 +10,7 @@ import { readPipedStdin } from "../core/stdin";
 import { errorBody } from "../errors";
 import { Llm } from "../services/Llm";
 import { Output } from "../services/Output";
-import { jsonFlag, modelFlag, newChatId } from "./shared";
+import { cwdFlag, jsonFlag, modelFlag, newChatId } from "./shared";
 
 const words = Argument.String("prompt").pipe(
   Argument.withDescription("The prompt (or pipe it on stdin)"),
@@ -19,11 +19,12 @@ const words = Argument.String("prompt").pipe(
 
 /**
  * One-shot, pipe-friendly: streams the reply to stdout, a usage line to stderr, and saves the
- * exchange as a chat (`orx export <id>`). With --json, NDJSON AskEvents on stdout.
+ * exchange as a chat (`orx export <id>`). With --json, NDJSON AskEvents on stdout. `cwd` is
+ * parsed into the input but not used yet.
  */
 export const ask = Command.make(
   "ask",
-  { words, json: jsonFlag, model: modelFlag },
+  { words, json: jsonFlag, model: modelFlag, cwd: cwdFlag },
   ({ words, json, model }) =>
     Effect.gen(function* () {
       const out = yield* Output;
@@ -61,6 +62,8 @@ export const ask = Command.make(
               );
             case "tool-result":
               return Effect.void;
+            case "note":
+              return out.note(noteLine(event.message, out.color));
             case "finish":
               return out
                 .write(event.reply.text.endsWith("\n") ? "" : "\n")

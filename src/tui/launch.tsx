@@ -2,7 +2,7 @@ import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@op
 import { createRoot } from "@opentui/react";
 import { Cause, Effect, FileSystem, Option, Stream } from "effect";
 import type { ChatMessage, StoredChat } from "~/schemas";
-import { loadChat, sendMessage, type TurnEvent } from "../core/chat";
+import { type ChatToolHandlers, loadChat, sendMessage, type TurnEvent } from "../core/chat";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
@@ -26,7 +26,7 @@ export const RENDERER_OPTIONS = {
 
 /** What a turn, the models list, and export need (whatever sendMessage requires, and more). */
 type LaunchServices =
-  | Stream.Services<ReturnType<typeof sendMessage>>
+  | Stream.Services<ReturnType<typeof sendMessage<ChatToolHandlers>>>
   | Effect.Services<typeof listModels>
   | Effect.Services<ReturnType<typeof loadChat>>
   | FileSystem.FileSystem;
@@ -37,7 +37,11 @@ const toUiMessage = (message: ChatMessage): UiMessage =>
     : {
         role: "assistant",
         text: message.text,
-        tools: message.tools.map((t) => ({ name: t.name, input: JSON.stringify(t.input) })),
+        tools: message.tools.map((t) => ({
+          name: t.name,
+          input: JSON.stringify(t.input),
+          status: t.isFailure ? "error" : "ok",
+        })),
         usage: usageLine(message),
       };
 
@@ -46,9 +50,21 @@ const toUiEvent = (event: TurnEvent): ReadonlyArray<UiEvent> => {
     case "text":
       return [{ type: "text", delta: event.delta }];
     case "tool-call":
-      return [{ type: "tool", call: { name: event.name, input: JSON.stringify(event.input) } }];
+      return [
+        {
+          type: "tool",
+          call: {
+            id: event.id,
+            name: event.name,
+            input: JSON.stringify(event.input),
+            status: "running",
+          },
+        },
+      ];
     case "tool-result":
-      return [];
+      return [{ type: "tool-result", id: event.id, isFailure: event.isFailure }];
+    case "note":
+      return [{ type: "note", message: event.message }];
     case "finish":
       return [{ type: "done", usage: usageLine(event.reply) }];
   }
@@ -128,7 +144,10 @@ export const makeBridge = (initial: StoredChat, quit: () => void) =>
           listModels.pipe(
             Effect.map((list) => ({
               available: list.available,
-              models: list.models.map((m) => ({ id: m.id, name: m.name })),
+              // The session needs tool calling: models without it aren't offered.
+              models: list.models
+                .filter((m) => m.supportsTools)
+                .map((m) => ({ id: m.id, name: m.name })),
             })),
             Effect.orElseSucceed(() => ({ available: false, models: [] })),
           ),

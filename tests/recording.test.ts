@@ -9,9 +9,15 @@ const finish = (finishReason: string, text: string): TurnEvent => ({
   reply: { role: "assistant", text, tools: [], finishReason },
 });
 const text = (delta: string): TurnEvent => ({ type: "text", delta });
-const call: TurnEvent = { type: "tool-call", name: "currentTime", input: { timeZone: "UTC" } };
+const call: TurnEvent = {
+  type: "tool-call",
+  id: "call_1",
+  name: "currentTime",
+  input: { timeZone: "UTC" },
+};
 const result: TurnEvent = {
   type: "tool-result",
+  id: "call_1",
   name: "currentTime",
   output: {},
   isFailure: false,
