@@ -3,7 +3,7 @@
 #
 #   rr check          the full gate (lint, typecheck, test, e2e), like `bun run check`
 #   rr test           unit + TUI tests
-#   rr unit -- tests/cli-contract.test.ts -t "<name>"
+#   rr test -- ./tests/cli-contract.test.ts -t "<name>"
 #   rr run "bun run orx -- doctor --json"
 
 version: 1
@@ -28,7 +28,7 @@ defaults:
       bun " + Bun.version + "; orx needs >= 1.4.2 (curl -fsSL https://bun.sh/install | bash -s
       bun-v1.4.2)"), process.exit(1))'
     - bun install --frozen-lockfile --silent
-  # Plain text for whoever reads the output or ~/.rr/logs, usually an agent: vitest and bun
+  # Plain text for whoever reads the output or ~/.rr/logs, usually an agent: bun would
   # otherwise color their output even though the remote shell has no TTY.
   env:
     NO_COLOR: "1"
@@ -70,23 +70,15 @@ tasks:
     description: Full gate (lint, typecheck, unit + TUI tests, build + e2e)
     run: bun run check
 
-  # Steps, not `bun run test`: that script chains two runners, so an argument would land on the
-  # TUI runner. rr rejects arguments to a multi-step task; scope with `rr unit` or `rr tui`.
+  # `bun run test` is a bare `bun test` (rooted at tests/ by bunfig.toml), so a path argument
+  # scopes it: `rr test -- ./tests/config.test.ts -t name`.
   test:
-    description: Unit tests (vitest) then TUI tests (bun test); takes no arguments
-    steps:
-      - name: unit
-        run: bun run test:unit
-      - name: tui
-        run: bun run test:tui
-
-  unit:
-    description: vitest; pass a file and/or -t after --
-    run: bun run test:unit
+    description: Unit + TUI tests (bun test); pass ./tests/<file> and/or -t <name> after -- to scope
+    run: bun run test
 
   # `bun run test:tui <file>` would run the whole directory plus the file, so a path argument
   # replaces ./tests/tui. With only flags (`rr tui -- -t name`) ./tests/tui stays: a bare
-  # `bun test -t name` would also pick up the vitest files.
+  # `bun test -t name` would also pick up the unit tests.
   tui:
     description: TUI tests; pass ./tests/tui/<file> and/or -t <name> after -- to scope
     run: bash -c 'case "$1" in ""|-*) set -- ./tests/tui "$@" ;; esac; bun test "$@"' rr
@@ -104,7 +96,7 @@ tasks:
     run: bun run typecheck
 
   coverage:
-    description: vitest with a v8 coverage report
+    description: bun test with a coverage report
     run: bun run coverage
 
   # Splits the gate across both hosts. Each subtask reruns `bun install` (fast when warm).

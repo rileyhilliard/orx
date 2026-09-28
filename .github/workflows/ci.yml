@@ -22,19 +22,15 @@ jobs:
       - uses: actions/checkout@v7
       # Reads the bun version from packageManager in package.json.
       - uses: oven-sh/setup-bun@v2
-      # vitest runs on Node.
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
       # The grep tool uses rg when it's on PATH; tests/agent-tools.test.ts fails in CI without it.
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
       # Every platform's OpenTUI native package, so build:all can embed each target's.
       - run: bun install --frozen-lockfile --os='*' --cpu='*'
       - run: bun run lint
       - run: bun run typecheck
-      # The unit tests, with a coverage report in the failure artifact. No thresholds: a report, not a gate.
+      # Every test under tests/ (unit and TUI), with a coverage report in the failure artifact.
+      # No thresholds: a report, not a gate.
       - run: bun run coverage
-      - run: bun run test:tui
       # Builds dist/orx, then drives it in a pseudo-terminal against the stubs.
       - run: bun run e2e
       # Every release target compiles (a cross-compile smoke; release.yml runs them).
