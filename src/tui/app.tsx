@@ -118,6 +118,16 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   const [notice, setNotice] = useState<
     { error: boolean; lines: ReadonlyArray<string> } | "help" | undefined
   >();
+  // Custom commands and skills that didn't load cleanly: said once, unless something else is
+  // already showing there.
+  useEffect(() => {
+    bridge.loadWarnings().then(
+      (lines) => {
+        if (lines.length > 0) setNotice((shown) => shown ?? { error: false, lines });
+      },
+      () => setStatus("Couldn't load the custom commands and skills."),
+    );
+  }, [bridge]);
   const [mode, setMode] = useState<UiMode>("default");
   useEffect(() => bridge.watchMode(setMode), [bridge]);
   const [approval, setApproval] = useState<UiApproval | undefined>(undefined);

@@ -139,6 +139,10 @@ describe("orx ask --agent", () => {
     const mode = await runCli(["ask", "hi", "--permission-mode", "yolo"], { env });
     expect(mode.exitCode).toBe(2);
     expect(mode.stderr).toContain("--permission-mode needs --agent");
+    // Naming the default mode is still a mode without --agent.
+    const explicitDefault = await runCli(["ask", "hi", "--permission-mode", "default"], { env });
+    expect(explicitDefault.exitCode).toBe(2);
+    expect(explicitDefault.stderr).toContain("--permission-mode needs --agent");
     expect(stub.chatRequests).toHaveLength(0);
   });
 
@@ -164,6 +168,23 @@ describe("orx ask --agent", () => {
     expect(run.exitCode).toBe(0);
     const warnings = run.logs.filter((r) => r.level === "warn" && /tool calling/.test(r.msg));
     expect(warnings).toHaveLength(1);
+  });
+
+  it("fetches an unavailable models list once, and warns once, for a named model", async () => {
+    stub.failModels = 10;
+    stub.modelsRequests = 0;
+    const run = await runCli(
+      ["ask", "hi", "--agent", "--cwd", workspace(), "--model", "acme/cheap-model"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    // One fetch: the first try and its two retries.
+    expect(stub.modelsRequests).toBe(3);
+    const warnings = run.logs.filter((r) => r.level === "warn");
+    expect(warnings.map((r) => r.msg)).toEqual([
+      "Models list unavailable; can't check that acme/cheap-model supports tool calling",
+    ]);
   });
 
   it("gives plain ask no workspace tools", async () => {

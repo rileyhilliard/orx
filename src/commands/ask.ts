@@ -1,11 +1,12 @@
 import { Effect, Exit, Option, Schema, Stream } from "effect";
+import { Toolkit } from "effect/unstable/ai";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import type { AskEvent } from "~/schemas";
 import { Prompt, ToolFailure } from "~/schemas";
 import { newChat, sendMessage, type TurnEvent } from "../core/chat";
 import { noteLine, usageLine } from "../core/format";
 import { decodeInput } from "../core/input";
-import { resolveModel, resolveToolModel } from "../core/models";
+import { resolveChatModel, resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { readPipedStdin } from "../core/stdin";
 import { BadInput, outcomeOf } from "../errors";
@@ -26,9 +27,9 @@ const agent = Flag.Boolean("agent").pipe(
 
 const permissionMode = Flag.Literals("permission-mode", PERMISSION_MODES).pipe(
   Flag.withDescription(
-    "With --agent: what runs without asking. Nobody can be asked here, so `default` denies every write, edit, and command",
+    "With --agent: what runs without asking. Nobody can be asked here, so `default` (the default) denies every write, edit, and command",
   ),
-  Flag.withDefault("default"),
+  Flag.optional,
 );
 
 const decodeToolFailure = Schema.decodeUnknownOption(ToolFailure);
@@ -89,7 +90,8 @@ export const ask = Command.make(
       if (!agent && Option.isSome(cwd)) {
         return yield* new BadInput({ message: "--cwd needs --agent" });
       }
-      if (!agent && permissionMode !== "default") {
+      // Checked before the default applies, so naming any mode without --agent is refused.
+      if (!agent && Option.isSome(permissionMode)) {
         return yield* new BadInput({ message: "--permission-mode needs --agent" });
       }
       yield* (yield* Llm).ready;
@@ -97,9 +99,10 @@ export const ask = Command.make(
       const text = yield* decodeInput(Prompt)(
         [words.join(" "), piped].filter((part) => part && part.trim() !== "").join("\n\n"),
       );
-      const modelId = yield* (agent ? resolveToolModel : resolveModel)(
-        Option.getOrUndefined(model),
-      );
+      const requested = Option.getOrUndefined(model);
+      const { modelId, tools } = agent
+        ? { modelId: yield* resolveToolModel(requested), tools: true }
+        : yield* resolveChatModel(requested);
       const chat = newChat(yield* newChatId, modelId);
       const emit = (event: AskEvent) => out.json(event);
 
@@ -153,13 +156,19 @@ export const ask = Command.make(
       };
 
       if (agent) {
-        const session = yield* prepareSession(cwd, { mode: permissionMode, headless: true });
+        const session = yield* prepareSession(cwd, {
+          mode: Option.getOrElse(permissionMode, () => "default" as const),
+          headless: true,
+        });
         yield* sendMessage(chat, text, modelId, {
           toolkit: session.toolkit,
           systemPrompt: session.systemPrompt,
         }).pipe(Stream.runForEach(onEvent), Effect.provide(session.layer));
       } else {
-        yield* sendMessage(chat, text, modelId).pipe(Stream.runForEach(onEvent));
+        // A model that can't call tools gets none: with them, OpenRouter finds no endpoint.
+        yield* sendMessage(chat, text, modelId, tools ? {} : { toolkit: Toolkit.empty }).pipe(
+          Stream.runForEach(onEvent),
+        );
       }
     }).pipe(
       // Every failure after parsing ends --json output with one `error` event (AskEvent): an

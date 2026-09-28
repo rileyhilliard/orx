@@ -2,14 +2,7 @@ import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@op
 import { createRoot } from "@opentui/react";
 import { Cause, Effect, Fiber, FileSystem, Option, Schema, Stream } from "effect";
 import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
-import {
-  type ChatToolHandlers,
-  loadChat,
-  newChat,
-  sendMessage,
-  type TurnEvent,
-  type TurnToolkit,
-} from "../core/chat";
+import { loadChat, newChat, sendMessage, type TurnEvent, type TurnToolkit } from "../core/chat";
 import { expandSessionCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
@@ -18,6 +11,7 @@ import { listModels } from "../core/models";
 import { expandSkill, loadSlash } from "../core/skills";
 import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
+import { FileState } from "../services/file-state";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
 import { summarizeTool, toolStatus } from "./tool-summary";
@@ -48,13 +42,18 @@ export interface SessionOptions<R, M = never> {
   readonly attachFiles: (text: string) => Effect.Effect<string, never, M>;
 }
 
-/** What a turn, the models list, and export need (whatever sendMessage requires, and more). */
+/**
+ * What a turn, the models list, and export need (whatever sendMessage requires besides the
+ * session's tools, and more).
+ */
 type LaunchServices =
-  | Stream.Services<ReturnType<typeof sendMessage<ChatToolHandlers>>>
+  | Stream.Services<ReturnType<typeof sendMessage<never>>>
   | Effect.Services<typeof listModels>
   | Effect.Services<ReturnType<typeof loadChat>>
   | Effect.Services<ReturnType<typeof loadSlash>>
   | Effect.Services<ReturnType<typeof expandSessionCommand>>
+  | Permissions
+  | FileState
   | FileSystem.FileSystem;
 
 const toUiMessage = (message: ChatMessage): UiMessage =>
@@ -138,28 +137,24 @@ const logDefect = (cause: Cause.Cause<unknown>) =>
  * streaming (saved as interrupted); launchChat calls it when its scope closes, so a signal
  * saves the reply too. tests/tui/closed-loop.test.tsx drives this with a test renderer.
  * `session` is the coding session (`prepareSession`): its root is where custom commands and
- * skills load from (`<root>/.orx/`), and turns use its tools and system prompt. Without one,
- * turns use the plain chat tools and commands load from the cwd.
+ * skills load from (`<root>/.orx/`), and turns use its tools and system prompt.
  */
 export const makeBridge = <R = never, M = never>(
   initial: StoredChat,
   quit: () => void,
-  session?: SessionOptions<R, M>,
+  session: SessionOptions<R, M>,
 ) =>
   Effect.gen(function* () {
     const context = yield* Effect.context<LaunchServices | R | M>();
-    const root = session?.root ?? process.cwd();
-    const turnOptions = session
-      ? { toolkit: session.toolkit, systemPrompt: session.systemPrompt }
-      : {};
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
-    // The session's approval gate; without one (plain chat) nothing ever asks.
-    const permissions = yield* Effect.serviceOption(Permissions);
+    // The session's approval gate, and what its model has read (a new chat starts unread).
+    const permissions = yield* Permissions;
+    const fileState = yield* FileState;
     let chat = initial;
     // Commands and skills load once per session; the loader logs its warnings.
     const slash = yield* Effect.cached(
-      loadSlash(root).pipe(
+      loadSlash(session.root).pipe(
         Effect.catchCause((cause) =>
           Effect.as(Effect.logError("loading commands and skills failed", cause), {
             commands: [],
@@ -172,26 +167,22 @@ export const makeBridge = <R = never, M = never>(
     // The `@` picker's file list: the last walk answers at once, and each open refreshes it.
     let files: Promise<ReadonlyArray<string>> | undefined;
     const walkFiles = () =>
-      session
-        ? run(
-            session.listFiles.pipe(
-              Effect.catchCause((cause) =>
-                Effect.as(Effect.logError("listing workspace files failed", cause), []),
-              ),
-            ),
-          )
-        : Promise.resolve([]);
+      run(
+        session.listFiles.pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logError("listing workspace files failed", cause), []),
+          ),
+        ),
+      );
     // A message's `@path` attachments; a failure to read them sends the message without them.
     const attach = (text: string) =>
       session
-        ? session
-            .attachFiles(text)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.as(Effect.logError("attaching @ files failed", cause), ""),
-              ),
-            )
-        : Effect.succeed("");
+        .attachFiles(text)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logError("attaching @ files failed", cause), ""),
+          ),
+        );
     // The turns' iterators run on their own fibers, outside launchChat's scope.
     const active = new Set<AsyncIterator<UiEvent>>();
     const tracked = (iterable: AsyncIterable<UiEvent>): AsyncIterable<UiEvent> => ({
@@ -222,8 +213,9 @@ export const makeBridge = <R = never, M = never>(
         const inputs = new Map<string, unknown>();
         return Stream.unwrap(
           Effect.map(attach(text), (attachments) =>
-            sendMessage<ChatToolHandlers | R>(chat, text, model, {
-              ...turnOptions,
+            sendMessage<R>(chat, text, model, {
+              toolkit: session.toolkit,
+              systemPrompt: session.systemPrompt,
               ...(attachments === "" ? {} : { attachments }),
             }),
           ),
@@ -302,6 +294,7 @@ export const makeBridge = <R = never, M = never>(
             s.skills.map((k) => ({ name: k.name, description: k.description })),
           ),
         ),
+      loadWarnings: () => run(Effect.map(slash, (s) => s.warnings)),
       expandCommand: (name, args) =>
         run(
           Effect.gen(function* () {
@@ -330,16 +323,11 @@ export const makeBridge = <R = never, M = never>(
         files = next;
         return last ?? next;
       },
-      answer: (id, decision) =>
-        Option.isSome(permissions)
-          ? run(permissions.value.answer(id, decision))
-          : Promise.resolve(),
-      setMode: (mode) =>
-        Option.isSome(permissions) ? run(permissions.value.setMode(mode)) : Promise.resolve(),
+      answer: (id, decision) => run(permissions.answer(id, decision)),
+      setMode: (mode) => run(permissions.setMode(mode)),
       watchMode: (onMode) => {
-        if (Option.isNone(permissions)) return () => {};
         const fiber = Effect.runForkWith(context)(
-          permissions.value.modeChanges.pipe(
+          permissions.modeChanges.pipe(
             Stream.runForEach((mode) => Effect.sync(() => onMode(mode))),
           ),
         );
@@ -347,10 +335,13 @@ export const makeBridge = <R = never, M = never>(
       },
       newChat: () =>
         run(
-          Effect.sync(() => {
-            chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model, chat.cwd);
-            return chat.id;
-          }),
+          Effect.andThen(
+            fileState.reset,
+            Effect.sync(() => {
+              chat = newChat(Schema.decodeSync(ChatId)(crypto.randomUUID()), chat.model, chat.cwd);
+              return chat.id;
+            }),
+          ),
         ),
     };
     return { bridge, stopTurns };
@@ -373,7 +364,7 @@ const createRenderer = Effect.tryPromise({
  */
 export const launchChat = <R = never, M = never>(
   initial: StoredChat,
-  session?: SessionOptions<R, M>,
+  session: SessionOptions<R, M>,
 ) =>
   Effect.gen(function* () {
     let quit: () => void = () => {};

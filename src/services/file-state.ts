@@ -30,6 +30,11 @@ export interface FileStateShape {
   readonly withLock: (
     path: string,
   ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  /**
+   * Forgets every read, for a new chat: its model hasn't seen those files. The locks stay, so a
+   * write still running from the last chat keeps its file.
+   */
+  readonly reset: Effect.Effect<void>;
 }
 
 const hashOf = (content: Uint8Array) => createHash("sha256").update(content).digest("hex");
@@ -72,6 +77,7 @@ const makeFileState = Effect.gen(function* () {
       }
       return Semaphore.withPermit(lock)(effect);
     },
+    reset: Effect.sync(() => stamps.clear()),
   } satisfies FileStateShape;
 });
 
