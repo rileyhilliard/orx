@@ -23,7 +23,9 @@ rotate(join(logs, "orx.log"), join(logs, "orx.prev.log"));
 const args = process.argv.slice(2);
 // The TUI owns the terminal: its stderr stays a terminal (piping it would change what orx
 // detects), and its logs still reach logs/orx.jsonl.
-const interactive = args[0] === "chat" && process.stdin.isTTY && process.stdout.isTTY;
+// Bare `orx` (no subcommand, maybe flags) is the TUI session.
+const interactive =
+  (args[0] === undefined || args[0].startsWith("-")) && process.stdin.isTTY && process.stdout.isTTY;
 
 const child = Bun.spawn([process.execPath, join(root, "src/bin.ts"), ...args], {
   env: {

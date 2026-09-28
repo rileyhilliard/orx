@@ -10,7 +10,7 @@ paths:
 
 # TUI (OpenTUI + React)
 
-`orx chat` is OpenTUI (`@opentui/core` + `@opentui/react`, pinned exactly `0.5.12`) with React 19. Load the `opentui` skill before changing anything here, and the `tui-design-slop` skill before adding a header, status line, empty state, or panel. `DESIGN.md` has the tokens, layout, keybindings, and states.
+The `orx` session TUI is OpenTUI (`@opentui/core` + `@opentui/react`, pinned exactly `0.5.12`) with React 19. Load the `opentui` skill before changing anything here, and the `tui-design-slop` skill before adding a header, status line, empty state, or panel. `DESIGN.md` has the tokens, layout, keybindings, and states.
 
 ## The bridge
 
@@ -39,4 +39,4 @@ paths:
 - Render with `testRender(<App bridge={fake} />, { width, height })`, drive with `mockInput` (`typeText`, `pressEnter`, `pressKey`, `pressCtrlC`), wait with `waitForFrame` / `renderOnce`, and assert on `captureCharFrame()`. A fake `ChatBridge` is plain objects and async generators; no Effect needed. The closed-loop test builds the real bridge over the stub OpenRouter.
 - `waitForFrame` stops as soon as the renderer has nothing scheduled; it doesn't wait for I/O. That's fine with a fake bridge, whose events are microtasks, but with the real bridge (HTTP to the stub, the chat file's write) use `waitForScreen` from `tests/tui/render.ts`, which renders until the frame matches or a deadline passes. A turn's usage line appears before the chat is saved; the input leaving "Replying…" marks the end of the turn, save included.
 - Destroy the renderer after each test (`renderer.destroy()`), or its process handlers and raw-mode stdin leak into the next one.
-- To see the real screen: `bun run tui:capture -- chat --keys "hi<enter>"` runs orx in a PTY and prints the rendered screen as text. orx's own flags go after a second `--` (`bun run tui:capture -- --keys "hi<enter>" -- chat --resume <id>`).
+- To see the real screen: `bun run tui:capture -- --keys "hi<enter>"` runs orx in a PTY and prints the rendered screen as text. orx's own flags go after a second `--` (`bun run tui:capture -- --keys "hi<enter>" -- --resume <id>`).

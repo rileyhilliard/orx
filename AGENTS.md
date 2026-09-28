@@ -4,7 +4,7 @@ Instructions for coding agents working in this repository. Keep this file under 
 
 ## Overview
 
-orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), `orx chat` is a TUI with a model picker, per-reply tokens and cost, and Markdown export, `orx extract` is a structured-output example, `orx mcp` serves the same tools over MCP, and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, MCP is Effect's `McpServer`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, TUI and e2e tests), Node 24 (vitest 5), Biome 2, TypeScript 7 (`tsc`).
+orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), bare `orx` is the coding agent TUI (workspace tools, slash commands, skills) with a model picker, per-reply tokens and cost, and Markdown export, `orx extract` is a structured-output example, `orx mcp` serves the same tools over MCP, and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, MCP is Effect's `McpServer`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, TUI and e2e tests), Node 24 (vitest 5), Biome 2, TypeScript 7 (`tsc`).
 
 ## Commands
 
@@ -15,7 +15,7 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun install` | Dependencies, then `scripts/prepare.ts` installs the git hooks (skipped when `CI` is set) |
 | `bun run orx -- <args>` | orx from source, with `LOG_LEVEL=info`, logs in `logs/orx.jsonl` and `logs/orx.log`, chats in `.orx/data` |
 | `bun run stub` / `stub:stop` | A stub OpenRouter and stub releases on local ports, detached; prints `export` lines (`eval "$(bun run --silent stub)"`) |
-| `bun run tui:capture -- chat --keys "hi<enter>"` | Runs orx in a pseudo-terminal, types the keys, prints the screen as text (`--wait-for <text>`, `--bin dist/orx`; orx's own flags after a second `--`) |
+| `bun run tui:capture -- --keys "hi<enter>"` | Runs orx in a pseudo-terminal, types the keys, prints the screen as text (`--wait-for <text>`, `--bin dist/orx`; orx's own flags after a second `--`) |
 | `bun run lint` | `biome check .` (lint, format, import order, `biome-plugins/boundaries.grit`) |
 | `bun run format` | `biome check --write .` |
 | `bun run typecheck` | `tsc` |
@@ -79,7 +79,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 - stdout carries results only, and only through `Output`. Logs, notes (`Output.note`), and errors go to stderr. `main.ts` holds the CLI's own Console output (help, `--version`) and sends it to stdout on success, stderr on a usage error. `orx mcp` depends on this: one stray stdout line corrupts JSON-RPC.
 - Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig`, 4 `UpstreamUnavailable`, 5 `InvalidModelOutput`, 6 `PermissionDenied`, 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the README table.
 - `--json` makes results machine-readable (NDJSON `AskEvent`s for `ask`) and errors `{"error":{tag,message,retryable}}` on stderr.
-- Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, so vitest can run it on Node. The `chat` and `doctor` commands reach the TUI only by dynamic `import("../tui/launch")`.
+- Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, so vitest can run it on Node. The session (bare `orx`) and `doctor` reach the TUI only by dynamic `import("../tui/launch")`.
 - TUI components never import `effect`; they get a `ChatBridge` (plain promises and async iterables) from `launch.tsx`. Colors come from `tui/theme.ts` only.
 - Only `src/config.ts` reads the environment (`bin.ts` also clears `DEV`, which would load OpenTUI's devtools). Empty values count as unset. A new var goes in `config.ts`, `.env.example`, and the README table; one the config file should also set goes in `schemas/config-file.ts` and `fileToEnv`.
 - Each service is a `Context.Service` class with static layers: `X.layer`, plus `X.layerMemory` where tests need fresh state.
@@ -112,7 +112,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 ## Debugging
 
 - If a fix hasn't worked after two attempts with no new diagnostic step in between, stop, write down what you learned, list two or three other root-cause hypotheses, and ask which to pursue.
-- Drive the real CLI: `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask hi --json | jq`, `bun run tui:capture -- chat --keys "hi<enter>" --wait-for "in /"`. The stub needs no key and costs nothing.
+- Drive the real CLI: `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask hi --json | jq`, `bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`. The stub needs no key and costs nothing.
 - Read the logs before guessing. `logs/orx.jsonl` has one JSON object per line: `time`, `level`, `msg`, annotations as top-level keys, `error` for defects. Every run logs one `command` line (`command`, flag names, `exitCode`, `durationMs`, `runId`, `errorTag`, and `errorDetail` with OpenRouter's or GitHub's status and reason), including a run a signal interrupted; every model turn one `llm call` line (requested and served model, tokens, cost, finish reason, `aborted` when the user stopped it, `errorTag`/`errorDetail` when it failed, time to first token) with the same `runId`. `logs/orx.log` is stderr as plain text.
 - Queries: `jq -c 'select(.level == "error" or .level == "warn")' logs/orx.jsonl`, `jq -c 'select(.msg == "command" and .exitCode != 0)' logs/orx.jsonl`.
 - `bun run orx -- doctor --json` prints the version, paths, whether the key is set, and a config error if there is one. `--log-level debug` shows debug lines for one run.

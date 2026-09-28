@@ -144,9 +144,9 @@ describe("orx mcp", () => {
   });
 });
 
-describe("orx chat (TUI)", () => {
+describe("orx (TUI session)", () => {
   it("streams a reply, shows usage, and quits on Ctrl+C with exit 0", async () => {
-    const pty = spawnPty([BIN, "chat"], { cols: 90, rows: 20, env: cleanEnv() });
+    const pty = spawnPty([BIN], { cols: 90, rows: 20, env: cleanEnv() });
     await pty.waitFor((s) => s.includes("Ctrl+C quit"));
     pty.write("hi");
     await pty.waitFor((s) => /\bhi\b/.test(s));

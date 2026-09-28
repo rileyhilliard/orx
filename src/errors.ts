@@ -28,7 +28,7 @@ export class UnknownModel extends Schema.TaggedError<UnknownModel>()("UnknownMod
   model: Schema.String,
 }) {}
 
-/** An interactive command (`orx chat`) ran without a terminal. Exit 2. */
+/** An interactive command (bare `orx`) ran without a terminal. Exit 2. */
 export class NotInteractive extends Schema.TaggedError<NotInteractive>()("NotInteractive", {
   message: Schema.String,
 }) {}

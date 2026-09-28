@@ -1,6 +1,6 @@
 # orx
 
-A terminal client for any OpenRouter model: `orx ask` streams a reply into your terminal or a pipe, `orx chat` is a full-screen chat with a model picker and per-reply tokens and cost, `orx extract` pulls structured data out of text, and `orx mcp` offers the same tools to agents over MCP. One self-contained binary that updates itself.
+A terminal client for any OpenRouter model: `orx ask` streams a reply into your terminal or a pipe, bare `orx` is a coding agent session (file and shell tools, slash commands, skills) with a model picker and per-reply tokens and cost, `orx extract` pulls structured data out of text, and `orx mcp` offers the same tools to agents over MCP. One self-contained binary that updates itself.
 
 Built with [Effect](https://effect.website) (CLI, AI, and MCP modules), [OpenTUI](https://github.com/sst/opentui) for the terminal UI, and [Bun](https://bun.sh), which compiles it to a single file.
 
@@ -20,8 +20,8 @@ The installer picks the binary for your OS and CPU (macOS and Linux with glibc, 
 orx ask "what's a monad, in one sentence"
 git diff | orx ask "review this diff"        # piped stdin is appended to the prompt
 orx ask --json "time in Tokyo?" | jq -c .   # NDJSON: text, tool-call, tool-result, done | error
-orx chat                                     # Ctrl+P model, Ctrl+E export, Esc stop, Ctrl+C quit
-orx chat --resume <id>                       # ids from `orx chats`
+orx                                          # Ctrl+P model, Ctrl+E export, Esc stop, Ctrl+C quit
+orx --resume <id>                            # ids from `orx chats`
 orx models gpt                               # search models, prices per million tokens
 orx extract "Ada Lovelace, ada@example.com, Analytical Engines Ltd"
 orx export <id> -o chat.md
@@ -77,7 +77,7 @@ cp .env.example .env              # optional: a real key for bun run orx
 bun install                       # also installs the git hooks
 eval "$(bun run --silent stub)"   # a local stub OpenRouter: no key, no cost
 bun run orx -- ask "hi"           # orx from source; logs in logs/orx.jsonl
-bun run tui:capture -- chat --keys "hi<enter>" --wait-for "in /"   # the TUI's screen as text
+bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"   # the TUI's screen as text
 bun run check                     # the gate (CI adds coverage and build:all)
 ```
 

@@ -240,9 +240,9 @@ describe("orx models", () => {
   });
 });
 
-describe("orx chat", () => {
+describe("orx (the session)", () => {
   it("exits 2 without a terminal and points at ask", async () => {
-    const run = await runCli(["chat"], { ...withStub(), stdin: "" });
+    const run = await runCli([], { ...withStub(), stdin: "" });
     expect(run.exitCode).toBe(2);
     expect(run.stderr).toContain("orx ask");
   });

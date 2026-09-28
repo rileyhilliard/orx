@@ -362,6 +362,8 @@ export interface TurnOptions<R = ChatToolHandlers> {
   readonly modelId: string;
   /** The tools the model may call, and with them the handlers `R`. Default: `defaultToolkit`. */
   readonly toolkit?: TurnToolkit<R>;
+  /** The system prompt. Default: SYSTEM_PROMPT from the config. */
+  readonly systemPrompt?: string;
   /** Called once with the reply as far as it got, including when the turn fails or is interrupted. */
   readonly onEnd?: (reply: AssistantMessage) => Effect.Effect<void>;
 }
@@ -531,7 +533,7 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
           if (options.onEnd) yield* options.onEnd(reply);
         });
 
-      return loop(toPrompt(config.systemPrompt, options.history), 0).pipe(
+      return loop(toPrompt(options.systemPrompt ?? config.systemPrompt, options.history), 0).pipe(
         Stream.tap((event) =>
           event.type === "text"
             ? Effect.flatMap(Clock.currentTimeMillis, (now) =>
@@ -574,6 +576,8 @@ export const loadChat = (id: ChatId) =>
 export interface SendOptions<R = ChatToolHandlers> {
   /** The tools the model may call. Default: `defaultToolkit`. */
   readonly toolkit?: TurnToolkit<R>;
+  /** The system prompt. Default: SYSTEM_PROMPT from the config. */
+  readonly systemPrompt?: string;
 }
 
 /**
@@ -596,6 +600,7 @@ export const sendMessage = <R = ChatToolHandlers>(
         history,
         modelId,
         ...(options.toolkit ? { toolkit: options.toolkit } : {}),
+        ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         onEnd: (reply) =>
           reply.interrupted && reply.text === "" && reply.tools.length === 0
             ? Effect.void

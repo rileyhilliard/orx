@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// `bun run tui:capture -- chat --keys "hi<enter>"`: runs orx in a pseudo-terminal, types the
+// `bun run tui:capture -- --keys "hi<enter>"`: runs orx in a pseudo-terminal, types the
 // keys, and prints the screen as text once it settles. For agents, which can't look at a
 // terminal. Logs and chats go where `bun run orx` puts them (logs/, .orx/data); point it at
 // `bun run stub` for replies without a key.
@@ -11,7 +11,7 @@
 //   --no-quit         leave the app running instead of sending Ctrl+C at the end
 //
 // orx's own flags go after a second `--`, so they aren't read as these:
-// `bun run tui:capture -- --keys "hi<enter>" -- chat --resume <id>`.
+// `bun run tui:capture -- --keys "hi<enter>" -- --resume <id>`.
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { parseKeys, spawnPty } from "./lib/pty";
@@ -36,7 +36,7 @@ const parse = () => {
     process.stderr.write(
       `tui:capture: ${error instanceof Error ? error.message.split(".")[0] : error}. ` +
         `Put orx's own flags after a second \`--\`: ` +
-        `bun run tui:capture -- --keys "..." -- chat --resume <id>\n`,
+        `bun run tui:capture -- --keys "..." -- --resume <id>\n`,
     );
     process.exit(2);
   }

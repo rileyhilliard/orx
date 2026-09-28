@@ -8,6 +8,7 @@ import {
   newChat,
   sendMessage,
   type TurnEvent,
+  type TurnToolkit,
 } from "../core/chat";
 import { expandCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
@@ -31,6 +32,13 @@ export const RENDERER_OPTIONS = {
   exitSignals: [],
   consoleMode: "disabled",
 } satisfies CliRendererConfig;
+
+/** A coding session's root, tools, and system prompt (see `prepareSession`). */
+export interface SessionOptions<R> {
+  readonly root: string;
+  readonly toolkit: TurnToolkit<R>;
+  readonly systemPrompt: string;
+}
 
 /** What a turn, the models list, and export need (whatever sendMessage requires, and more). */
 type LaunchServices =
@@ -97,11 +105,21 @@ const logDefect = (cause: Cause.Cause<unknown>) =>
  * get instead of Effect. `quit` is called when the user quits. `stopTurns` ends any reply still
  * streaming (saved as interrupted); launchChat calls it when its scope closes, so a signal
  * saves the reply too. tests/tui/closed-loop.test.tsx drives this with a test renderer.
- * `root` is where custom commands and skills load from (`<root>/.orx/`).
+ * `session` is the coding session (`prepareSession`): its root is where custom commands and
+ * skills load from (`<root>/.orx/`), and turns use its tools and system prompt. Without one,
+ * turns use the plain chat tools and commands load from the cwd.
  */
-export const makeBridge = (initial: StoredChat, quit: () => void, root: string = process.cwd()) =>
+export const makeBridge = <R = never>(
+  initial: StoredChat,
+  quit: () => void,
+  session?: SessionOptions<R>,
+) =>
   Effect.gen(function* () {
-    const context = yield* Effect.context<LaunchServices>();
+    const context = yield* Effect.context<LaunchServices | R>();
+    const root = session?.root ?? process.cwd();
+    const turnOptions = session
+      ? { toolkit: session.toolkit, systemPrompt: session.systemPrompt }
+      : {};
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
     let chat = initial;
@@ -141,7 +159,9 @@ export const makeBridge = (initial: StoredChat, quit: () => void, root: string =
       initialModel: chat.model,
       history: chat.messages.map(toUiMessage),
       send: (text, model) =>
-        Stream.suspend(() => sendMessage(chat, text, model)).pipe(
+        Stream.suspend(() =>
+          sendMessage<ChatToolHandlers | R>(chat, text, model, turnOptions),
+        ).pipe(
           Stream.flatMap((event) => Stream.fromIterable(toUiEvent(event))),
           Stream.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Stream.empty;
@@ -237,17 +257,17 @@ const createRenderer = Effect.tryPromise({
 });
 
 /**
- * `orx chat`: runs the TUI until the user quits. The renderer is a scoped resource, so it is
+ * Bare `orx`: runs the TUI until the user quits. The renderer is a scoped resource, so it is
  * destroyed (and the terminal restored) however this ends, including interruption by SIGINT.
  * While it runs, logs go only to the log file: the TUI owns the terminal.
  */
-export const launchChat = (initial: StoredChat) =>
+export const launchChat = <R = never>(initial: StoredChat, session?: SessionOptions<R>) =>
   Effect.gen(function* () {
     let quit: () => void = () => {};
     const quitting = new Promise<void>((resolve) => {
       quit = resolve;
     });
-    const { bridge, stopTurns } = yield* makeBridge(initial, () => quit());
+    const { bridge, stopTurns } = yield* makeBridge(initial, () => quit(), session);
     const renderer = yield* Effect.acquireRelease(createRenderer, (r) =>
       Effect.sync(() => r.destroy()),
     );
