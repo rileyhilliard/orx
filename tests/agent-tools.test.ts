@@ -224,6 +224,33 @@ describe.each([
     );
   });
 
+  it.skipIf(skip)("doesn't search secret-shaped files, and says how many it skipped", async () => {
+    const root = grepFixture();
+    mkdirSync(join(root, "keys"));
+    writeFileSync(join(root, ".env"), "needle=hunter2\n");
+    writeFileSync(join(root, ".env.local"), "needle=hunter2\n");
+    writeFileSync(join(root, "keys", "server.pem"), "needle\n");
+    writeFileSync(join(root, "keys", "api.key"), "needle\n");
+    writeFileSync(join(root, "keys", "id_ed25519"), "needle\n");
+    const note = (n: number) =>
+      `(${n} secret-shaped ${n === 1 ? "file" : "files"} (.env*, *.pem, *.key, id_*) not searched; read one by path if you need it)`;
+
+    const files = await grep(root, { pattern: "needle" });
+    expect(files.value).toBe(`src/a.ts\nsrc/b.md\n${note(5)}`);
+    const content = await grep(root, { pattern: "hunter2", output_mode: "content" });
+    expect(content.value).toBe(`No matches for hunter2\n${note(5)}`);
+    // A glob narrows what's counted; the exclusions still win over it.
+    expect((await grep(root, { pattern: "needle", glob: "*.pem" })).value).toBe(
+      `No matches for needle\n${note(1)}`,
+    );
+    // Named directly, a secret file is still not searched.
+    expect((await grep(root, { pattern: "needle", path: ".env" })).value).toBe(
+      `No matches for needle\n${note(1)}`,
+    );
+    // No secret files in scope, no note.
+    expect((await grep(root, { pattern: "needle", path: "src" })).value).toBe("src/a.ts\nsrc/b.md");
+  });
+
   it.skipIf(skip)("searches one file, reports no matches, and fails on a bad regex", async () => {
     const root = grepFixture();
     expect((await grep(root, { pattern: "needle", path: "src/b.md" })).value).toBe("src/b.md");
