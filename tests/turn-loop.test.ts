@@ -104,6 +104,35 @@ describe("a tool call to a tool that doesn't exist", () => {
   });
 });
 
+describe("text from several model steps", () => {
+  it("is one paragraph per step, in the events and the saved reply", async () => {
+    useStub();
+    stub.steps = [
+      {
+        text: "Checking the time.",
+        toolCalls: [{ name: "currentTime", arguments: JSON.stringify({ timeZone: "UTC" }) }],
+      },
+      { text: "It's noon." },
+    ];
+    const { exit, events, reply } = await turn([{ role: "user", text: "time?" }]);
+    expect(exit._tag).toBe("Success");
+    const streamed = events.flatMap((e) => (e.type === "text" ? [e.delta] : [])).join("");
+    // Without the break the user reads "Checking the time.It's noon."
+    expect(streamed).toBe("Checking the time.\n\nIt's noon.");
+    expect(reply?.text).toBe(streamed);
+  });
+
+  it("gets no leading break when the first text comes after a tool call", async () => {
+    useStub();
+    stub.steps = [
+      { toolCalls: [{ name: "currentTime", arguments: JSON.stringify({ timeZone: "UTC" }) }] },
+      { text: "It's noon." },
+    ];
+    const { reply } = await turn([{ role: "user", text: "time?" }]);
+    expect(reply?.text).toBe("It's noon.");
+  });
+});
+
 describe("an error after the stream started", () => {
   it("fails the turn with exit 4 and an error event, and saves the reply as interrupted", async () => {
     stub.steps = [

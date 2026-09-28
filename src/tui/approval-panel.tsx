@@ -1,6 +1,6 @@
 import { printable } from "./printable";
 import { theme } from "./theme";
-import { collapseLines } from "./tool-summary";
+import { collapseLines, withoutFileHeader } from "./tool-summary";
 import type { UiApproval } from "./types";
 
 /** What the panel offers, left to right; the first is picked when it opens. */
@@ -71,7 +71,7 @@ export const approvalRows = (approval: UiApproval, width: number) => {
     wrap(bash ? `     ${line}` : line, w).map((text) => ({ text, fg: theme.tool })),
   );
   const diff = approval.diff
-    ? printable(approval.diff)
+    ? printable(withoutFileHeader(approval.diff))
         .replace(/\n$/, "")
         .split("\n")
         .flatMap((line) => wrap(line, w).map((text) => ({ text, fg: diffColor(line) })))

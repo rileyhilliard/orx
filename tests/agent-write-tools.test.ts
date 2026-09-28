@@ -534,6 +534,6 @@ describe("parallel edits in one step", () => {
         .filter((e) => e.type === "text")
         .map((e) => e.delta)
         .join(""),
-    ).toBe("Editing both lines.Done.");
+    ).toBe("Editing both lines.\n\nDone.");
   });
 });

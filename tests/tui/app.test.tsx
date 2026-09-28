@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { App } from "~/tui/app";
+import { App, WORKING_IDLE_MS } from "~/tui/app";
 import { wrap } from "~/tui/approval-panel";
 import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMode } from "~/tui/types";
 import { pressWhenArmed, type RenderSetup, render as renderTui, waitForScreen } from "./render";
@@ -22,6 +22,7 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
   };
   const bridge: ChatBridge = {
     chatId: "0f0e0d0c-0000-4000-8000-000000000000",
+    workspace: "~/project",
     initialModel: "openai/gpt-test",
     history: [],
     send: (text, model) => {
@@ -72,18 +73,53 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
   return { bridge, calls };
 };
 
-const render = async (bridge: ChatBridge) => {
-  setup = await renderTui(<App bridge={bridge} />, { width: 80, height: 20 });
+const render = async (bridge: ChatBridge, size = { width: 80, height: 20 }) => {
+  setup = await renderTui(<App bridge={bridge} />, size);
   await setup.renderOnce();
   return setup;
 };
 
 describe("App", () => {
-  it("shows the model and the key hints", async () => {
+  it("shows the model, the workspace, and the key hints", async () => {
     const { captureCharFrame } = await render(fakeBridge([]).bridge);
     const frame = captureCharFrame();
-    expect(frame).toContain("openai/gpt-test");
+    expect(frame).toMatch(/orx {2}openai\/gpt-test {2}in ~\/project/);
     expect(frame).toContain("Ctrl+P model");
+  });
+
+  it("cuts a long workspace from the left before the model or the chat id give way", async () => {
+    const { bridge } = fakeBridge([], {
+      workspace: "/tmp/a-very/deeply/nested/place/for/work/project",
+    });
+    const setup = await render(bridge, { width: 60, height: 12 });
+    const header = setup.captureCharFrame().split("\n")[0] ?? "";
+    expect(header).toContain("orx  openai/gpt-test  in …");
+    expect(header).toContain("/project");
+    // A gap before the chat id, however long the path.
+    expect(header).toMatch(/project +chat 0f0e0d0c/);
+  });
+
+  it("says in an empty chat what the mode lets the agent do", async () => {
+    let setMode: (mode: UiMode) => void = () => {};
+    const { bridge } = fakeBridge([], {
+      watchMode: (onMode) => {
+        setMode = onMode;
+        onMode("acceptEdits");
+        return () => {};
+      },
+    });
+    const setup = await render(bridge);
+    expect(await waitForScreen(setup, (f) => f.includes("Edits apply"), 2000)).toContain(
+      "Ask for a change here. Edits apply as they're made; commands ask first.",
+    );
+    setMode("default");
+    expect(await waitForScreen(setup, (f) => f.includes("Edits and commands"), 2000)).toContain(
+      "Ask for a change here. Edits and commands ask first.",
+    );
+    setMode("plan");
+    expect(await waitForScreen(setup, (f) => f.includes("Plan mode"), 2000)).toContain(
+      "Ask for a plan. Plan mode reads the code and changes nothing.",
+    );
   });
 
   it("shows what went wrong loading commands and skills when it starts, until Esc", async () => {
@@ -638,6 +674,8 @@ describe("the approval panel", () => {
     expect(panel).toMatch(/Allow +Always +Deny/);
     expect(panel).toContain("Waiting for your answer");
     expect(panel).not.toContain("Replying");
+    // The panel is waiting on the user, not the model: no working row.
+    expect(panel).not.toContain("Thinking");
     expect(panel).toContain("Enter pick · ←→ choose · y / a / n · Esc stop");
     expect(highlighted(setup)).toEqual(["Allow"]);
     await pressWhenArmed(setup, "enter", () => calls.answers.length > 0);
@@ -693,6 +731,19 @@ describe("the approval panel", () => {
     expect(done).not.toContain("Run  bun test");
     // The y went to the panel, not the composer.
     expect(done).not.toContain("│ y");
+  });
+
+  it("takes a pasted n then Enter as a denial with an empty note, not the highlighted choice", async () => {
+    const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("run the tests");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("Run  bun test"));
+    // Once armed, with Always highlighted: both keys land before React re-renders.
+    await pressWhenArmed(setup, "\u001b[C", () => highlighted(setup).includes("Always"));
+    await setup.mockInput.typeText("n\r");
+    await screen(setup, () => calls.answers.length > 0);
+    expect(calls.answers).toEqual([["approval-1", { no: "" }]]);
   });
 
   it("ignores y / a / n, Left/Right, and Enter typed before the panel has been on screen long enough to read", async () => {
@@ -811,7 +862,9 @@ describe("the approval panel", () => {
     const top = await screen(setup, (f) => f.includes("Edit [2Jsrc/big.ts"));
     expect(top).not.toContain("\u001b");
     expect(top).toContain("↑↓ scroll");
-    expect(top).toMatch(/lines 1–\d+ of 62/);
+    // The diff's file header isn't shown: the panel's `Edit src/big.ts` names the file.
+    expect(top).toMatch(/lines 1–\d+ of 60/);
+    expect(top).not.toContain("+++ b/src/big.ts");
     // The choices and the composer's footer stay on screen beside a long diff.
     expect(top).toMatch(/Allow +Deny/);
     expect(top).toContain("Esc stop");
@@ -820,7 +873,7 @@ describe("the approval panel", () => {
     // More pages than the diff has: the last one stops at its end.
     for (let i = 0; i < 8; i++) setup.mockInput.pressKey("\u001b[6~");
     const bottom = await screen(setup, (f) => f.includes("+line 60"));
-    expect(bottom).toMatch(/lines \d+–62 of 62/);
+    expect(bottom).toMatch(/lines \d+–60 of 60/);
     expect(bottom).toMatch(/Allow +Deny/);
     expect(bottom).toContain("Esc stop");
     // The summary stays in view while the diff scrolls.
@@ -885,6 +938,158 @@ describe("the approval panel", () => {
     const done = await screen(setup, (f) => f.includes("u5"));
     expect(done).toContain("Done · changed src/a.ts");
     expect(done.indexOf("Renamed it.")).toBeLessThan(done.indexOf("Done · changed"));
+  });
+
+  it("says the agent is working while nothing streams, and what it's running", async () => {
+    let step: () => void = () => {};
+    let finish: () => void = () => {};
+    const stepped = new Promise<void>((resolve) => {
+      step = resolve;
+    });
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { bridge } = fakeBridge([], {
+      send: () =>
+        (async function* () {
+          await stepped;
+          yield {
+            type: "tool",
+            call: {
+              id: "t1",
+              name: "bash",
+              input: "{}",
+              target: "bash bun test",
+              status: "running",
+            },
+          } satisfies UiEvent;
+          await finished;
+          yield { type: "tool-result", id: "t1", status: "ok", summary: "bash bun test · exit 0" };
+          yield { type: "done", usage: "u9" };
+        })(),
+    });
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("test it");
+    setup.mockInput.pressEnter();
+    // Before the first token: the model is thinking.
+    const thinking = await waitForScreen(setup, (f) => f.includes("Thinking"), 2000);
+    expect(thinking).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Thinking · \ds/);
+    // Its row sits right above the composer.
+    const rows = thinking.split("\n");
+    expect(rows[rows.findIndex((r) => r.includes("Thinking")) + 1]).toMatch(/^┌/);
+    step();
+    // A tool running: the row names it.
+    const running = await waitForScreen(
+      setup,
+      (f) => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] bash bun test · \ds/.test(f),
+      2000,
+    );
+    expect(running).not.toContain("Thinking");
+    finish();
+    const done = await waitForScreen(setup, (f) => f.includes("u9"), 2000);
+    expect(done).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  });
+
+  it("names a running tool that isn't one of the agent's by its name", async () => {
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { bridge } = fakeBridge([], {
+      send: () =>
+        (async function* () {
+          yield {
+            type: "tool",
+            call: { id: "s1", name: "skill", input: "{}", status: "running" },
+          } satisfies UiEvent;
+          await finished;
+          yield { type: "done", usage: "u11" } satisfies UiEvent;
+        })(),
+    });
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const frame = await waitForScreen(setup, (f) => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] skill · \ds/.test(f), 2000);
+    expect(frame).not.toContain("Thinking");
+    finish();
+    await waitForScreen(setup, (f) => f.includes("u11"), 2000);
+  });
+
+  it("stops thinking while text streams, and thinks again once it goes quiet", async () => {
+    let resume: () => void = () => {};
+    const resumed = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { bridge } = fakeBridge([], {
+      send: () =>
+        (async function* () {
+          // Longer than the screen, so the list is pinned to the bottom and any row shifts it.
+          const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
+          yield { type: "text", delta: `${lines}\nHalf a thought` } satisfies UiEvent;
+          await resumed;
+          yield { type: "text", delta: ", and the rest." } satisfies UiEvent;
+          await finished;
+          yield { type: "done", usage: "u10" } satisfies UiEvent;
+        })(),
+    });
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    // Text just arrived: the reply is the progress, nothing thinks.
+    const streamingNow = await waitForScreen(setup, (f) => f.includes("Half a thought"), 2000);
+    expect(streamingNow).not.toContain("Thinking");
+    // Quiet for WORKING_IDLE_MS: thinking again.
+    const quiet = await waitForScreen(setup, (f) => f.includes("Thinking"), WORKING_IDLE_MS + 2000);
+    expect(quiet).toContain("Half a thought");
+    // The row's space stays while it's hidden, so nothing on screen moves when it comes back.
+    const rowOf = (frame: string, text: string) =>
+      frame.split("\n").findIndex((row) => row.includes(text));
+    expect(rowOf(quiet, "┌")).toBe(rowOf(streamingNow, "┌"));
+    expect(rowOf(quiet, "Half a thought")).toBe(rowOf(streamingNow, "Half a thought"));
+    resume();
+    const again = await waitForScreen(setup, (f) => f.includes("and the rest."), 2000);
+    expect(again).not.toContain("Thinking");
+    finish();
+    expect(await waitForScreen(setup, (f) => f.includes("u10"), 2000)).not.toContain("Thinking");
+  });
+
+  it("shows a reply in the order it happened: text, the calls it led to, then more text", async () => {
+    const { bridge } = fakeBridge([
+      { type: "text", delta: "Looking first." },
+      {
+        type: "tool",
+        call: { id: "t1", name: "read", input: "{}", target: "read a.ts", status: "running" },
+      },
+      { type: "tool-result", id: "t1", status: "ok", summary: "read a.ts · 3 lines" },
+      { type: "text", delta: "\n\nAll good." },
+      { type: "done", usage: "u7" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("u7"));
+    const rows = frame.split("\n").map((row) => row.trim());
+    const at = (text: string) => rows.findIndex((row) => row.startsWith(text));
+    expect(at("Looking first.")).toBeGreaterThan(-1);
+    // A blank row wherever text gives way to tool lines and back.
+    expect(at("→ read a.ts · 3 lines")).toBe(at("Looking first.") + 2);
+    expect(at("All good.")).toBe(at("→ read a.ts · 3 lines") + 2);
+  });
+
+  it("keeps a reply's first-line indentation", async () => {
+    const { bridge } = fakeBridge([
+      { type: "text", delta: "\n    indented code" },
+      { type: "done", usage: "u8" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("u8"));
+    expect(frame).toContain("     indented code");
   });
 
   it("doesn't say done when the reply stopped early with a note", async () => {

@@ -6,6 +6,7 @@ import { printable } from "~/tui/printable";
 import {
   collapseLines,
   describeCall,
+  homeRelative,
   summarizeTool,
   toolStatus,
   turnSummary,
@@ -22,16 +23,27 @@ describe("summarizeTool", () => {
     expect(summarizeTool("glob", { pattern: "**/*.ts" }, "a.ts\nb.ts", false)).toEqual({
       summary: "glob **/*.ts · 2 files",
     });
+    // Edits and writes read like the other tools: what, then how big.
     expect(
       summarizeTool("write", { path: "a.ts", content: "a\nb\n" }, "Created a.ts (2 lines)", false),
-    ).toEqual({ summary: "Created a.ts (2 lines)", diff: "+a\n+b" });
+    ).toEqual({ summary: "write a.ts · new file, 2 lines", diff: "+a\n+b" });
     expect(
       summarizeTool("write", { path: "a.ts" }, "Overwrote a.ts (1 lines)\n-a\n+b", false),
-    ).toEqual({ summary: "Overwrote a.ts (1 lines)", diff: "-a\n+b" });
+    ).toEqual({ summary: "write a.ts · +1 −1", diff: "-a\n+b" });
     expect(summarizeTool("edit", { path: "a.ts" }, "-a\n+b", false)).toEqual({
-      summary: "edit a.ts",
+      summary: "edit a.ts · +1 −1",
       diff: "-a\n+b",
     });
+    // The file header repeats the tool line; the hunks stay.
+    expect(
+      summarizeTool(
+        "edit",
+        { path: "./a.ts" },
+        "--- a.ts\n+++ a.ts\n@@ -1,2 +1,2 @@\n-a\n+b\n+c\n keep",
+        false,
+        "/w",
+      ),
+    ).toEqual({ summary: "edit a.ts · +2 −1", diff: "@@ -1,2 +1,2 @@\n-a\n+b\n+c\n keep" });
   });
 
   it("shows a failure's message, and leaves other tools alone", () => {
@@ -68,10 +80,23 @@ describe("summarizeTool", () => {
     expect(toolStatus("Edited", false)).toBe("ok");
   });
 
-  it("shows no diff for an overwrite, whose output is one line", () => {
+  it("counts added and removed lines whose content starts like a file header", () => {
     expect(
-      summarizeTool("write", { path: "a.ts", content: "b" }, "Overwrote a.ts (1 lines)", false),
-    ).toEqual({ summary: "Overwrote a.ts (1 lines)" });
+      summarizeTool("edit", { path: "q.sql" }, "@@ -1 +1 @@\n--- old note\n+++ new note", false),
+    ).toMatchObject({
+      summary: "edit q.sql · +1 −1",
+    });
+  });
+
+  it("shows no diff for an overwrite too large to diff, and says how long the file is", () => {
+    expect(
+      summarizeTool(
+        "write",
+        { path: "a.ts", content: "b\nc\n" },
+        "Overwrote a.ts (1 lines; the diff is too large to show)",
+        false,
+      ),
+    ).toEqual({ summary: "write a.ts · 2 lines" });
   });
 
   it("says a grep found nothing instead of counting its message as a line", () => {
@@ -123,13 +148,28 @@ describe("describeCall", () => {
     });
     // Other tools, and input without the field, keep their `name(input)` line.
     // One file however the model spelled it: `./src/a.ts` or an absolute path in the root.
-    expect(describeCall("edit", { path: "./src/a.ts" }, "/w")).toMatchObject({ file: "src/a.ts" });
+    expect(describeCall("edit", { path: "./src/a.ts" }, "/w")).toEqual({
+      target: "edit src/a.ts",
+      file: "src/a.ts",
+    });
     expect(describeCall("edit", { path: "/w/src/a.ts" }, "/w")).toMatchObject({ file: "src/a.ts" });
     expect(describeCall("edit", { path: "/elsewhere/a.ts" }, "/w")).toMatchObject({
       file: "/elsewhere/a.ts",
     });
     expect(describeCall("currentTime", { timeZone: "UTC" })).toEqual({});
     expect(describeCall("edit", { old_string: "x" })).toEqual({});
+  });
+});
+
+describe("homeRelative", () => {
+  it("shows the home directory as ~", () => {
+    expect(homeRelative("/Users/me", "/Users/me")).toBe("~");
+    expect(homeRelative("/Users/me/project", "/Users/me")).toBe("~/project");
+    expect(homeRelative("/Users/me/project", "/Users/me/")).toBe("~/project");
+    // A sibling that shares the prefix isn't under home.
+    expect(homeRelative("/Users/meg/project", "/Users/me")).toBe("/Users/meg/project");
+    expect(homeRelative("/tmp/project", "/Users/me")).toBe("/tmp/project");
+    expect(homeRelative("/tmp/project", undefined)).toBe("/tmp/project");
   });
 });
 

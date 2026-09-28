@@ -27,7 +27,7 @@ Environment variables win over the optional config file at `~/.config/orx/config
 
 Results go to stdout and everything else (usage lines, logs, errors) goes to stderr, so a pipe only sees the answer. Every reply is saved as a chat, and its id is printed after the reply on stderr. When stdin isn't a terminal, `ask` reads it to the end and appends it to the prompt, so in a `while read` loop, or under a job runner whose stdin stays open, give it `< /dev/null`.
 
-`orx ask --json` writes NDJSON events to stdout: `text`, `tool-call`, `tool-result`, `permission-denied`, and `note` as they happen, then one `done` (with tokens and cost) or `error`. With `--json`, any command's error is `{"error":{"tag","message","retryable"}}` on stderr.
+`orx ask --json` writes NDJSON events to stdout: `text`, `tool-call`, `tool-result`, `permission-denied`, and `note` as they happen, then one `done` (with tokens and cost) or `error`. Text from separate model steps (before and after a tool call) is separated by a blank line: the `text` event that starts the later step begins with `\n\n`, which orx adds. With `--json`, any command's error is `{"error":{"tag","message","retryable"}}` on stderr.
 
 ## Exit codes
 

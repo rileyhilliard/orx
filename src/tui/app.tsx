@@ -1,7 +1,7 @@
 import type { InputRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApprovalPanel, approvalChoices, approvalRows } from "./approval-panel";
+import { ApprovalPanel } from "./approval-panel";
 import { BUILTINS, isBuiltin, isMode, KEYS, MODES, parseSlash } from "./commands";
 import { insertMention, opensMentionPicker, rankPaths } from "./mentions";
 import { MessageList } from "./message-list";
@@ -9,20 +9,25 @@ import { ModelPicker } from "./model-picker";
 import { clip, Picker, type PickerItem, type PickerList } from "./picker";
 import { printable } from "./printable";
 import { theme } from "./theme";
-import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMessage, UiMode } from "./types";
+import type { ChatBridge, UiDecision, UiEvent, UiMessage, UiMode } from "./types";
+import { useApproval } from "./use-approval";
+import { Working } from "./working";
 
-/**
- * How long an approval is on screen before Enter or y / a / n answer it: keys typed ahead for
- * the composer must not approve something the user hasn't seen.
- */
-export const APPROVAL_ARM_MS = 300;
+/** The working row's label: the running tool's line, or `Thinking` while the model works. */
+const workingLabel = (reply: UiMessage | undefined) => {
+  const running = reply?.tools.findLast((t) => t.status === "running");
+  return running ? (running.target ?? running.name) : "Thinking";
+};
+
+/** How long streamed text can pause before the working row comes back. */
+export const WORKING_IDLE_MS = 1000;
 
 const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
   switch (event.type) {
     case "text":
       return { ...reply, text: reply.text + event.delta };
     case "tool":
-      return { ...reply, tools: [...reply.tools, event.call] };
+      return { ...reply, tools: [...reply.tools, { ...event.call, at: reply.text.length }] };
     case "tool-result":
       return {
         ...reply,
@@ -37,7 +42,7 @@ const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
             : call,
         ),
       };
-    // The approval panel's, not the reply's (App handles them).
+    // The approval panel's, not the reply's (useApproval handles them).
     case "approval":
     case "approval-cancelled":
       return reply;
@@ -55,6 +60,10 @@ const rankFiles = (items: ReadonlyArray<PickerItem>, query: string) => {
   const byPath = new Map(items.map((item) => [item.value, item]));
   return rankPaths([...byPath.keys()], query).flatMap((p) => byPath.get(p) ?? []);
 };
+
+/** `  in ~/project`, cut from the left to fit `room` columns, or nothing when too little fits. */
+const headerPath = (path: string, room: number) =>
+  room < 12 ? "" : `  in ${clip(path, room - "  in ".length, "start")}`;
 
 /** /help: the built-ins, then every key in two columns (one when the terminal is narrow). */
 const helpLines = (width: number) => {
@@ -108,6 +117,18 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   const [messages, setMessages] = useState<ReadonlyArray<UiMessage>>(bridge.history);
   const [model, setModel] = useState(bridge.initialModel);
   const [streaming, setStreaming] = useState(false);
+  const [turnStartedAt, setTurnStartedAt] = useState(0);
+  // True while text is arriving: the reply itself shows progress, so the working row hides
+  // until the text goes quiet for WORKING_IDLE_MS.
+  const [textFlowing, setTextFlowing] = useState(false);
+  const quietTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const onTurnEvent = useCallback((event: UiEvent | undefined) => {
+    clearTimeout(quietTimer.current);
+    const text = event?.type === "text";
+    setTextFlowing(text);
+    if (text) quietTimer.current = setTimeout(() => setTextFlowing(false), WORKING_IDLE_MS);
+  }, []);
+  useEffect(() => () => clearTimeout(quietTimer.current), []);
   const [overlay, setOverlay] = useState<Overlay | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(undefined);
   // The composer is set imperatively: a controlled `value` loses a keystroke typed just before
@@ -132,32 +153,18 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   }, [bridge]);
   const [mode, setMode] = useState<UiMode>("default");
   useEffect(() => bridge.watchMode(setMode), [bridge]);
-  const [approval, setApproval] = useState<UiApproval | undefined>(undefined);
-  const approvalShownAt = useRef(0);
-  // The highlighted choice in the approval panel, mirrored in a ref: a key handled before React
-  // re-renders must see the latest one.
-  const [choice, setChoiceState] = useState(0);
-  const choiceRef = useRef(0);
-  const setChoice = useCallback((index: number) => {
-    choiceRef.current = index;
-    setChoiceState(index);
-  }, []);
-  const [diffOffset, setDiffOffset] = useState(0);
-  // After `n` on an approval, the composer takes an optional note for the model.
-  const [noting, setNoting] = useState(false);
-  const draftBeforeNote = useRef("");
+  const answer = useCallback(
+    (id: string, decision: UiDecision) => {
+      bridge.answer(id, decision).catch(() => setStatus("Couldn't answer the request."));
+    },
+    [bridge],
+  );
+  const approvals = useApproval({ input, setDraft, answer });
+  const { approval, noting } = approvals;
+  const { open: openApproval, cancel: cancelApproval, close: closeApproval } = approvals;
   const [chatId, setChatId] = useState(bridge.chatId);
   const current = useRef<AsyncIterator<UiEvent> | undefined>(undefined);
   const { width, height } = useTerminalDimensions();
-
-  // However the approval closes (answered, cancelled, the turn ended), the note is over and
-  // the draft it set aside comes back.
-  useEffect(() => {
-    if (approval === undefined && noting) {
-      setNoting(false);
-      setDraft(draftBeforeNote.current);
-    }
-  }, [approval, noting, setDraft]);
 
   const stop = useCallback(async () => {
     const it = current.current;
@@ -172,6 +179,8 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       setStatus(undefined);
       setNotice(undefined);
       setStreaming(true);
+      setTurnStartedAt(Date.now());
+      onTurnEvent(undefined);
       setMessages((ms) => [
         ...ms,
         { role: "user", text, tools: [] },
@@ -183,17 +192,13 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         current.current = it;
         for (let next = await it.next(); !next.done; next = await it.next()) {
           const event = next.value;
+          onTurnEvent(event);
           if (event.type === "approval") {
-            // The panel takes Enter and y / a / n; the composer must not (the prop alone doesn't
-            // blur it), and a list open for the draft closes so its filter can't answer either.
-            input.current?.blur();
+            // A list open for the draft closes, so its filter can't answer the panel.
             setOverlay(undefined);
-            approvalShownAt.current = Date.now();
-            setDiffOffset(0);
-            setChoice(0);
-            setApproval(event.request);
+            openApproval(event.request);
           } else if (event.type === "approval-cancelled") {
-            setApproval((open) => (open?.id === event.id ? undefined : open));
+            cancelApproval(event.id);
           }
           setMessages((ms) => {
             const last = ms.at(-1);
@@ -210,12 +215,12 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       } finally {
         current.current = undefined;
         setStreaming(false);
-        setApproval(undefined);
+        closeApproval();
         // The turn can end after the screen is gone (quit mid-reply); a destroyed input throws.
         if (input.current && !input.current.isDestroyed) input.current.focus();
       }
     },
-    [bridge, model, streaming, setDraft, setChoice],
+    [bridge, model, streaming, setDraft, openApproval, cancelApproval, closeApproval, onTurnEvent],
   );
 
   const runBuiltin = (name: string, args: string) => {
@@ -251,17 +256,9 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     }
   };
 
-  /** Answers the open approval and gives the composer back (the note's draft returns). */
-  const decide = (decision: UiDecision) => {
-    if (!approval) return;
-    setApproval(undefined);
-    input.current?.focus();
-    bridge.answer(approval.id, decision).catch(() => setStatus("Couldn't answer the request."));
-  };
-
   /** Enter in the composer: a slash command, or a message. */
   const submit = (text: string) => {
-    if (approval && noting) return decide({ no: text });
+    if (approvals.submitNote(text)) return;
     if (text.trim() === "/") return setOverlay("commands");
     const slash = parseSlash(text);
     if (slash === undefined) return void send(text);
@@ -319,14 +316,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     return { items: paths.map((p) => ({ value: p, label: p })), available: true };
   }, [bridge]);
 
-  // The approval's scrolling window: its head always shows; the body gets the rows left after
-  // the header, composer, footer, position line, choices (a blank row above them), and three
-  // rows of conversation.
-  const panel = approval ? approvalRows(approval, width - 2) : undefined;
-  const choiceLabels = approval ? approvalChoices(approval).map((c) => c.label) : [];
-  const panelRows = Math.max(3, height - 11 - (panel?.head.length ?? 0));
-  const maxOffset = Math.max(0, (panel?.body.length ?? 0) - panelRows);
-  const scrolls = maxOffset > 0;
+  const { panel } = approvals;
 
   // On a short terminal the notice is cut to what fits beside two rows of the conversation,
   // its last row saying how much is left out. Its text can quote a command's file and model.
@@ -344,49 +334,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         : undefined;
 
   useKeyboard((key) => {
-    if (approval && !noting && !overlay && !key.ctrl && !key.meta) {
-      const choices = approvalChoices(approval);
-      if (key.name === "left" || key.name === "right") {
-        key.preventDefault();
-        // Like Enter, an arrow typed before the panel could be read moves nothing.
-        if (Date.now() - approvalShownAt.current < APPROVAL_ARM_MS) return;
-        const next = choiceRef.current + (key.name === "left" ? -1 : 1);
-        setChoice(Math.max(0, Math.min(choices.length - 1, next)));
-        return;
-      }
-      const enter = key.name === "return" || key.name === "linefeed" || key.name === "kpenter";
-      // The panel's keys, kept from the composer, which regains focus while this key is handled.
-      if (enter || ["y", "a", "n"].includes(key.name)) {
-        key.preventDefault();
-        // Typed before the panel could be read: ignore it.
-        if (Date.now() - approvalShownAt.current < APPROVAL_ARM_MS) return;
-      }
-      const picked = enter
-        ? choices[choiceRef.current]?.decision
-        : key.name === "y"
-          ? "yes"
-          : key.name === "a" && approval.canAlways
-            ? "always"
-            : key.name === "n"
-              ? "no"
-              : undefined;
-      if (picked === "yes" || picked === "always") return decide(picked);
-      if (picked === "no") {
-        draftBeforeNote.current = input.current?.value ?? "";
-        setDraft("");
-        setNoting(true);
-        input.current?.focus();
-        return;
-      }
-    }
-    if (approval && !overlay && scrolls) {
-      const step = { up: -1, down: 1, pageup: -panelRows, pagedown: panelRows }[key.name];
-      if (step !== undefined) {
-        key.preventDefault();
-        setDiffOffset((offset) => Math.max(0, Math.min(maxOffset, offset + step)));
-        return;
-      }
-    }
+    if (!overlay && approvals.handleKey(key)) return;
     if (key.name === "tab" && key.shift && !overlay) {
       // yolo isn't in the cycle (only --dangerously-skip-permissions sets it), so Shift+Tab from
       // yolo goes to default and can't come back.
@@ -398,12 +346,8 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       stop().then(bridge.quit, bridge.quit);
     } else if (key.name === "escape") {
       if (overlay) closeOverlay();
-      else if (approval && noting) {
-        // Back to the choices, with the draft the note set aside.
-        setNoting(false);
-        setDraft(draftBeforeNote.current);
-        input.current?.blur();
-      } else if (notice) setNotice(undefined);
+      else if (approval && noting) approvals.leaveNote();
+      else if (notice) setNotice(undefined);
       else stop().catch(() => setStatus("Couldn't stop the reply."));
     } else if (key.ctrl && key.name === "p" && !streaming && !overlay) {
       setOverlay("model");
@@ -417,12 +361,21 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
       <box flexDirection="row" flexShrink={0} paddingLeft={1}>
         <text fg={theme.accent}>orx</text>
         <text fg={theme.muted} wrapMode="none" flexShrink={1}>{`  ${model}`}</text>
+        {/* The path gives way first, from the left, so its last directories stay. */}
+        <text fg={theme.faint} wrapMode="none" flexShrink={0}>
+          {headerPath(
+            bridge.workspace,
+            // What's left beside the other parts: padding, the wordmark, the model, and the chat id
+            // with a gap before it.
+            width - 1 - "orx".length - `  ${model}`.length - `  chat ${chatId.slice(0, 8)}`.length,
+          )}
+        </text>
         <box flexGrow={1} />
         <text fg={theme.faint} flexShrink={0} paddingLeft={1}>
           {`chat ${chatId.slice(0, 8)}`}
         </text>
       </box>
-      <MessageList messages={messages} streaming={streaming} />
+      <MessageList messages={messages} streaming={streaming} mode={mode} />
       {shownNotice ? (
         <box flexDirection="column" flexShrink={0} paddingLeft={1}>
           {shownNotice.lines.map((line, i) => (
@@ -437,11 +390,19 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         <ApprovalPanel
           head={panel.head}
           body={panel.body}
-          offset={Math.min(diffOffset, maxOffset)}
-          rows={panelRows}
-          choices={choiceLabels}
-          choice={choice}
+          offset={panel.offset}
+          rows={panel.rows}
+          choices={panel.choices}
+          choice={approvals.choice}
         />
+      ) : null}
+      {streaming && !approval ? (
+        textFlowing ? (
+          // The row keeps its place while text streams, so the conversation doesn't jump.
+          <box height={1} flexShrink={0} />
+        ) : (
+          <Working label={workingLabel(messages.at(-1))} startedAt={turnStartedAt} />
+        )
       ) : null}
       <box
         border
@@ -477,7 +438,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
           {approval
             ? noting
               ? "Enter deny with this note · Esc back"
-              : `Enter pick · ←→ choose · y / ${approval.canAlways ? "a / " : ""}n · ${scrolls ? "↑↓ scroll · " : ""}Esc stop`
+              : `Enter pick · ←→ choose · y / ${approval.canAlways ? "a / " : ""}n · ${panel && panel.maxOffset > 0 ? "↑↓ scroll · " : ""}Esc stop`
             : (status ??
               fitHints(FOOTER_HINTS, width - 1 - (mode === "default" ? 0 : mode.length + 1)))}
         </text>

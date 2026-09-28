@@ -1,8 +1,9 @@
 import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { Cause, Effect, Exit, Fiber, FileSystem, Option, Schema, Stream } from "effect";
-import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
-import { newChat, sendMessage, type TurnEvent, type TurnToolkit } from "../core/chat";
+import { type AssistantMessage, ChatId, type ChatMessage, type StoredChat } from "~/schemas";
+import { Paths } from "../config";
+import { newChat, STEP_BREAK, sendMessage, type TurnEvent, type TurnToolkit } from "../core/chat";
 import { expandSessionCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
@@ -14,7 +15,7 @@ import { TerminalLogging } from "../logging";
 import { FileState } from "../services/file-state";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
-import { describeCall, summarizeTool, toolStatus } from "./tool-summary";
+import { describeCall, homeRelative, summarizeTool, toolStatus } from "./tool-summary";
 import type { ChatBridge, UiError, UiEvent, UiMessage } from "./types";
 
 /**
@@ -53,24 +54,59 @@ type LaunchServices =
   | Effect.Services<ReturnType<typeof expandSessionCommand>>
   | Permissions
   | FileState
+  | Paths
   | FileSystem.FileSystem;
 
-const toUiMessage = (message: ChatMessage, root: string): UiMessage =>
-  message.role === "user"
-    ? { role: "user", text: message.text, tools: [] }
-    : {
-        role: "assistant",
-        text: message.text,
-        tools: message.tools.map((t) => ({
-          name: t.name,
-          input: JSON.stringify(t.input),
-          ...describeCall(t.name, t.input, root),
-          status: toolStatus(t.output, t.isFailure),
-          ...summarizeTool(t.name, t.input, t.output, t.isFailure),
-        })),
-        usage: usageLine(message),
-        ...(message.interrupted ? { interrupted: true } : {}),
-      };
+/**
+ * Where each saved tool call came in the reply's text, rebuilt from its steps: a step's text,
+ * then its calls (the order models stream them in; a saved step lists its calls first).
+ * Undefined when that can't be exact: a chat saved before steps existed, or a step whose text
+ * came after its calls, which `runTurn` breaks where this can't see. The caller then shows the
+ * calls first.
+ */
+export const callOffsets = (message: AssistantMessage): ReadonlyArray<number> | undefined => {
+  if (message.steps === undefined) return undefined;
+  const offsets: number[] = [];
+  let length = 0;
+  let afterCall = false;
+  for (const step of message.steps) {
+    const parts = step.content.flatMap((entry) =>
+      entry.role === "assistant" ? entry.content : [],
+    );
+    const text = parts.reduce((sum, part) => sum + (part.type === "text" ? part.text : ""), "");
+    if (text !== "") {
+      length += (afterCall && length > 0 ? STEP_BREAK.length : 0) + text.length;
+      afterCall = false;
+    }
+    for (const part of parts) {
+      if (part.type !== "tool-call") continue;
+      offsets.push(length);
+      afterCall = true;
+    }
+  }
+  return offsets.length === message.tools.length && length === message.text.length
+    ? offsets
+    : undefined;
+};
+
+const toUiMessage = (message: ChatMessage, root: string): UiMessage => {
+  if (message.role === "user") return { role: "user", text: message.text, tools: [] };
+  const offsets = callOffsets(message);
+  return {
+    role: "assistant",
+    text: message.text,
+    tools: message.tools.map((t, i) => ({
+      name: t.name,
+      input: JSON.stringify(t.input),
+      ...describeCall(t.name, t.input, root),
+      status: toolStatus(t.output, t.isFailure),
+      ...summarizeTool(t.name, t.input, t.output, t.isFailure, root),
+      ...(offsets?.[i] === undefined ? {} : { at: offsets[i] }),
+    })),
+    usage: usageLine(message),
+    ...(message.interrupted ? { interrupted: true } : {}),
+  };
+};
 
 /**
  * A turn's events for the components. `inputs` holds each tool call's input until its result
@@ -102,6 +138,7 @@ const toUiEvent =
           inputs.get(event.id),
           event.output,
           event.isFailure,
+          root,
         );
         inputs.delete(event.id);
         const status = toolStatus(event.output, event.isFailure);
@@ -157,6 +194,7 @@ export const makeBridge = <R = never, M = never>(
     // The session's approval gate, and what its model has read (a new chat starts unread).
     const permissions = yield* Permissions;
     const fileState = yield* FileState;
+    const { home } = yield* Paths;
     let chat = initial;
     // Commands and skills load once per session; the loader logs its warnings.
     const slash = yield* Effect.cached(
@@ -210,6 +248,7 @@ export const makeBridge = <R = never, M = never>(
       Promise.allSettled([...active].map((it) => it.return?.())).then(() => active.clear());
     const bridge: ChatBridge = {
       chatId: chat.id,
+      workspace: homeRelative(session.root, Option.getOrUndefined(home)),
       initialModel: chat.model,
       history: chat.messages.map((message) => toUiMessage(message, session.root)),
       // The chat keeps what was typed; the model also gets the `@path` files' contents,

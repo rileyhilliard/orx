@@ -79,9 +79,12 @@ const project = () => {
   return { home, work };
 };
 
-/** The model reads math.js, edits it, then says it's done. */
+/** The model says what it'll do, reads math.js, edits it, then says it's done. */
 const readThenEdit = () => [
-  { toolCalls: [{ name: "read", arguments: JSON.stringify({ path: "math.js" }) }] },
+  {
+    text: "Reading it first.",
+    toolCalls: [{ name: "read", arguments: JSON.stringify({ path: "math.js" }) }],
+  },
   {
     toolCalls: [
       {
@@ -192,14 +195,18 @@ describe("TUI closed loop, coding session", () => {
     const reply = Option.getOrThrow(saved).messages.at(-1);
     expect(reply).toMatchObject({
       role: "assistant",
-      text: "Done editing.",
+      text: "Reading it first.\n\nDone editing.",
       tools: [
         { name: "read", isFailure: false },
         { name: "edit", isFailure: false },
       ],
     });
-    // Resumed, the finished reply still says what it changed.
-    expect(await resumed(home, work, Option.getOrThrow(saved))).toContain("Done · changed math.js");
+    // Resumed, the reply reads as it did live: the calls, then the text that followed them,
+    // and what it changed.
+    const again = await resumed(home, work, Option.getOrThrow(saved));
+    expect(again).toContain("Done · changed math.js");
+    expect(again.indexOf("Reading it first.")).toBeLessThan(again.indexOf("→ read math.js"));
+    expect(again.indexOf("→ edit math.js")).toBeLessThan(again.indexOf("Done editing."));
   });
 
   it("leaves the file alone on n, and the model is told the user said no", async () => {

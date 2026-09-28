@@ -146,6 +146,9 @@ export const toPrompt = (
   return Prompt.fromMessages(messages);
 };
 
+/** Between the texts of separate model steps, so "Checking." and "Done." don't run together. */
+export const STEP_BREAK = "\n\n";
+
 interface StepResult {
   readonly parts: ReadonlyArray<Response.AnyPart>;
   readonly finishReason: string;
@@ -153,6 +156,8 @@ interface StepResult {
 
 interface TurnState {
   text: string;
+  /** A tool call came after the last text: the next text starts a new paragraph. */
+  textBreak: boolean;
   tools: ToolStep[];
   /** Completed model steps, as the next request replays them. */
   steps: Prompt.Prompt[];
@@ -422,8 +427,16 @@ const step = <R>(options: StepOptions<R>) => {
 const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
   Ref.modify(state, (s): [ReadonlyArray<TurnEvent>, TurnState] => {
     switch (part.type) {
-      case "text-delta":
-        return [[{ type: "text", delta: part.delta }], { ...s, text: s.text + part.delta }];
+      case "text-delta": {
+        const delta =
+          s.textBreak && s.text !== "" && part.delta !== ""
+            ? `${STEP_BREAK}${part.delta}`
+            : part.delta;
+        return [
+          [{ type: "text", delta }],
+          { ...s, text: s.text + delta, textBreak: s.textBreak && part.delta === "" },
+        ];
+      }
       case "response-metadata":
         return [[], { ...s, model: part.modelId ?? s.model }];
       case "tool-call": {
@@ -433,7 +446,7 @@ const toEvents = (part: Response.AnyPart, state: Ref.Ref<TurnState>) =>
         const count = s.lastCall?.key === key ? s.lastCall.count + 1 : 1;
         return [
           [{ type: "tool-call", id: part.id, name: part.name, input: part.params }],
-          { ...s, pendingCalls, lastCall: { key, name: part.name, count } },
+          { ...s, pendingCalls, lastCall: { key, name: part.name, count }, textBreak: true },
         ];
       }
       case "tool-result": {
@@ -583,6 +596,7 @@ export const runTurn = <R = never, E = never>(options: TurnOptions<R, E>) =>
       );
       const state = yield* Ref.make<TurnState>({
         text: "",
+        textBreak: false,
         tools: [],
         steps: [],
         inputTokens: 0,

@@ -84,7 +84,7 @@ Run these from the repo root in your own terminal.
 1. A hook denies a command (30 seconds): `echo '{"tool_name":"Bash","tool_input":{"command":"npx vitest"}}' | bun .claude/hooks/guard-commands.ts` prints a deny with the right command. `bun test ./tests/hooks` runs every hook test.
 2. The boundary plugin flags a platform import (30 seconds): add `import "bun:ffi";` to `src/core/models.ts`, run `bun run lint`, and remove it.
 3. Drive the CLI with no key (1 minute): `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask --bogus --json; echo $?` (stdout empty, exit 2), and `jq -c 'select(.msg=="command")' logs/orx.jsonl`.
-4. See the TUI as an agent does (30 seconds): `bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`.
+4. See the TUI as an agent does (30 seconds): `bun run tui:capture -- --keys "hi<enter>" --wait-for "in / "` (the usage line).
 5. The `/feature` workflow (1 minute to explain): in Claude Code, `/feature <what to build>` writes an RFC in `docs/rfcs/`, has it challenged, executes it in a worktree with one subagent per work group, runs the gate and two code reviews, and opens a PR.
 
 ## Working in a worktree

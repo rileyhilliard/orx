@@ -15,7 +15,7 @@ Read `DESIGN.md` first: it has the color roles, the layout, the keys, and the st
 
 The deletion test. Delete the element. If nothing is lost, it was decoration. Applies to borders, titles, labels, separators, icons, badges, and hint text. Run it on every one before shipping.
 
-The squint test. Look at a capture (`bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`) from across the room, or with the colors stripped. If you can't tell that the conversation is the main thing, the screen has no hierarchy. Hierarchy on a grid comes from brightness (`text` over `muted` over `faint`), position, and blank rows, not from frames and hue.
+The squint test. Look at a capture (`bun run tui:capture -- --keys "hi<enter>" --wait-for "in / "` (the usage line)) from across the room, or with the colors stripped. If you can't tell that the conversation is the main thing, the screen has no hierarchy. Hierarchy on a grid comes from brightness (`text` over `muted` over `faint`), position, and blank rows, not from frames and hue.
 
 ## Frames
 
@@ -63,7 +63,7 @@ Every grep hit needs the deletion test, not a blanket rewrite. Run these from th
 | --- | --- | --- |
 | Emoji as status or icon | `rg -nP "[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]" src/tui` | Words, or a plain glyph that tells two things apart |
 | Checkmarks, crosses, bullets on every line | `rg -n "[✓✔✗✘•●◆★]" src/tui` | Only where they distinguish states in the same list |
-| Spinner or animated dots | `rg -n "spinner\|setInterval\|useTimeline\|[⠋⠙⠹⠸]" src/tui` | The streaming text is the progress; `…` until the first token |
+| Spinner or animated dots | `rg -n "spinner\|setInterval\|useTimeline\|[⠋⠙⠹⠸]" src/tui` | One working row above the composer while a turn runs (`working.tsx`, DESIGN.md), because a model step or a command can be silent for a long time; nowhere else |
 | ASCII-art banner or `ascii-font` | `rg -n "ascii-font\|figlet" src/tui` | The wordmark in the header row |
 | Sparkle or robot framing for the model | `rg -n "✨\|🤖\|AI assistant" src/tui` | The model id |
 

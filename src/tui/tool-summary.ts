@@ -62,21 +62,17 @@ const countLines = (text: string, pattern: RegExp) =>
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** `3 lines`: a file's length, a trailing newline not starting another line. */
+const lineCount = (content: string) =>
+  plural(content === "" ? 0 : content.replace(/\n$/, "").split("\n").length, "line");
+
 const AGENT_TOOLS = new Set(["read", "glob", "grep", "write", "edit", "bash"]);
 
-/** `edit src/x.ts`, `bash bun test`: an agent tool call by what it touches. */
-const headOf = (name: string, input: unknown): string | undefined => {
-  if (!AGENT_TOOLS.has(name)) return undefined;
-  const target =
-    name === "bash"
-      ? field(input, "command")
-      : name === "glob" || name === "grep"
-        ? field(input, "pattern")
-        : field(input, "path");
-  if (target === undefined) return undefined;
-  const first = firstLine(target);
-  const shown = first.length > 80 || first !== target ? `${first.slice(0, 80)}…` : target;
-  return `${name} ${shown}`;
+/** `path` with the home directory as `~` (`~/project`, or `~` for home itself), for display. */
+export const homeRelative = (path: string, home: string | undefined) => {
+  if (home === undefined || home === "") return path;
+  const dir = home.replace(/\/$/, "");
+  return path === dir ? "~" : path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
 };
 
 /** `path` as the workspace sees it: `./a.ts` and `<root>/a.ts` are both `a.ts`. */
@@ -86,6 +82,24 @@ const relativePath = (path: string, root: string | undefined) => {
       ? path.slice(root.replace(/\/$/, "").length + 1)
       : path;
   return inRoot.replace(/^(\.\/)+/, "");
+};
+
+/** `edit src/x.ts`, `bash bun test`: an agent tool call by what it touches. */
+const headOf = (name: string, input: unknown, root?: string): string | undefined => {
+  if (!AGENT_TOOLS.has(name)) return undefined;
+  const path = field(input, "path");
+  const target =
+    name === "bash"
+      ? field(input, "command")
+      : name === "glob" || name === "grep"
+        ? field(input, "pattern")
+        : path === undefined
+          ? undefined
+          : relativePath(path, root);
+  if (target === undefined) return undefined;
+  const first = firstLine(target);
+  const shown = first.length > 80 || first !== target ? `${first.slice(0, 80)}…` : target;
+  return `${name} ${shown}`;
 };
 
 /**
@@ -98,7 +112,7 @@ export const describeCall = (
   input: unknown,
   root?: string,
 ): { readonly target?: string; readonly file?: string } => {
-  const target = headOf(name, input);
+  const target = headOf(name, input, root);
   if (target === undefined) return {};
   const path = name === "edit" || name === "write" ? field(input, "path") : undefined;
   return path === undefined ? { target } : { target, file: relativePath(path, root) };
@@ -136,18 +150,26 @@ export const turnSummary = (
   return ["Done", ...changed, ...ran].join(" · ");
 };
 
+/** A unified diff without its `---`/`+++` file header, which the tool line already names. */
+export const withoutFileHeader = (diff: string) => diff.replace(/^--- .*\n\+\+\+ .*(\n|$)/, "");
+
+/** `+2 −1`: the lines a diff (hunks only, see withoutFileHeader) adds and removes. */
+const diffSize = (diff: string) => `+${countLines(diff, /^\+/)} −${countLines(diff, /^-/)}`;
+
 /**
  * The summary line for a finished call of one of the agent's tools, and the diff an edit
- * applied (for a write that created a file, its content); undefined for other tools, which keep their `name(input)` line. A failure
- * shows its message's first line; a denial says so, with the reason's first line.
+ * applied (for a write that created a file, its content); undefined for other tools, which keep
+ * their `name(input)` line. A failure shows its message's first line; a denial says so, with the
+ * reason's first line.
  */
 export const summarizeTool = (
   name: string,
   input: unknown,
   output: unknown,
   isFailure: boolean,
+  root?: string,
 ): { readonly summary: string; readonly diff?: string } | undefined => {
-  const head = headOf(name, input);
+  const head = headOf(name, input, root);
   if (head === undefined) return undefined;
   if (isFailure) {
     const reason = denialReason(output);
@@ -173,16 +195,25 @@ export const summarizeTool = (
     }
     case "write": {
       // A new file's diff is its content; an overwrite's result is a summary line, then its diff.
-      const [summary = head, ...rest] = text.split("\n");
-      const diff = summary.startsWith("Created")
-        ? createdDiff(field(input, "content") ?? "")
-        : rest.length > 0
-          ? rest.join("\n")
-          : undefined;
-      return diff === undefined ? { summary } : { summary, diff };
+      const [first = "", ...rest] = text.split("\n");
+      if (first.startsWith("Created")) {
+        const content = field(input, "content") ?? "";
+        const diff = createdDiff(content);
+        const summary = `${head} · new file, ${lineCount(content)}`;
+        return diff === undefined ? { summary } : { summary, diff };
+      }
+      const diff = withoutFileHeader(rest.join("\n"));
+      if (diff !== "") return { summary: `${head} · ${diffSize(diff)}`, diff };
+      // Too large to diff: say how long the file is now.
+      const content = field(input, "content");
+      return content === undefined
+        ? { summary: head }
+        : { summary: `${head} · ${lineCount(content)}` };
     }
-    case "edit":
-      return { summary: head, diff: text };
+    case "edit": {
+      const diff = withoutFileHeader(text);
+      return { summary: `${head} · ${diffSize(diff)}`, diff };
+    }
     default:
       return undefined;
   }

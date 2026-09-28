@@ -70,9 +70,10 @@ src/
   runtime.ts        AppLayer (every service; platform from outside), LoggerLayer
   tui/              Bun-only: launch.tsx (renderer + makeBridge: the only TUI file importing effect),
                     app.tsx, message-list, picker.tsx (shared list overlay) + model-picker,
-                    approval-panel, mentions.ts (the `@` picker's matching), tool-summary.ts (one
-                    line per tool call), commands.ts (slash parsing, built-ins, keys), types.ts (the
-                    bridge), theme.ts, printable.ts (strips control characters from model text)
+                    approval-panel + use-approval.ts (its state and keys), mentions.ts (the `@`
+                    picker's matching), tool-summary.ts (one line per tool call), commands.ts
+                    (slash parsing, built-ins, keys), types.ts (the bridge), theme.ts, printable.ts
+                    (strips control characters from model text)
 scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-server.ts, tui-capture.ts,
                     record-openrouter.ts, prepare.ts, demo.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
                     recording.ts)
@@ -128,7 +129,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 ## Debugging
 
 - If a fix hasn't worked after two attempts with no new diagnostic step in between, stop, write down what you learned, list two or three other root-cause hypotheses, and ask which to pursue.
-- Drive the real CLI: `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask hi --json | jq`, `bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`. The stub needs no key and costs nothing.
+- Drive the real CLI: `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask hi --json | jq`, `bun run tui:capture -- --keys "hi<enter>" --wait-for "in / "` (the usage line). The stub needs no key and costs nothing.
 - Read the logs before guessing. `logs/orx.jsonl` has one JSON object per line: `time`, `level`, `msg`, annotations as top-level keys, `error` for defects. Every run logs one `command` line (`command`, flag names, `exitCode`, `durationMs`, `runId`, `errorTag`, and `errorDetail` with OpenRouter's or GitHub's status and reason), including a run a signal interrupted; every model turn one `llm call` line (requested and served model, tokens including cache read/write and reasoning, cost, finish reason, `aborted` when the user stopped it, `errorTag`/`errorDetail` when it failed, `errorTag: "Defect"` for a bug, time to first token) with the same `runId`. `logs/orx.log` is stderr as plain text.
 - Queries: `jq -c 'select(.level == "error" or .level == "warn")' logs/orx.jsonl`, `jq -c 'select(.msg == "command" and .exitCode != 0)' logs/orx.jsonl`.
 - `bun run orx -- doctor --json` prints the version, paths, whether the key is set, and a config error if there is one. `--log-level debug` shows debug lines for one run.

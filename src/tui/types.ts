@@ -18,6 +18,8 @@ export interface UiToolCall {
   readonly summary?: string;
   /** The diff an edit or write applied. */
   readonly diff?: string;
+  /** Where in the reply's text the call came, so the reply reads in order. */
+  readonly at?: number;
 }
 
 export type UiToolStatus = "running" | "ok" | "error" | "denied";
@@ -80,6 +82,8 @@ export interface UiModel {
 
 export interface ChatBridge {
   readonly chatId: string;
+  /** The directory the agent works in, for the header (`~/project`). */
+  readonly workspace: string;
   readonly initialModel: string;
   readonly history: ReadonlyArray<UiMessage>;
   /**

@@ -1,5 +1,5 @@
 import { testRender } from "@opentui/react/test-utils";
-import { APPROVAL_ARM_MS } from "~/tui/app";
+import { APPROVAL_ARM_MS } from "~/tui/use-approval";
 
 /**
  * testRender with React's act checks off. The app's state changes arrive from streams and
