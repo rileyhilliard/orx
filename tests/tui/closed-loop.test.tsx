@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
@@ -11,6 +11,7 @@ import type { ChatId } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { App } from "~/tui/app";
 import { makeBridge } from "~/tui/launch";
+import type { UiExpansion } from "~/tui/types";
 import { type StubOpenRouter, startStubOpenRouter } from "../helpers/stub-openrouter";
 import { type RenderSetup, render, waitForScreen } from "./render";
 
@@ -120,6 +121,46 @@ describe("TUI closed loop", () => {
       const list = await Effect.runPromise(program.pipe(Effect.provide(layer(root)), quiet));
       expect(list.available).toBe(true);
       expect(list.models.map((m) => m.id)).toEqual(["openai/gpt-test", "acme/cheap-model"]);
+    } finally {
+      stub.models = models;
+    }
+  });
+
+  it("refuses a custom command whose model: can't call tools, or doesn't exist", async () => {
+    const models = stub.models;
+    stub.models = [
+      { id: "openai/gpt-test", name: "OpenAI: GPT Test" },
+      { id: "acme/no-tools", name: "Acme: No Tools", tools: false },
+      { id: "acme/cheap-model", name: "Acme: Cheap Model" },
+    ];
+    const root = mkdtempSync(join(tmpdir(), "orx-tui-"));
+    const commands = join(root, "config", "orx", "commands");
+    mkdirSync(commands, { recursive: true });
+    const command = (name: string, model: string) =>
+      writeFileSync(join(commands, `${name}.md`), `---\nmodel: ${model}\n---\nReview $ARGUMENTS`);
+    command("plain", "acme/no-tools");
+    command("typo", "acme/nope");
+    command("cheap", "acme/cheap-model");
+    const program = Effect.gen(function* () {
+      const { bridge } = yield* makeBridge(newChat(chatId, "openai/gpt-test"), () => {});
+      return yield* Effect.promise(() =>
+        Promise.all([
+          bridge.expandCommand("plain", "a.ts"),
+          bridge.expandCommand("typo", "a.ts"),
+          bridge.expandCommand("cheap", "a.ts"),
+        ]),
+      );
+    });
+    try {
+      const results = await Effect.runPromise(program.pipe(Effect.provide(layer(root)), quiet));
+      const [plain, typo, cheap] = results;
+      const errorOf = (expansion: UiExpansion | undefined) =>
+        expansion && "error" in expansion ? expansion.error : "";
+      expect(errorOf(plain)).toContain("/plain: acme/no-tools doesn't support tool calling");
+      expect(errorOf(plain)).toMatch(/Change the model: line in \S*plain\.md\.$/);
+      expect(errorOf(typo)).toContain("/typo: Unknown model: acme/nope");
+      expect(errorOf(typo)).toMatch(/Change the model: line in \S*typo\.md\.$/);
+      expect(cheap).toEqual({ text: "Review a.ts", model: "acme/cheap-model" });
     } finally {
       stub.models = models;
     }

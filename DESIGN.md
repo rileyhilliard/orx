@@ -12,13 +12,13 @@ The terminal's own background shows through: orx never paints a full-screen fill
 | --- | --- | --- |
 | Text | `theme.text` | Assistant replies |
 | User | `theme.user` | The user's messages, prefixed `> ` |
-| Muted | `theme.muted` | The model id in the header, placeholders, the empty-state line |
-| Faint | `theme.faint` | Usage lines, key hints, the chat id: present but out of the way |
+| Muted | `theme.muted` | The model id in the header, placeholders, the empty-state line, a denied tool call |
+| Faint | `theme.faint` | Usage lines, key hints, the chat id, an approval's scroll position: present but out of the way |
 | Accent | `theme.accent` | The `orx` wordmark and the picker's border. One job per screen |
-| Tool | `theme.tool` | Tool call lines (`→ currentTime({...})`) |
+| Tool | `theme.tool` | Tool call lines (`→ currentTime({...})`) and the approval panel's summary |
 | Error | `theme.error` | The error line under a reply, and nothing else |
-| Border | `theme.border` | The composer frame (`theme.faint` while a reply streams), and the picker's selected row |
-| Selected | `theme.selectedBg` | The picker's background, so it reads as a layer over the chat |
+| Border | `theme.border` | The composer frame (`theme.faint` while a reply streams), and a list's highlighted row |
+| Selected | `theme.selectedBg` | A list's background, so it reads as a layer over the chat |
 
 ## Layout
 
@@ -26,9 +26,11 @@ Top to bottom: a one-row header (`orx`, the model, the short chat id right-align
 
 Messages are separated by one blank row. A reply is its tool lines, then its text, then an error line if it failed, then its usage line (`model · 278 in / 30 out · $0.000057`). No boxes around messages, no avatars, no timestamps.
 
-The model picker and the command list share one overlay (`src/tui/picker.tsx`), inset from the edges, with a search input and a list (the command list shows each description under its name). It's the only bordered panel besides the composer.
+The model picker, the command list, and the `@` file list share one overlay (`src/tui/picker.tsx`): a search input and one row per item, sized to its content and anchored just above the composer, at most 10 rows (fewer on a short terminal). A longer list scrolls with the highlight and shows `3 of 48` in its bottom border. The command list puts each description beside its name; a label too long for the row is cut with `…` at the end, or at the start for a path so its file name stays. An empty result says "No matches". It's the only bordered panel besides the composer.
 
-The `@` file list uses the same overlay. A tool call waiting for approval shows unbordered above the composer: the command (`Run  bun test`) or the change (`Edit src/x.ts`) in `tool`, then its diff (added lines `text`, the rest `muted`, cut at 20 lines with a `faint` count). While it's open the composer is unfocused and the footer shows `y allow · a always · n deny · Esc stop`; after `n` the composer takes an optional note. A finished agent tool call is one `tool` line saying what it did (`→ read src/x.ts · 120 lines`, `→ bash bun test · exit 1`), an edit's diff under it the same way.
+A tool call waiting for approval shows unbordered above the composer: the command (`Run  bun test`) or the change (`Edit src/x.ts`) in `tool`, then the rest of a multi-line command and the whole diff (added lines `text`, the rest `muted`), wrapped rather than clipped, since the user is approving every line. When it doesn't fit, the summary stays and the rest scrolls, with a `faint` `lines 1–12 of 84` under it and `↑↓ scroll` in the footer. While it's open the composer is unfocused, any open list closes, and the footer shows `y allow · a always · n deny · Esc stop`; y / a / n do nothing until the panel has been on screen for 300 ms, so keys typed ahead for the composer can't approve it. After `n` the composer takes an optional note (`/` and `@` don't open lists there). Summaries, diffs, tool lines, and replies are drawn without control characters (`printable.ts`): the model wrote them.
+
+A finished agent tool call is one `tool` line saying what it did (`→ read src/x.ts · 120 lines`, `→ bash bun test · exit 1`), an edit's diff (or a new file's content) under it cut at 20 lines with a `faint` count. A failure shows its message's first line in `error`; a call the user or the mode denied is `muted` (`→ edit src/x.ts · denied · The user said no.`), since it isn't an error.
 
 Slash command output (`/help`, an unknown command or mode) is a few unbordered lines between the messages and the composer, `muted` (or `error`), until the next message or Esc. A permission mode other than `default` shows right-aligned in the footer, `muted`.
 
@@ -36,17 +38,21 @@ Slash command output (`/help`, an unknown command or mode) is a few unbordered l
 
 | Key | Does |
 | --- | --- |
-| Enter | Send the message, or run a `/command` |
+| Enter | Send the message, or run a `/command`; in a list, pick the highlighted item |
 | / | In an empty composer, open the command list (built-ins, custom commands, skills) |
 | @ | At the start of a word, open the file list; picking inserts `@path`, and on send the file is attached for the model |
+| Up / Down | Move the highlight in a list (typing a filter puts it back on the first match), or scroll an approval's diff |
+| PgUp / PgDn | Scroll an approval's diff a page at a time |
+| Tab | In a list, pick the highlighted item |
+| Backspace | In a list's empty filter, close it and delete the `/` or `@` that opened it |
 | y / a / n | With an approval open: allow, always allow (when offered), deny with an optional note |
-| Shift+Tab | Cycle the permission mode: default, acceptEdits, plan |
-| Esc | Stop the streaming reply (it's saved, marked interrupted), close a list, or dismiss the /help or error lines |
+| Shift+Tab | Cycle the permission mode: default, acceptEdits, plan. yolo (`--dangerously-skip-permissions`) isn't in the cycle: Shift+Tab from yolo goes to default, and the keyboard can't go back, so a stray key can only take permissions away |
+| Esc | The innermost thing first: close a list, leave a deny note (back to y / a / n), dismiss the /help or error lines, else stop the streaming reply (it's saved, marked interrupted; with an approval open, that denies it) |
 | Ctrl+P | Open the model picker (not while a reply streams) |
 | Ctrl+E | Export the chat as Markdown into the current directory |
 | Ctrl+C | Quit, stopping a reply first so it's saved; exit code 0 |
 
-The footer always lists these. A new key goes in the footer, this table, and `app.tsx`'s docblock in the same change. Don't bind keys terminals commonly swallow (Ctrl+S, Ctrl+Q, Ctrl+Z). Ctrl+E takes over the input's end-of-line shortcut; the input is one line, so End does the same job.
+The footer shows the keys that fit in 80 columns next to the mode (`@ files · / commands · Shift+Tab mode · Ctrl+P model · Ctrl+C quit`, 66 columns, leaving room for `acceptEdits`); `/help` lists every key from `KEYS` in `src/tui/commands.ts`. A new key goes in `KEYS`, this table, and `app.tsx`'s docblock in the same change, and in the footer only if it still fits. Don't bind keys terminals commonly swallow (Ctrl+S, Ctrl+Q, Ctrl+Z). Ctrl+E takes over the input's end-of-line shortcut; the input is one line, so End does the same job.
 
 ## States
 
@@ -54,6 +60,7 @@ The footer always lists these. A new key goes in the footer, this table, and `ap
 - Streaming: the reply shows `…` until the first text arrives; the composer's placeholder says "Replying… Esc stops" and its border goes faint.
 - Error: the partial reply stays, with the error line under it. A retryable error says "(send again to retry)"; a non-retryable one (a rejected key) says only what happened.
 - Models list unavailable: the picker says so in the error color, and Esc closes it; chat keeps the current model.
+- A custom command whose `model:` is unknown or can't call tools: the error line says which and where to change it, and nothing is sent.
 
 ## Do and don't
 

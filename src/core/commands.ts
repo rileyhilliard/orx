@@ -1,6 +1,8 @@
 import { Effect, FileSystem, Path, Schema, SchemaIssue } from "effect";
 import { Paths } from "../config";
+import { UnknownModel } from "../errors";
 import { CommandFrontmatter } from "../schemas";
+import { resolveToolModel } from "./models";
 
 /**
  * Custom slash commands: saved prompts in `<root>/.orx/commands/**.md` (the workspace) and
@@ -207,3 +209,26 @@ export const expandCommand = (
   text: withArguments(command.body, args),
   ...(command.model !== undefined ? { model: command.model } : {}),
 });
+
+/**
+ * `expandCommand` for the coding session, whose turns need tool calling: a command's `model:`
+ * is checked the way the session's own model is (`resolveToolModel`), so an unknown model, or
+ * one without tool calling, fails with UnknownModel naming the command's file.
+ */
+export const expandSessionCommand = (command: CustomCommand, args: string) =>
+  Effect.gen(function* () {
+    const expanded = expandCommand(command, args);
+    if (command.model === undefined) return expanded;
+    const fix = `Change the model: line in ${command.file}.`;
+    const model = yield* resolveToolModel(command.model, fix).pipe(
+      // An unknown id fails in resolveModel, whose message doesn't know about the file.
+      Effect.catchTag("UnknownModel", (error) =>
+        Effect.fail(
+          error.message.endsWith(fix)
+            ? error
+            : new UnknownModel({ message: `${error.message} ${fix}`, model: error.model }),
+        ),
+      ),
+    );
+    return { ...expanded, model };
+  });

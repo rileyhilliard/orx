@@ -10,7 +10,7 @@ import {
   type TurnEvent,
   type TurnToolkit,
 } from "../core/chat";
-import { expandCommand } from "../core/commands";
+import { expandSessionCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
@@ -20,7 +20,7 @@ import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
-import { summarizeTool } from "./tool-summary";
+import { summarizeTool, toolStatus } from "./tool-summary";
 import type { ChatBridge, UiError, UiEvent, UiMessage } from "./types";
 
 /**
@@ -54,6 +54,7 @@ type LaunchServices =
   | Effect.Services<typeof listModels>
   | Effect.Services<ReturnType<typeof loadChat>>
   | Effect.Services<ReturnType<typeof loadSlash>>
+  | Effect.Services<ReturnType<typeof expandSessionCommand>>
   | FileSystem.FileSystem;
 
 const toUiMessage = (message: ChatMessage): UiMessage =>
@@ -65,53 +66,58 @@ const toUiMessage = (message: ChatMessage): UiMessage =>
         tools: message.tools.map((t) => ({
           name: t.name,
           input: JSON.stringify(t.input),
-          status: t.isFailure ? "error" : "ok",
+          status: toolStatus(t.output, t.isFailure),
+          ...summarizeTool(t.name, t.input, t.output, t.isFailure),
         })),
         usage: usageLine(message),
       };
 
-/** Each tool call's input until its result arrives, for the result's summary line. */
-const inputs = new Map<string, unknown>();
-
-const toUiEvent = (event: TurnEvent): ReadonlyArray<UiEvent> => {
-  if (event.type === "tool-call") inputs.set(event.id, event.input);
-  switch (event.type) {
-    case "text":
-      return [{ type: "text", delta: event.delta }];
-    case "tool-call":
-      return [
-        {
-          type: "tool",
-          call: {
-            id: event.id,
-            name: event.name,
-            input: JSON.stringify(event.input),
-            status: "running",
+/**
+ * A turn's events for the components. `inputs` holds each tool call's input until its result
+ * arrives, for the result's summary line; the caller gives each turn a fresh map.
+ */
+const toUiEvent =
+  (inputs: Map<string, unknown>) =>
+  (event: TurnEvent): ReadonlyArray<UiEvent> => {
+    switch (event.type) {
+      case "text":
+        return [{ type: "text", delta: event.delta }];
+      case "tool-call":
+        inputs.set(event.id, event.input);
+        return [
+          {
+            type: "tool",
+            call: {
+              id: event.id,
+              name: event.name,
+              input: JSON.stringify(event.input),
+              status: "running",
+            },
           },
-        },
-      ];
-    case "tool-result": {
-      const summary = summarizeTool(
-        event.name,
-        inputs.get(event.id),
-        event.output,
-        event.isFailure,
-      );
-      inputs.delete(event.id);
-      return [{ type: "tool-result", id: event.id, isFailure: event.isFailure, ...summary }];
+        ];
+      case "tool-result": {
+        const summary = summarizeTool(
+          event.name,
+          inputs.get(event.id),
+          event.output,
+          event.isFailure,
+        );
+        inputs.delete(event.id);
+        const status = toolStatus(event.output, event.isFailure);
+        return [{ type: "tool-result", id: event.id, status, ...summary }];
+      }
+      case "note":
+        return [{ type: "note", message: event.message }];
+      case "approval-request": {
+        const { type: _, ...request } = event;
+        return [{ type: "approval", request }];
+      }
+      case "approval-cancelled":
+        return [{ type: "approval-cancelled", id: event.id }];
+      case "finish":
+        return [{ type: "done", usage: usageLine(event.reply) }];
     }
-    case "note":
-      return [{ type: "note", message: event.message }];
-    case "approval-request": {
-      const { type: _, ...request } = event;
-      return [{ type: "approval", request }];
-    }
-    case "approval-cancelled":
-      return [{ type: "approval-cancelled", id: event.id }];
-    case "finish":
-      return [{ type: "done", usage: usageLine(event.reply) }];
-  }
-};
+  };
 
 const toUiError = (cause: Cause.Cause<unknown>): UiError => {
   const failure = cause.reasons.find(Cause.isFailReason)?.error;
@@ -211,8 +217,10 @@ export const makeBridge = <R = never, M = never>(
       history: chat.messages.map(toUiMessage),
       // The chat keeps what was typed; the model also gets the `@path` files' contents,
       // saved beside the text as the message's attachments.
-      send: (text, model) =>
-        Stream.unwrap(
+      send: (text, model) => {
+        // This turn's tool inputs, so no call outlives its turn (an interrupted one included).
+        const inputs = new Map<string, unknown>();
+        return Stream.unwrap(
           Effect.map(attach(text), (attachments) =>
             sendMessage<ChatToolHandlers | R>(chat, text, model, {
               ...turnOptions,
@@ -220,7 +228,7 @@ export const makeBridge = <R = never, M = never>(
             }),
           ),
         ).pipe(
-          Stream.flatMap((event) => Stream.fromIterable(toUiEvent(event))),
+          Stream.flatMap((event) => Stream.fromIterable(toUiEvent(inputs)(event))),
           Stream.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Stream.empty;
             const failed: UiEvent = { type: "error", error: toUiError(cause) };
@@ -238,7 +246,8 @@ export const makeBridge = <R = never, M = never>(
           ),
           Stream.toAsyncIterableWith(context),
           tracked,
-        ),
+        );
+      },
       listModels: () =>
         run(
           listModels.pipe(
@@ -286,10 +295,18 @@ export const makeBridge = <R = never, M = never>(
         ),
       expandCommand: (name, args) =>
         run(
-          Effect.map(slash, (s) => {
-            const command = s.commands.find((c) => c.name === name);
-            if (command) return expandCommand(command, args);
-            const skill = s.skills.find((k) => k.name === name);
+          Effect.gen(function* () {
+            const { commands, skills } = yield* slash;
+            const command = commands.find((c) => c.name === name);
+            if (command) {
+              // A command's own model must be able to call tools, like the session's.
+              return yield* expandSessionCommand(command, args).pipe(
+                Effect.catchTag("UnknownModel", (error) =>
+                  Effect.succeed({ error: `/${name}: ${error.message}` }),
+                ),
+              );
+            }
+            const skill = skills.find((k) => k.name === name);
             return skill ? { text: expandSkill(skill, args) } : undefined;
           }),
         ),
@@ -299,8 +316,6 @@ export const makeBridge = <R = never, M = never>(
         files = next;
         return last ?? next;
       },
-      // Attaching happens in `send`, so the saved message keeps only the typed text.
-      attachFiles: (text) => Promise.resolve(text),
       answer: (id, decision) =>
         Option.isSome(permissions)
           ? run(permissions.value.answer(id, decision))

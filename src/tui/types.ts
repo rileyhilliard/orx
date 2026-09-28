@@ -8,13 +8,15 @@ export interface UiToolCall {
   readonly id?: string;
   readonly name: string;
   readonly input: string;
-  /** Running until its result arrives; a saved call is ok or error. */
-  readonly status?: "running" | "ok" | "error";
+  /** Running until its result arrives; then ok, error, or denied (by the user or the mode). */
+  readonly status?: UiToolStatus;
   /** Once finished, one line saying what it did (`read src/x.ts · 120 lines`). */
   readonly summary?: string;
-  /** The diff an edit applied. */
+  /** The diff an edit or write applied. */
   readonly diff?: string;
 }
+
+export type UiToolStatus = "running" | "ok" | "error" | "denied";
 
 export interface UiMessage {
   readonly role: "user" | "assistant";
@@ -38,7 +40,7 @@ export type UiEvent =
   | {
       readonly type: "tool-result";
       readonly id: string;
-      readonly isFailure: boolean;
+      readonly status: Exclude<UiToolStatus, "running">;
       readonly summary?: string;
       readonly diff?: string;
     }
@@ -74,7 +76,10 @@ export interface ChatBridge {
   readonly chatId: string;
   readonly initialModel: string;
   readonly history: ReadonlyArray<UiMessage>;
-  /** One turn. Ending the iteration early (`return()`) stops the reply and saves it as interrupted. */
+  /**
+   * One turn for `text` as typed; the bridge attaches the files its `@path` mentions for the
+   * model. Ending the iteration early (`return()`) stops the reply and saves it as interrupted.
+   */
   readonly send: (text: string, model: string) => AsyncIterable<UiEvent>;
   readonly listModels: () => Promise<{
     readonly models: ReadonlyArray<UiModel>;
@@ -92,7 +97,8 @@ export interface ChatBridge {
   readonly listSkills: () => Promise<ReadonlyArray<UiSlashItem>>;
   /**
    * What `/name args` sends for a custom command (it wins a clash) or a skill, or undefined
-   * when no command or skill has that name.
+   * when no command or skill has that name. A command whose `model:` is unknown or can't call
+   * tools resolves to `{ error }` instead, the line to show.
    */
   readonly expandCommand: (name: string, args: string) => Promise<UiExpansion | undefined>;
   /**
@@ -100,12 +106,6 @@ export interface ChatBridge {
    * first call; later calls answer from the last walk and refresh it for the next one.
    */
   readonly listFiles: () => Promise<ReadonlyArray<string>>;
-  /**
-   * The message as the model should get it: `text` plus a `<file>` block (numbered lines) for
-   * each `@path` naming a workspace file, and a listing for each `@dir/`. Never rejects; with
-   * nothing to attach it resolves to `text`.
-   */
-  readonly attachFiles: (text: string) => Promise<string>;
   /** Answers an approval request; an unknown id (already answered or cancelled) is ignored. */
   readonly answer: (id: string, decision: UiDecision) => Promise<void>;
   readonly setMode: (mode: UiMode) => Promise<void>;
@@ -123,8 +123,10 @@ export interface UiSlashItem {
   readonly description: string;
 }
 
-export interface UiExpansion {
-  readonly text: string;
-  /** The model for this turn only, when a command's frontmatter names one. */
-  readonly model?: string;
-}
+export type UiExpansion =
+  | {
+      readonly text: string;
+      /** The model for this turn only, when a command's frontmatter names one. */
+      readonly model?: string;
+    }
+  | { readonly error: string };

@@ -33,14 +33,22 @@ export type Builtin = (typeof BUILTINS)[number]["name"];
 
 export const isBuiltin = (name: string): name is Builtin => BUILTINS.some((b) => b.name === name);
 
-/** The keys, for /help. Keep in step with the footer and DESIGN.md. */
+/**
+ * Every key, for /help (two columns, so keep each description short). The footer shows only
+ * the ones that fit in 80 columns; a new key goes here, in DESIGN.md's table, and in app.tsx's
+ * docblock.
+ */
 export const KEYS = [
-  ["Enter", "send"],
+  ["Enter", "send, or run a /command"],
   ["@", "attach a file"],
   ["/", "commands and skills"],
-  ["Esc", "stop a reply, or close a list"],
+  ["Up / Down", "move in a list or a diff"],
+  ["PgUp/PgDn", "page through a diff"],
+  ["Tab", "pick in a list"],
+  ["Backspace", "on an empty filter, close"],
+  ["Esc", "close, or stop a reply"],
   ["Shift+Tab", "cycle the permission mode"],
-  ["y / a / n", "allow, always allow, or deny a tool call"],
+  ["y / a / n", "allow, always, deny"],
   ["Ctrl+P", "pick a model"],
   ["Ctrl+E", "export as Markdown"],
   ["Ctrl+C", "quit"],

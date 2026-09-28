@@ -9,18 +9,20 @@ const toList = (list: {
   items: list.models.map((m) => ({ value: m.id, label: m.id, description: m.name })),
 });
 
-/** The model list in the shared picker. Type to filter, arrows to move, Enter to pick, Esc to close. */
+/** The model list in the shared picker. Type to filter, Up/Down to move, Enter to pick, Esc to close. */
 export const ModelPicker = ({
   load,
   current,
   onPick,
+  onBack,
 }: {
   readonly load: () => Promise<{
     readonly models: ReadonlyArray<UiModel>;
     readonly available: boolean;
   }>;
   readonly current: string;
-  readonly onPick: (id: string | undefined) => void;
+  readonly onPick: (id: string) => void;
+  readonly onBack: () => void;
 }) => {
   return (
     <Picker
@@ -31,6 +33,7 @@ export const ModelPicker = ({
       load={load}
       toList={toList}
       onPick={onPick}
+      onBack={onBack}
     />
   );
 };

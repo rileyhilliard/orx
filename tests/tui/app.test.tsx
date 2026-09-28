@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { App } from "~/tui/app";
+import { APPROVAL_ARM_MS, App } from "~/tui/app";
+import { wrap } from "~/tui/approval-panel";
 import type { ChatBridge, UiApproval, UiDecision, UiEvent, UiMode } from "~/tui/types";
 import { type RenderSetup, render as renderTui, waitForScreen } from "./render";
 
@@ -65,8 +66,6 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
     },
     watchMode: () => () => {},
     listFiles: async () => ["README.md", "docs/", "docs/readme-notes.txt", "src/app.tsx"],
-    attachFiles: async (text) =>
-      text.includes("@README.md") ? `${text}\n\n<file path="README.md">…</file>` : text,
     ...overrides,
   };
   return { bridge, calls };
@@ -86,6 +85,20 @@ describe("App", () => {
     expect(frame).toContain("Ctrl+P model");
   });
 
+  it("fits the footer and a non-default mode in 80 columns", async () => {
+    const { bridge } = fakeBridge([], {
+      watchMode: (onMode) => {
+        onMode("acceptEdits");
+        return () => {};
+      },
+    });
+    const { waitForFrame } = await render(bridge);
+    const frame = await waitForFrame((f) => f.includes("acceptEdits"));
+    const footer = frame.split("\n").find((l) => l.includes("Ctrl+C quit")) ?? "";
+    expect(footer).toContain("@ files · / commands · Shift+Tab mode · Ctrl+P model · Ctrl+C quit");
+    expect(footer.trimEnd().endsWith("acceptEdits")).toBe(true);
+  });
+
   it("sends the draft on Enter and renders the streamed reply, tool call, and usage", async () => {
     const { bridge, calls } = fakeBridge([
       { type: "tool", call: { name: "currentTime", input: '{"timeZone":"UTC"}' } },
@@ -101,6 +114,17 @@ describe("App", () => {
     expect(frame).toContain("> what time is it");
     expect(frame).toContain("→ currentTime");
     expect(frame).toContain("It is noon.");
+  });
+
+  it("marks a tool call still running when the turn ended as stopped", async () => {
+    const { bridge } = fakeBridge([
+      { type: "tool", call: { id: "t1", name: "slow", input: '{"n":1}', status: "running" } },
+    ]);
+    const { mockInput, waitForFrame } = await render(bridge);
+    await mockInput.typeText("go");
+    mockInput.pressEnter();
+    const frame = await waitForFrame((f) => f.includes("→ slow") && !f.includes("Replying"));
+    expect(frame).toContain('→ slow({"n":1}) · stopped');
   });
 
   it("shows an error and whether sending again can help", async () => {
@@ -128,6 +152,31 @@ describe("App", () => {
     mockInput.pressKey("p", { ctrl: true });
     await waitForFrame((f) => f.includes("acme/cheap-model"));
     await mockInput.typeText("cheap");
+    mockInput.pressEnter();
+    await waitForFrame((f) => !f.includes("Search models") && f.includes("acme/cheap-model"));
+    await mockInput.typeText("hi");
+    mockInput.pressEnter();
+    await waitForFrame((f) => f.includes("> hi"));
+    expect(calls.sent).toEqual([["hi", "acme/cheap-model"]]);
+  });
+
+  it("moves the highlight with Up/Down and picks the highlighted model on Enter", async () => {
+    const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
+    const setup = await render(bridge);
+    const { mockInput } = setup;
+    // A key's state change can land after the renderer goes idle, so poll the screen.
+    const waitForFrame = (predicate: (frame: string) => boolean) =>
+      waitForScreen(setup, predicate, 2000);
+    mockInput.pressKey("p", { ctrl: true });
+    await waitForFrame((f) => f.includes("▶ openai/gpt-test"));
+    mockInput.pressArrow("down");
+    await waitForFrame((f) => f.includes("▶ acme/cheap-model"));
+    // Past the end stays on the last item.
+    mockInput.pressArrow("down");
+    mockInput.pressArrow("up");
+    await waitForFrame((f) => f.includes("▶ openai/gpt-test"));
+    mockInput.pressArrow("down");
+    await waitForFrame((f) => f.includes("▶ acme/cheap-model"));
     mockInput.pressEnter();
     await waitForFrame((f) => !f.includes("Search models") && f.includes("acme/cheap-model"));
     await mockInput.typeText("hi");
@@ -172,13 +221,107 @@ describe("slash commands", () => {
     const first = await screen(setup, (f) => f.includes("/help"));
     expect(first).toContain("List commands and keys");
     await setup.mockInput.typeText("pdf");
-    const frame = await screen(setup, (f) => f.includes("/pdf"));
+    const frame = await screen(setup, (f) => f.includes("/pdf") && !f.includes("/help"));
     expect(frame).toContain("Fill PDF forms");
     expect(frame).not.toContain("/help");
     // The skill named like the command is listed once, as the command.
     await setup.mockInput.typeText("\b\b\breview");
     const review = await screen(setup, (f) => f.includes("Review a file"));
     expect(review).not.toContain("A skill the command shadows");
+  });
+
+  it("sizes the list to its items, with no empty rows", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup);
+    const frame = await screen(setup, (f) => f.includes("/pdf"));
+    const lines = frame.split("\n");
+    const top = lines.findIndex((l) => l.includes("Commands"));
+    const bottom = lines.findIndex((l, i) => i > top && l.includes("└"));
+    // The filter row plus one row per item: help, clear, model, mode, export, quit, review, pdf.
+    expect(bottom - top - 1).toBe(9);
+    expect(lines.slice(top + 1, bottom).every((l) => /│.*\S.*│/.test(l))).toBe(true);
+    // Each description sits on its item's row.
+    expect(frame).toMatch(/\/export\s+Export the chat as Markdown/);
+  });
+
+  it("picks the highlighted command with Up/Down and Tab, and a new filter starts at the top", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup);
+    await screen(setup, (f) => f.includes("▶ /help"));
+    setup.mockInput.pressArrow("down");
+    setup.mockInput.pressArrow("down");
+    await screen(setup, (f) => f.includes("▶ /model"));
+    await setup.mockInput.typeText("e");
+    await screen(setup, (f) => f.includes("▶ /export"));
+    setup.mockInput.pressArrow("down");
+    await screen(setup, (f) => f.includes("▶ /help"));
+    setup.mockInput.pressTab();
+    await screen(setup, (f) => !f.includes("Commands") && f.includes("/help "));
+  });
+
+  it("strips control characters from names and descriptions it didn't write", async () => {
+    const setup = await render(
+      fakeBridge([], {
+        listCommands: async () => [{ name: "evil", description: "red\u001b[31mtext" }],
+      }).bridge,
+    );
+    await openList(setup, "evil");
+    const frame = await screen(setup, (f) => f.includes("/evil"));
+    expect(frame).toContain("red[31mtext");
+    expect(frame).not.toContain("\u001b");
+  });
+
+  it("cuts /help on a short terminal and says how much is left out", async () => {
+    const view = await renderTui(<App bridge={fakeBridge([]).bridge} />, {
+      width: 80,
+      height: 14,
+    });
+    setup = view;
+    await setup.mockInput.typeText("/help");
+    await screen(setup, (f) => f.includes("Commands"));
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Commands"));
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("more lines; make the terminal taller"));
+    expect(frame).toContain("/help    List commands and keys");
+  });
+
+  it("says when nothing matches, and Enter then does nothing", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup, "zzz");
+    await screen(setup, (f) => f.includes("No matches"));
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("No matches"));
+    expect(frame).toContain("Commands");
+  });
+
+  it("closes on Backspace in an empty filter and takes the / back", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await openList(setup, "h");
+    setup.mockInput.pressBackspace();
+    await screen(setup, (f) => f.includes("▶ /help") && f.includes("/clear"));
+    setup.mockInput.pressBackspace();
+    const frame = await screen(setup, (f) => !f.includes("Commands"));
+    expect(frame).toContain("Message");
+    expect(frame).not.toContain("│ /");
+  });
+
+  it("lists every key in /help, in two columns at 80", async () => {
+    const view = await renderTui(<App bridge={fakeBridge([]).bridge} />, {
+      width: 80,
+      height: 30,
+    });
+    setup = view;
+    await setup.mockInput.typeText("/help");
+    await screen(setup, (f) => f.includes("Commands"));
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Commands"));
+    setup.mockInput.pressEnter();
+    const frame = await screen(setup, (f) => f.includes("Ctrl+C     quit"));
+    expect(frame).toMatch(/Enter\s+send, or run a \/command\s+@\s+attach a file/);
+    expect(frame).toContain("/quit    Quit orx");
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Ctrl+C     quit"));
   });
 
   it("inserts the picked command into the composer, and Enter runs it", async () => {
@@ -220,6 +363,22 @@ describe("slash commands", () => {
       ["Review src/a.ts", "acme/reviewer"],
       ["next", "openai/gpt-test"],
     ]);
+  });
+
+  it("shows a command's model error inline and sends nothing", async () => {
+    const { bridge, calls } = fakeBridge([], {
+      expandCommand: async () => ({
+        error: "/review: acme/no-tools doesn't support tool calling, which the coding agent needs.",
+      }),
+    });
+    const setup = await render(bridge);
+    await openList(setup);
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Commands"));
+    await setup.mockInput.typeText("review a.ts");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("acme/no-tools doesn't support tool calling"));
+    expect(calls.sent).toEqual([]);
   });
 
   it("sends a skill's body with the arguments appended", async () => {
@@ -299,7 +458,31 @@ describe("the @ file picker", () => {
     await screen(setup, (f) => !f.includes("Files"));
   });
 
-  it("inserts the picked path at the @, and the model gets the attachment", async () => {
+  it("picks the highlighted path, and Backspace in the empty filter takes the @ back", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await setup.mockInput.typeText("see ");
+    await setup.mockInput.typeText("@");
+    await screen(setup, (f) => f.includes("▶ README.md"));
+    setup.mockInput.pressBackspace();
+    await screen(setup, (f) => !f.includes("Files") && f.includes("│ see "));
+    await setup.mockInput.typeText("@");
+    await screen(setup, (f) => f.includes("▶ README.md"));
+    setup.mockInput.pressArrow("down");
+    setup.mockInput.pressArrow("down");
+    await screen(setup, (f) => f.includes("▶ docs/readme-notes.txt"));
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => !f.includes("Files") && f.includes("see @docs/readme-notes.txt"));
+  });
+
+  it("keeps a long path's file name in view", async () => {
+    const long = `${"deeply/nested/".repeat(8)}component-name.tsx`;
+    const setup = await render(fakeBridge([], { listFiles: async () => [long] }).bridge);
+    await setup.mockInput.typeText("@");
+    const frame = await screen(setup, (f) => f.includes("component-name.tsx"));
+    expect(frame).toContain("▶ …");
+  });
+
+  it("inserts the picked path at the @ and sends the text as typed", async () => {
     const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
     const setup = await render(bridge);
     await setup.mockInput.typeText("look at @");
@@ -314,16 +497,30 @@ describe("the @ file picker", () => {
       setup,
       (f) => calls.sent.length === 1 && f.includes("look at @README.md please"),
     );
-    expect(calls.sent).toEqual([
-      ['look at @README.md please\n\n<file path="README.md">…</file>', "openai/gpt-test"],
-    ]);
-    expect(frame).not.toContain("<file");
+    // Attaching the file is the bridge's job (launch.tsx), so the typed text is what's sent.
+    expect(calls.sent).toEqual([["look at @README.md please", "openai/gpt-test"]]);
+    expect(frame).toContain("> look at @README.md please");
   });
 });
 
 describe("the approval panel", () => {
   const screen = (setup: RenderSetup, predicate: (frame: string) => boolean) =>
     waitForScreen(setup, predicate, 2000);
+
+  /**
+   * Types `key` until `done`: the panel ignores y / a / n for its first APPROVAL_ARM_MS, so a
+   * press lands once it's armed. Checks between presses so no extra key reaches the composer.
+   */
+  const pressWhenArmed = async (setup: RenderSetup, key: string, done: () => boolean) => {
+    const deadline = Date.now() + APPROVAL_ARM_MS + 2000;
+    for (;;) {
+      await setup.renderOnce();
+      if (done()) return;
+      if (Date.now() > deadline) throw new Error(`"${key}" never answered the panel`);
+      await setup.mockInput.typeText(key);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
 
   const bashApproval: UiApproval = {
     id: "approval-1",
@@ -332,8 +529,15 @@ describe("the approval panel", () => {
     canAlways: true,
   };
 
-  /** A turn that asks for `request`, waits for the answer, then finishes with `after`. */
-  const askingBridge = (request: UiApproval, after: ReadonlyArray<UiEvent> = []) => {
+  /**
+   * A turn that yields `before`, waits for `release` (when given), asks for `request`, waits
+   * for the answer, then finishes with `after`.
+   */
+  const askingBridge = (
+    request: UiApproval,
+    after: ReadonlyArray<UiEvent> = [],
+    options: { before?: ReadonlyArray<UiEvent>; release?: Promise<void> } = {},
+  ) => {
     let answered: () => void = () => {};
     const waiting = new Promise<void>((resolve) => {
       answered = resolve;
@@ -342,6 +546,8 @@ describe("the approval panel", () => {
       send: (text, model) => {
         fake.calls.sent.push([text, model]);
         return (async function* () {
+          for (const event of options.before ?? []) yield event;
+          await options.release;
           yield { type: "approval", request } satisfies UiEvent;
           await waiting;
           for (const event of after) yield event;
@@ -365,12 +571,48 @@ describe("the approval panel", () => {
     setup.mockInput.pressEnter();
     const panel = await screen(setup, (f) => f.includes("Run  bun test"));
     expect(panel).toContain("y allow · a always · n deny · Esc stop");
-    await setup.mockInput.typeText("y");
+    await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
     const done = await screen(setup, (f) => f.includes("tests pass"));
     expect(calls.answers).toEqual([["approval-1", "yes"]]);
     expect(done).not.toContain("Run  bun test");
     // The y went to the panel, not the composer.
     expect(done).not.toContain("│ y");
+  });
+
+  it("ignores y / a / n typed before the panel has been on screen long enough to read", async () => {
+    const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("run the tests");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("Run  bun test"));
+    // Type-ahead: an "always" the user never chose.
+    await setup.mockInput.typeText("a");
+    await setup.renderOnce();
+    expect(calls.answers).toEqual([]);
+    await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
+    expect(calls.answers).toEqual([["approval-1", "yes"]]);
+  });
+
+  it("closes an open list when an approval arrives, so its filter can't answer", async () => {
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }], {
+      before: [{ type: "text", delta: "working" }],
+      release: released,
+    });
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("working"));
+    await setup.mockInput.typeText("/");
+    await screen(setup, (f) => f.includes("Commands"));
+    release();
+    await screen(setup, (f) => f.includes("Run  bun test") && !f.includes("Commands"));
+    await setup.mockInput.typeText("y");
+    await setup.renderOnce();
+    expect(calls.answers).toEqual([]);
   });
 
   it("offers always only when allowed, and n takes an optional note", async () => {
@@ -390,15 +632,83 @@ describe("the approval panel", () => {
     const panel = await screen(setup, (f) => f.includes("Edit src/a.ts"));
     expect(panel).toContain("+new");
     expect(panel).toContain("y allow · n deny");
-    await setup.mockInput.typeText("a");
+    await pressWhenArmed(setup, "n", () =>
+      setup.captureCharFrame().includes("Enter deny with this note"),
+    );
+    // A note isn't a message: / and @ don't open lists.
+    await setup.mockInput.typeText("/ @");
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).not.toContain("Commands");
+    expect(setup.captureCharFrame()).not.toContain("Files");
+    // `a` was never on offer; no answer yet.
     expect(calls.answers).toEqual([]);
-    await setup.mockInput.typeText("n");
-    await screen(setup, (f) => f.includes("Enter deny with this note"));
+    setup.mockInput.pressBackspace();
+    setup.mockInput.pressBackspace();
+    setup.mockInput.pressBackspace();
     await setup.mockInput.typeText("use a flag");
     setup.mockInput.pressEnter();
     await screen(setup, (f) => f.includes("u2"));
     expect(calls.answers).toEqual([["approval-2", { no: "use a flag" }]]);
     expect(calls.sent).toHaveLength(1);
+  });
+
+  it("goes back from the note to y / a / n on Esc, keeping the draft", async () => {
+    const { bridge, calls } = askingBridge(bashApproval, [{ type: "done", usage: "u1" }]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("run the tests");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("Run  bun test"));
+    await pressWhenArmed(setup, "n", () =>
+      setup.captureCharFrame().includes("Enter deny with this note"),
+    );
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => f.includes("y allow · a always · n deny"));
+    await pressWhenArmed(setup, "y", () => calls.answers.length > 0);
+    expect(calls.answers).toEqual([["approval-1", "yes"]]);
+    // The reply is still going; Esc only left the note.
+    expect(calls.sent).toHaveLength(1);
+  });
+
+  it("shows the whole diff, scrolled with Up/Down and PgUp/PgDn, and strips control characters", async () => {
+    const diff = [
+      "--- a/src/big.ts",
+      "+++ b/src/big.ts",
+      ...Array.from({ length: 60 }, (_, i) => `+line ${i + 1}`),
+    ].join("\n");
+    const { bridge } = askingBridge(
+      {
+        id: "approval-3",
+        tool: "edit",
+        summary: "Edit \u001b[2Jsrc/big.ts\r",
+        diff,
+        canAlways: false,
+      },
+      [{ type: "done", usage: "u3" }],
+    );
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("edit it");
+    setup.mockInput.pressEnter();
+    const top = await screen(setup, (f) => f.includes("Edit [2Jsrc/big.ts"));
+    expect(top).not.toContain("\u001b");
+    expect(top).toContain("↑↓ scroll");
+    expect(top).toMatch(/lines 1–\d+ of 62/);
+    expect(top).not.toContain("+line 60");
+    // PgDn, as a terminal sends it (the test keyboard has no name for it).
+    for (let i = 0; i < 6; i++) setup.mockInput.pressKey("\u001b[6~");
+    const bottom = await screen(setup, (f) => f.includes("+line 60"));
+    expect(bottom).toMatch(/lines \d+–62 of 62/);
+    // The summary stays in view while the diff scrolls.
+    expect(bottom).toContain("Edit [2Jsrc/big.ts");
+    setup.mockInput.pressArrow("up");
+    await screen(setup, (f) => !f.includes("+line 60"));
+  });
+
+  it("wraps by terminal columns, expanding tabs, so no approved text is cut off", () => {
+    expect(wrap("\tab", 6)).toEqual(["    ab"]);
+    expect(wrap("a\tbcdef", 6)).toEqual(["a   bc", "def"]);
+    // Wide characters take two columns each.
+    expect(wrap("日本語テキスト", 6)).toEqual(["日本語", "テキス", "ト"]);
+    expect(wrap("", 6)).toEqual([" "]);
   });
 
   it("closes when the request is cancelled or the turn ends", async () => {
@@ -412,7 +722,31 @@ describe("the approval panel", () => {
     setup.mockInput.pressEnter();
     const frame = await screen(setup, (f) => f.includes("stopped") && !f.includes("Replying"));
     expect(frame).not.toContain("Run  bun test");
-    expect(frame).toContain("Enter send");
+    expect(frame).toContain("@ files");
+  });
+
+  it("shows a denied call apart from a failed one", async () => {
+    const { bridge } = fakeBridge([
+      { type: "tool", call: { id: "t1", name: "edit", input: "{}", status: "running" } },
+      { type: "tool-result", id: "t1", status: "denied", summary: "edit a.ts · denied · no" },
+      { type: "tool", call: { id: "t2", name: "read", input: "{}", status: "running" } },
+      { type: "tool-result", id: "t2", status: "error", summary: "read b.ts · missing" },
+      { type: "done", usage: "u4" },
+    ]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("go");
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => f.includes("u4"));
+    const colorOf = (text: string) =>
+      setup
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .find((span) => span.text.includes(text))?.fg;
+    const denied = colorOf("edit a.ts · denied");
+    const failed = colorOf("read b.ts · missing");
+    expect(denied).toBeDefined();
+    expect(failed).toBeDefined();
+    expect(denied).not.toEqual(failed);
   });
 
   it("cycles the permission mode with Shift+Tab and follows the bridge's changes", async () => {
@@ -431,5 +765,9 @@ describe("the approval panel", () => {
     expect(calls.modes).toEqual(["acceptEdits", "plan"]);
     push("yolo");
     await screen(setup, (f) => /yolo\s*$/m.test(f));
+    // yolo isn't in the cycle: Shift+Tab leaves it for default.
+    setup.mockInput.pressKey("\t", { shift: true });
+    await screen(setup, (f) => !/yolo\s*$/m.test(f));
+    expect(calls.modes.at(-1)).toBe("default");
   });
 });
