@@ -16,7 +16,7 @@ export const listModels = Effect.gen(function* () {
       (models): ModelsList => ({ models, defaultModel: config.defaultModel, available: true }),
     ),
     Effect.catchTag("UpstreamUnavailable", (error) =>
-      Effect.logWarning("Models list unavailable", error.message).pipe(
+      Effect.logWarning("Models list unavailable", error.detail ?? error.message).pipe(
         Effect.as<ModelsList>({ models: [], defaultModel: config.defaultModel, available: false }),
       ),
     ),
@@ -79,6 +79,50 @@ export const searchModels = (
     .map(({ model }) => model);
 };
 
+/** A model's entry in the list; a variant suffix (`:online`, `:nitro`, `:floor`) counts as its base id. */
+const findListed = (models: ReadonlyArray<ModelInfo>, modelId: string) => {
+  const base = modelId.split(":", 1)[0];
+  return models.find((m) => m.id === modelId) ?? models.find((m) => m.id === base);
+};
+
+/**
+ * The model a command runs on and its entry in the models list, fetched once. No model given:
+ * OPENROUTER_MODEL, looked up only with `lookUpDefault` (the default is always accepted). A
+ * named model must be listed. When the list can't be fetched, the model is used as given and
+ * one warning says so, ending with `without`.
+ */
+const lookUpModel = (
+  requested: string | undefined,
+  options: { readonly lookUpDefault: boolean; readonly without: (modelId: string) => string },
+) =>
+  Effect.gen(function* () {
+    const config = yield* loadConfig;
+    const named = requested !== undefined && requested !== config.defaultModel;
+    const modelId = named ? requested : config.defaultModel;
+    if (!named && !options.lookUpDefault) return { modelId, info: undefined };
+    const models = yield* (yield* OpenRouterModels).list.pipe(
+      Effect.catchTag("UpstreamUnavailable", (error) =>
+        Effect.as(
+          Effect.logWarning(
+            `Models list unavailable; ${options.without(modelId)}`,
+            error.detail ?? error.message,
+          ),
+          undefined,
+        ),
+      ),
+    );
+    if (models === undefined) return { modelId, info: undefined };
+    const info = findListed(models, modelId);
+    if (named && info === undefined) {
+      const close = closestIds(models, modelId);
+      return yield* new UnknownModel({
+        message: `Unknown model: ${modelId}.${close.length > 0 ? ` Did you mean ${close.join(", ")}?` : ""} \`orx models\` lists them.`,
+        model: modelId,
+      });
+    }
+    return { modelId, info };
+  });
+
 /**
  * The model a command runs on. No model given: OPENROUTER_MODEL. A named model must be in
  * OpenRouter's list, where a variant suffix (`:online`, `:nitro`, `:floor`) counts as its base
@@ -86,31 +130,10 @@ export const searchModels = (
  * passed through with a warning (OpenRouter rejects an unknown one itself).
  */
 export const resolveModel = (requested: string | undefined) =>
-  Effect.gen(function* () {
-    const config = yield* loadConfig;
-    if (requested === undefined || requested === config.defaultModel) return config.defaultModel;
-    const openRouter = yield* OpenRouterModels;
-    const listed = yield* openRouter.list.pipe(
-      Effect.map((models) => ({ models })),
-      Effect.catchTag("UpstreamUnavailable", (error) =>
-        Effect.as(
-          Effect.logWarning("Models list unavailable; using the model as given", error.message),
-          undefined,
-        ),
-      ),
-    );
-    if (listed === undefined) return requested;
-    const { models } = listed;
-    const base = requested.split(":", 1)[0];
-    if (!models.some((model) => model.id === requested || model.id === base)) {
-      const close = closestIds(models, requested);
-      return yield* new UnknownModel({
-        message: `Unknown model: ${requested}.${close.length > 0 ? ` Did you mean ${close.join(", ")}?` : ""} \`orx models\` lists them.`,
-        model: requested,
-      });
-    }
-    return requested;
-  });
+  Effect.map(
+    lookUpModel(requested, { lookUpDefault: false, without: () => "using the model as given" }),
+    ({ modelId }) => modelId,
+  );
 
 /**
  * `resolveModel` for the coding agent (the session and `ask --agent`), which needs tool
@@ -124,21 +147,11 @@ export const resolveToolModel = (
   fix = "Pick another with --model or OPENROUTER_MODEL.",
 ) =>
   Effect.gen(function* () {
-    const modelId = yield* resolveModel(requested);
-    const models = yield* (yield* OpenRouterModels).list.pipe(
-      Effect.catchTag("UpstreamUnavailable", (error) =>
-        Effect.as(
-          Effect.logWarning(
-            `Models list unavailable; can't check that ${modelId} supports tool calling`,
-            error.message,
-          ),
-          [],
-        ),
-      ),
-    );
-    const base = modelId.split(":", 1)[0];
-    const model = models.find((m) => m.id === modelId) ?? models.find((m) => m.id === base);
-    if (model !== undefined && !model.supportsTools) {
+    const { modelId, info } = yield* lookUpModel(requested, {
+      lookUpDefault: true,
+      without: (modelId) => `can't check that ${modelId} supports tool calling`,
+    });
+    if (info !== undefined && !info.supportsTools) {
       return yield* new UnknownModel({
         message: `${modelId} doesn't support tool calling, which the coding agent needs. ${fix}`,
         model: modelId,

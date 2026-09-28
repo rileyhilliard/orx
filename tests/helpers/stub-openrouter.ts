@@ -93,8 +93,10 @@ export interface StubOpenRouter {
   readonly chatHeaders: IncomingHttpHeaders[];
   /** Count of GET /models requests. */
   modelsRequests: number;
-  /** Fail the next N GET /models requests with a 500. */
+  /** Fail the next N GET /models requests with `failModelsStatus`. */
   failModels: number;
+  /** The status a failed GET /models answers with (default 500). */
+  failModelsStatus: number;
   /** Stream this many text deltas of the reply, then hang until the client disconnects. */
   hangAfter: number | undefined;
   /** Stream this many text deltas of the reply, then drop the connection (with hangAfter unset). */
@@ -170,6 +172,7 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     chatHeaders: [] as IncomingHttpHeaders[],
     modelsRequests: 0,
     failModels: 0,
+    failModelsStatus: 500,
     failCompletions: undefined as CompletionFailure | undefined,
     dropAfter: undefined as number | undefined,
     hangAfter: undefined as number | undefined,
@@ -211,8 +214,10 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
       state.modelsRequests += 1;
       if (state.failModels > 0) {
         state.failModels -= 1;
-        res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: { message: "stub failure", code: 500 } }));
+        res.writeHead(state.failModelsStatus, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({ error: { message: "stub failure", code: state.failModelsStatus } }),
+        );
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -414,6 +419,12 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
     },
     set failModels(value) {
       state.failModels = value;
+    },
+    get failModelsStatus() {
+      return state.failModelsStatus;
+    },
+    set failModelsStatus(value) {
+      state.failModelsStatus = value;
     },
     get hangAfter() {
       return state.hangAfter;

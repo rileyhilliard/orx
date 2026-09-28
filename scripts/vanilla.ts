@@ -100,6 +100,7 @@ const REMOVE = [
   "tests/fixtures",
   "tests/mcp.test.ts",
   "tests/mentions.test.ts",
+  "tests/openrouter-models.test.ts",
   "tests/openrouter-replay.test.ts",
   "tests/permissions.test.ts",
   "tests/prompt.test.ts",

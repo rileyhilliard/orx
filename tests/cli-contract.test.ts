@@ -291,9 +291,9 @@ describe("orx models", () => {
     stub.failModels = 0;
     expect(run.exitCode).toBe(0);
     expect(JSON.parse(run.stdout)).toMatchObject({ available: false });
-    const fetches = run.logs.filter((r) => r.msg === "Models list fetch failed");
-    expect(fetches).toHaveLength(1);
-    expect(JSON.stringify(fetches[0])).toContain("HTTP 500");
+    const warnings = run.logs.filter((r) => r.level === "warn");
+    expect(warnings.map((r) => r.msg)).toEqual(["Models list unavailable"]);
+    expect(JSON.stringify(warnings[0])).toContain("HTTP 500");
   });
 
   it("shows a variable (-1, as openrouter/auto has) or unreadable price as unknown", async () => {

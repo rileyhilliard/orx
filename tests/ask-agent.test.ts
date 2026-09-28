@@ -170,6 +170,23 @@ describe("orx ask --agent", () => {
     expect(warnings).toHaveLength(1);
   });
 
+  it("fetches an unavailable models list once, and warns once, for a named model", async () => {
+    stub.failModels = 10;
+    stub.modelsRequests = 0;
+    const run = await runCli(
+      ["ask", "hi", "--agent", "--cwd", workspace(), "--model", "acme/cheap-model"],
+      { env: { OPENROUTER_BASE_URL: stub.baseUrl } },
+    );
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    // One fetch: the first try and its two retries.
+    expect(stub.modelsRequests).toBe(3);
+    const warnings = run.logs.filter((r) => r.level === "warn");
+    expect(warnings.map((r) => r.msg)).toEqual([
+      "Models list unavailable; can't check that acme/cheap-model supports tool calling",
+    ]);
+  });
+
   it("gives plain ask no workspace tools", async () => {
     const run = await runCli(["ask", "hi", "--json"], {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },

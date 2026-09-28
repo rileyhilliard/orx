@@ -6,9 +6,11 @@ import {
   Layer,
   Option,
   Ref,
+  Result,
   Schedule,
   Schema,
   SchemaTransformation,
+  Semaphore,
 } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 import type { ModelInfo } from "~/schemas";
@@ -16,11 +18,20 @@ import { AppConfig } from "../config";
 import { type InvalidConfig, UpstreamUnavailable } from "../errors";
 
 export interface OpenRouterModelsShape {
-  /** OpenRouter's models list, cached in memory with a TTL. Needs no API key. */
+  /**
+   * OpenRouter's models list, cached in memory with a TTL (MODELS_CACHE_TTL), and a failure for
+   * MODELS_FAILURE_TTL. Concurrent callers share one fetch. Needs no API key. Logs nothing: a
+   * caller that goes on without the list says what that means.
+   */
   readonly list: Effect.Effect<ReadonlyArray<ModelInfo>, UpstreamUnavailable | InvalidConfig>;
 }
 
 export const MODELS_FETCH_TIMEOUT = Duration.seconds(10);
+/**
+ * How long a failed fetch answers for the list: one run's callers (the model check, each turn's
+ * context window, the picker) don't each wait out the timeout and retries again.
+ */
+export const MODELS_FAILURE_TTL = Duration.seconds(30);
 /** Two retries, jittered exponential from 500ms. */
 export const modelsRetrySchedule = Schedule.max([
   Schedule.exponential(Duration.millis(500)).pipe(Schedule.jittered),
@@ -85,12 +96,28 @@ const detailOf = (cause: unknown): string => {
   return status === undefined ? text : `HTTP ${status}: ${text}`;
 };
 
+/**
+ * Only failures another try can fix are retryable: the network, a 429, a 5xx. Another 4xx or a
+ * response that doesn't decode would fail the same way again.
+ */
+const isRetryable = (cause: unknown): boolean => {
+  if (!HttpClientError.isHttpClientError(cause)) return false;
+  const status = cause.response?.status;
+  return status === undefined || status === 429 || status >= 500;
+};
+
+/** The last fetch's outcome, and when it came. */
+interface Fetched {
+  readonly at: number;
+  readonly result: Result.Result<ReadonlyArray<ModelInfo>, UpstreamUnavailable>;
+}
+
 const make = Effect.gen(function* () {
   const { load } = yield* AppConfig;
   const http = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
-  const cache = yield* Ref.make(
-    Option.none<{ readonly at: number; readonly models: ReadonlyArray<ModelInfo> }>(),
-  );
+  const cache = yield* Ref.make(Option.none<Fetched>());
+  // One fetch at a time: a caller that waited finds the cache the fetch it waited on filled.
+  const fetching = yield* Semaphore.make(1);
 
   const fetchModels = (baseUrl: string) =>
     http
@@ -105,7 +132,7 @@ const make = Effect.gen(function* () {
           (cause) =>
             new UpstreamUnavailable({
               message: "Couldn't fetch the OpenRouter models list.",
-              retryable: true,
+              retryable: isRetryable(cause),
               detail: detailOf(cause),
             }),
         ),
@@ -119,24 +146,28 @@ const make = Effect.gen(function* () {
               }),
             ),
         }),
-        Effect.retry(modelsRetrySchedule),
-        // Once, after the retries: the attempts before the last one are only noise.
-        Effect.tapError((error) =>
-          Effect.logWarning("Models list fetch failed", error.detail ?? error.message),
-        ),
+        Effect.retry({ schedule: modelsRetrySchedule, while: (error) => error.retryable }),
       );
 
   const list = Effect.gen(function* () {
     const config = yield* load;
     const now = yield* Clock.currentTimeMillis;
     const cached = yield* Ref.get(cache);
-    if (Option.isSome(cached) && now - cached.value.at < Duration.toMillis(config.modelsCacheTtl)) {
-      return cached.value.models;
-    }
-    const models = yield* fetchModels(config.baseUrl);
-    yield* Ref.set(cache, Option.some({ at: yield* Clock.currentTimeMillis, models }));
-    return models;
-  });
+    const fresh = Option.filter(cached, ({ at, result }) => {
+      const ttl = Result.isSuccess(result) ? config.modelsCacheTtl : MODELS_FAILURE_TTL;
+      return now - at < Duration.toMillis(ttl);
+    });
+    const result = Option.isSome(fresh)
+      ? fresh.value.result
+      : yield* Effect.result(fetchModels(config.baseUrl)).pipe(
+          Effect.tap((result) =>
+            Effect.flatMap(Clock.currentTimeMillis, (at) =>
+              Ref.set(cache, Option.some({ at, result })),
+            ),
+          ),
+        );
+    return Result.isSuccess(result) ? result.success : yield* Effect.fail(result.failure);
+  }).pipe(fetching.withPermit);
 
   return { list } satisfies OpenRouterModelsShape;
 });
