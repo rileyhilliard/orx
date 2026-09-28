@@ -27,13 +27,19 @@ export const modelsRetrySchedule = Schedule.max([
   Schedule.recurs(2),
 ]);
 
-/** A per-token price as OpenRouter sends it: a numeric string, "-1" when it varies (null here). */
-const WirePrice = Schema.FiniteFromString.pipe(
+/**
+ * A per-token price as OpenRouter sends it: a numeric string, "-1" when it varies. Null here when
+ * it varies or isn't a number, so one odd price doesn't fail the whole list.
+ */
+const WirePrice = Schema.String.pipe(
   Schema.decodeTo(
     Schema.NullOr(Schema.Number),
     SchemaTransformation.transform({
-      decode: (price) => (price < 0 ? null : price),
-      encode: (price) => price ?? -1,
+      decode: (wire) => {
+        const price = Number(wire);
+        return wire.trim() !== "" && Number.isFinite(price) && price >= 0 ? price : null;
+      },
+      encode: (price) => String(price ?? -1),
     }),
   ),
 );

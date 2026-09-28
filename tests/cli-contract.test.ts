@@ -296,14 +296,18 @@ describe("orx models", () => {
     expect(JSON.stringify(fetches[0])).toContain("HTTP 500");
   });
 
-  it("shows a variable price (-1, as openrouter/auto has) as unknown, not negative", async () => {
+  it("shows a variable (-1, as openrouter/auto has) or unreadable price as unknown", async () => {
     const models = stub.models;
-    stub.models = [{ id: "openrouter/auto", name: "Auto Router", prompt: "-1", completion: "-1" }];
+    stub.models = [
+      { id: "openrouter/auto", name: "Auto Router", prompt: "-1", completion: "-1" },
+      { id: "acme/odd", name: "Acme: Odd", prompt: "n/a", completion: "0.000002" },
+    ];
     const json = await runCli(["models", "--json"], withStub());
     const table = await runCli(["models"], withStub());
     stub.models = models;
     expect(JSON.parse(json.stdout).models).toMatchObject([
       { id: "openrouter/auto", promptPrice: null, completionPrice: null },
+      { id: "acme/odd", promptPrice: null, completionPrice: 0.000002 },
     ]);
     expect(table.stdout).toMatch(/openrouter\/auto\s+128k\s+varies\s+varies/);
   });
