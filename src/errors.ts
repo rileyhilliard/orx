@@ -1,4 +1,4 @@
-import { Cause, Exit, Schema } from "effect";
+import { Cause, Exit, Option, Schema } from "effect";
 import { CliError } from "effect/unstable/cli";
 import type { ErrorBody } from "~/schemas";
 
@@ -190,6 +190,22 @@ export const outcomeOf = (exit: Exit.Exit<unknown, unknown>): Outcome => {
   }
   if (isAppError(failure)) return { kind: "failed", error: failure, body: errorBody(failure) };
   return { kind: "defect", cause, body: INTERNAL };
+};
+
+/**
+ * The cause to log as a bug, if a run hit one: a defect outcome's, or that of a failure that
+ * also holds a defect (the typed error decides the exit code and message; without this, the
+ * defect beside it would go unreported). A closed stdout (BrokenPipe) isn't a bug.
+ */
+export const defectOf = (
+  exit: Exit.Exit<unknown, unknown>,
+): Option.Option<Cause.Cause<unknown>> => {
+  if (Exit.isSuccess(exit)) return Option.none();
+  const outcome = outcomeOf(exit);
+  if (outcome.kind === "defect") return Option.some(outcome.cause);
+  return outcome.kind !== "closed" && Cause.hasDies(exit.cause)
+    ? Option.some(exit.cause)
+    : Option.none();
 };
 
 export const exitCodeForOutcome = (outcome: Outcome): number => {

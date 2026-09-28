@@ -1,6 +1,6 @@
 import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { Cause, Effect, Fiber, FileSystem, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, FileSystem, Option, Schema, Stream } from "effect";
 import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
 import {
   type ChatToolHandlers,
@@ -16,7 +16,7 @@ import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
 import { listModels } from "../core/models";
 import { expandSkill, loadSlash } from "../core/skills";
-import { isAppError, retryableFor, TuiUnavailable } from "../errors";
+import { defectOf, isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
 import { Permissions } from "../services/permissions";
 import { App } from "./app";
@@ -126,11 +126,15 @@ const toUiError = (cause: Cause.Cause<unknown>): UiError => {
     : { message: "Something went wrong inside orx; the log has the details.", retryable: true };
 };
 
-/** Whatever failed a turn, as the log line for a defect (a tagged error is shown, not logged). */
+/**
+ * Whatever failed a turn, as the log line for a defect: a tagged error alone is shown, not
+ * logged, but a defect beside one is logged too.
+ */
 const logDefect = (cause: Cause.Cause<unknown>) =>
-  isAppError(cause.reasons.find(Cause.isFailReason)?.error)
-    ? Effect.void
-    : Effect.logError("chat turn failed", cause);
+  Option.match(defectOf(Exit.failCause(cause)), {
+    onNone: () => Effect.void,
+    onSome: (defect) => Effect.logError("chat turn failed", defect),
+  });
 
 /**
  * The ChatBridge over the real programs, bound to the current services: what the components

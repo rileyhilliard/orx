@@ -1,3 +1,4 @@
+import { Cause, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { toPrompt } from "~/core/chat";
 import { chatToMarkdown } from "~/core/export";
@@ -6,6 +7,8 @@ import { searchModels } from "~/core/models";
 import { checksumFor } from "~/core/update";
 import {
   BadInput,
+  BrokenPipe,
+  defectOf,
   exitCodeFor,
   InvalidConfig,
   InvalidModelOutput,
@@ -40,6 +43,31 @@ describe("exit codes", () => {
         retryable,
       ]);
     }
+  });
+});
+
+describe("defectOf", () => {
+  const upstream = new UpstreamUnavailable({ message: "down", retryable: true });
+  const bug = new Error("a bug");
+  const defect = (cause: Cause.Cause<unknown>) => defectOf(Exit.failCause(cause));
+
+  it("reports a defect beside the typed failure that decided the exit code", () => {
+    const cause = Cause.combine(Cause.fail(upstream), Cause.die(bug));
+    expect(Option.getOrUndefined(defect(cause))).toBe(cause);
+    const interrupted = Cause.combine(Cause.interrupt(), Cause.die(bug));
+    expect(Option.isSome(defect(interrupted))).toBe(true);
+  });
+
+  it("reports a defect alone, or a failure that isn't an AppError", () => {
+    expect(Option.isSome(defect(Cause.die(bug)))).toBe(true);
+    expect(Option.isSome(defect(Cause.fail(bug)))).toBe(true);
+  });
+
+  it("reports nothing for a typed failure, an interruption, or a closed stdout", () => {
+    expect(Option.isNone(defect(Cause.fail(upstream)))).toBe(true);
+    expect(Option.isNone(defect(Cause.interrupt()))).toBe(true);
+    expect(Option.isNone(defect(Cause.die(new BrokenPipe())))).toBe(true);
+    expect(Option.isNone(defectOf(Exit.void))).toBe(true);
   });
 });
 
