@@ -14,6 +14,8 @@ import { deny, readPayload, text } from "./_lib";
 import { type Command, commands } from "./_shell";
 
 const INSTALL = new Set(["add", "install", "i", "a"]);
+/** Flags of bun, bunx, and npx that take the next argument as their value. */
+const VALUE_FLAGS = new Set(["--cwd", "--package", "-p", "--preload", "-r", "--config", "-c"]);
 
 const RUNNER =
   "The test runner is bun test (import from bun:test): bun run test for everything under tests/, bun test ./tests/<file> [-t name] for one file, bun run e2e for the binary. An Effect test body runs with runTest from tests/helpers/effect.ts.";
@@ -52,12 +54,18 @@ function reasonFor(cmd: Command): string | undefined {
     }
   }
 
-  // The program bun, bunx, or npx would run: the first argument that isn't a flag (or bun's `x`
-  // or `run`), so `bun test -t vitest` isn't a vitest run.
+  // The program bun, bunx, or npx would run: the first argument that isn't a flag, a flag's value
+  // (`--cwd dir`), or bun's `x` or `run`, so `bun test -t vitest` isn't a vitest run.
   const runs = ["bun", "bunx", "npx"].includes(name)
-    ? args.find((a) => !a.startsWith("-") && !(name === "bun" && (a === "x" || a === "run")))
+    ? args.find(
+        (a, i) =>
+          !a.startsWith("-") &&
+          !VALUE_FLAGS.has(args[i - 1] ?? "") &&
+          !(name === "bun" && (a === "x" || a === "run")),
+      )
     : undefined;
-  const vitest = name === "vitest" || (runs !== undefined && basename(runs) === "vitest");
+  const vitest =
+    name === "vitest" || (runs !== undefined && packageName(basename(runs)) === "vitest");
   if (vitest) return `vitest isn't used here. ${RUNNER}`;
 
   if (name !== "bun") return undefined;

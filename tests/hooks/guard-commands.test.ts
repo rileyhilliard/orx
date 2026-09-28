@@ -18,6 +18,9 @@ describe.concurrent("guard-commands denies", () => {
     ["bun --bun vitest run", VITEST],
     ["bun x vitest", VITEST],
     ["bun run vitest", VITEST],
+    ["bunx vitest@5 run", VITEST],
+    ["npx vitest@latest", VITEST],
+    ["bun --cwd src vitest", VITEST],
     ["cd src && vitest", VITEST],
     ["npm install", PM],
     ["npm i effect", PM],
@@ -64,6 +67,7 @@ describe.concurrent("guard-commands allows", () => {
     "npm view effect version",
     "npx tsc --version",
     "bun --bun scripts/tool.ts",
+    "bun --cwd vitest test",
     "git commit -m 'vitest is banned here'",
     // A test name holding the command it tests.
     'bun test ./tests/hooks -t "vitest"',

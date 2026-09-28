@@ -8,7 +8,7 @@ orx is a terminal client for OpenRouter, compiled to one binary with `bun build 
 
 ## Commands
 
-Run these from the repo root. They are `package.json` scripts, the only supported way to build, test, and run the project; if a command here is wrong, fix it here in the same change. `bun test` is the only test runner: a bare `bun test` runs everything under `tests/`, and `bun test ./tests/<file>` one file.
+Run these from the repo root. They are `package.json` scripts (plus `bun test <file>` for one test file), the only supported way to build, test, and run the project; if a command here is wrong, fix it here in the same change. `bun test` is the only test runner: a bare `bun test` runs everything under `tests/`, and `bun test ./tests/<file>` one file.
 
 | Command | What it does |
 | --- | --- |
@@ -21,7 +21,7 @@ Run these from the repo root. They are `package.json` scripts, the only supporte
 | `bun run typecheck` | `tsc` |
 | `bun run test` | `bun test`: every file under `tests/`, unit and TUI, in one process (`test:tui` for `tests/tui` alone) |
 | `bun test ./tests/cli-contract.test.ts` | One file; add `-t "<name>"` for one test |
-| `bun run coverage` | `bun test --coverage`, a text and lcov report in `coverage/` (a report, not a gate: no thresholds, so it fails only when a test does) |
+| `bun run coverage` | `bun test --coverage`, a text and lcov report in `coverage/`, `src/tui/` included (a report, not a gate: no thresholds, so it fails only when a test does) |
 | `bun run e2e` | Builds `dist/orx`, then `bun test ./e2e`: the binary as a process and in a PTY, against the stubs |
 | `bun run check` | The full gate: lint, typecheck, test, e2e. Run it before calling work done. CI also installs every target's native package (`bun install --os='*' --cpu='*'`), runs `coverage` in place of `test`, and ends with `build:all` |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `dist/SHA256SUMS` (needs `bun install --os='*' --cpu='*'`) |
@@ -150,7 +150,7 @@ Things in the tree that exist to get a build through, not because they are right
 
 ## CI
 
-- `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), ripgrep (apt), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage (every test under `tests/`, with a report; no thresholds), e2e, build:all. No Node: `bun run` aliases `node` to bun for the `tsc` and `biome` shims when none is on PATH. No `OPENROUTER_API_KEY`: tests never touch the network.
+- `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), ripgrep (apt), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage (every test under `tests/`, with a report; no thresholds), e2e, build:all. No setup-node: the `tsc` and `biome` shims run on the image's Node (unpinned); where no `node` is on PATH, `bun run` aliases it to bun. No `OPENROUTER_API_KEY`: tests never touch the network.
 - `.github/workflows/vanilla.yml` runs `bun run vanilla -- --verify --name demo` on the same triggers. `template/vanilla/` holds rewritten copies of files main also has (`src/cli.ts`, `src/config.ts`, `AGENTS.md`, ...); when a change to one of those should reach the vanilla result, make it in the template copy too. Biome, tsc, and the hooks skip `template/`, so the workflow (or a local `bun run vanilla -- --verify`) is what checks it: it fails when the template no longer builds against main.
 - `.github/workflows/release.yml` on a `v*` tag: checks the tag matches `package.json`, runs the gate and `build:all`, smoke-tests each binary on its own OS and CPU (`--version`, `doctor --tui`), then publishes binaries, `SHA256SUMS`, and `install.sh` (`contents: write` in that job only).
 - Actions are pinned to major tags.

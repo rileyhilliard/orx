@@ -29,7 +29,7 @@ defaults:
       bun-v1.4.2)"), process.exit(1))'
     - bun install --frozen-lockfile --silent
   # Plain text for whoever reads the output or ~/.rr/logs, usually an agent: bun would
-  # otherwise color their output even though the remote shell has no TTY.
+  # otherwise color its output even though the remote shell has no TTY.
   env:
     NO_COLOR: "1"
     FORCE_COLOR: "0"

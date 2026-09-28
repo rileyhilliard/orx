@@ -10,9 +10,9 @@ import { ChatToolsLive } from "./tools";
 
 /**
  * Every app service. Platform services (FileSystem, Path, Stdio, HttpClient, and the CLI's
- * Terminal and ChildProcessSpawner) come from outside: BunServices in src/bin.ts
- * and in tests/helpers/cli.ts (with a test Stdio). Nothing here reads config while being built; AppConfig loads it on
- * first use, so --help and --version work with a broken config file.
+ * Terminal and ChildProcessSpawner) come from outside: BunServices in src/bin.ts and in
+ * tests/helpers/cli.ts (with a test Stdio). Nothing here reads config while being built;
+ * AppConfig loads it on first use, so --help and --version work with a broken config file.
  */
 export const AppLayer = Layer.mergeAll(
   Llm.layer,

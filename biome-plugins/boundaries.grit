@@ -27,8 +27,8 @@ or {
       }
     }
   },
-  // A static import of src/tui/ from outside it loads OpenTUI on every run and in every test that imports it. A dynamic
-  // import("../tui/launch") (importTui in src/commands/load-tui.ts) is the way in, so only
+  // A static import of src/tui/ from outside it loads OpenTUI on every run and in every test that
+  // imports it. A dynamic import("../tui/launch") (importTui in src/commands/load-tui.ts) is the way in, so only
   // JsModuleSource counts.
   JsModuleSource() as $src where {
     $filename <: r".*/src/.*",
