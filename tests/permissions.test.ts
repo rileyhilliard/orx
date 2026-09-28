@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Effect, Fiber, Stream } from "effect";
-import { describe, expect, it } from "vitest";
 import {
   decide,
   isCompoundCommand,
@@ -238,10 +238,10 @@ describe("Permissions", () => {
         return { request, ids, cancelled, result: yield* Fiber.join(fiber) };
       }).pipe(Effect.provide(Permissions.layer("default"))),
     );
-    expect(outcome.ids).toEqual([
+    expect(outcome.ids).toEqual<unknown>([
       outcome.request?.type === "approval-request" && outcome.request.id,
     ]);
-    expect(outcome.cancelled).toEqual({ type: "approval-cancelled", id: outcome.ids[0] });
+    expect(outcome.cancelled).toEqual<unknown>({ type: "approval-cancelled", id: outcome.ids[0] });
     expect(outcome.result).toEqual({ deny: "The user said no: interrupted" });
   });
 

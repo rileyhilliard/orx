@@ -1,9 +1,9 @@
+import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Option, Stream } from "effect";
-import { describe, expect, it } from "vitest";
 import { Paths } from "~/config";
 import { expandCommand, loadCommands, parseMarkdown, withArguments } from "~/core/commands";
 import { expandSkill, loadSkills, loadSlash } from "~/core/skills";
@@ -20,7 +20,7 @@ const fixture = () => {
     writeFileSync(file, text);
   };
   const layer = Layer.merge(
-    NodeServices.layer,
+    BunServices.layer,
     Layer.succeed(Paths, {
       configFile: join(userDir, "config.json"),
       dataDir: join(base, "data"),
@@ -32,7 +32,7 @@ const fixture = () => {
     root,
     workspace: (rel: string, text: string) => write(join(root, ".orx", rel), text),
     user: (rel: string, text: string) => write(join(userDir, rel), text),
-    run: <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices | Paths>) =>
+    run: <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Paths>) =>
       Effect.runPromise(Effect.provide(effect, layer)),
   };
 };

@@ -1,7 +1,7 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { askEvents, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
@@ -88,7 +88,7 @@ describe("orx ask --agent", () => {
     const events = askEvents(run.stdout) as Array<{ type: string; id?: string; name?: string }>;
     const denied = events.filter((e) => e.type === "permission-denied");
     const editCall = events.find((e) => e.type === "tool-call" && e.name === "edit");
-    expect(denied).toEqual([
+    expect(denied).toEqual<unknown>([
       {
         type: "permission-denied",
         id: editCall?.id,

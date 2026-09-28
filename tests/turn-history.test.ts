@@ -1,6 +1,6 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Effect, Option, Schema, Stream } from "effect";
 import { Prompt, Response } from "effect/unstable/ai";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { INTERRUPTED_RESULT, runTurn, sendMessage, stepPrompt, toPrompt } from "~/core/chat";
 import { ELIDE_ALL, elide, estimateTokens } from "~/core/context";
 import { chatToMarkdown } from "~/core/export";
@@ -8,6 +8,7 @@ import { chatsTable } from "~/core/format";
 import { AssistantMessage, type ChatId, type ChatMessage } from "~/schemas";
 import { ChatStore } from "~/services/ChatStore";
 import { runScript } from "../scripts/lib/script-layer";
+import { restoreEnv, stubEnv } from "./helpers/env";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -30,9 +31,9 @@ type WireMessage = {
 
 describe("turn history", () => {
   it("replays a reply's steps in the next turn, with tool call ids and results", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     stub.toolCalls = [{ name: "currentTime", arguments: '{"timeZone":"UTC"}' }];
     try {
       await runScript(
@@ -60,7 +61,7 @@ describe("turn history", () => {
         }),
       );
     } finally {
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
     expect(stub.chatRequests).toHaveLength(3);
     const messages = (stub.chatRequests[2] as { messages: WireMessage[] }).messages;
@@ -79,9 +80,9 @@ describe("turn history", () => {
   });
 
   it("drops an earlier model's reasoning details when the chat switches models", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     const detail = { type: "reasoning.text", text: "Need the time.", signature: "sig-1", index: 0 };
     stub.steps = [
       {
@@ -112,7 +113,7 @@ describe("turn history", () => {
         }),
       );
     } finally {
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
     expect(stub.chatRequests).toHaveLength(4);
     const assistantCall = (request: unknown) =>
@@ -155,9 +156,9 @@ describe("turn history", () => {
   });
 
   it("sends @ attachments to the model but saves and shows only the typed text", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
-    vi.stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
-    vi.stubEnv("LOG_LEVEL", "error");
+    stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    stubEnv("OPENROUTER_BASE_URL", stub.baseUrl);
+    stubEnv("LOG_LEVEL", "error");
     const id = "4b9f7f55-5a0e-4a8e-9a53-2f0c7f0c1a11" as ChatId;
     const attachments = '<file path="a.ts">\n     1\tconst secretSauce = 1;\n</file>';
     const chat = {
@@ -182,7 +183,7 @@ describe("turn history", () => {
         }),
       );
     } finally {
-      vi.unstubAllEnvs();
+      restoreEnv();
     }
     expect(saved[0]).toEqual({ role: "user", text: "explain @a.ts", attachments });
     const messages = (stub.chatRequests[0] as { messages: WireMessage[] }).messages;

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -11,9 +12,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Fiber, Layer, Stream } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { agentShellEnv } from "~/config";
 import { FileState } from "~/services/file-state";
 import { type PermissionMode, Permissions } from "~/services/permissions";
@@ -28,11 +28,11 @@ import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrou
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-write-tools-")));
 
-type Services = Workspace | FileState | Permissions | NodeServices.NodeServices;
+type Services = Workspace | FileState | Permissions | BunServices.BunServices;
 
 const layerFor = (root: string, mode: PermissionMode) =>
   Layer.mergeAll(Workspace.layerTest(root), FileState.layer, Permissions.layerHeadless(mode)).pipe(
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(BunServices.layer),
   );
 
 /** Runs `effect` in a workspace at `root` (acceptEdits unless given); a tool failure comes back as `{ failure }`. */
@@ -245,7 +245,7 @@ describe("edit", () => {
       Workspace.layerTest(root),
       FileState.layer,
       Permissions.layer("default"),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+    ).pipe(Layer.provideMerge(BunServices.layer));
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
         const permissions = yield* Permissions;

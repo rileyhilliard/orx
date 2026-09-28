@@ -1,10 +1,10 @@
+import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger, Option } from "effect";
 import { TestClock } from "effect/testing";
-import { describe, expect, it } from "vitest";
 import { Paths } from "~/config";
 import {
   buildSystemPrompt,
@@ -77,7 +77,7 @@ const pathsFor = (configHome: string) =>
 
 const memoryFor = (root: string, configHome: string) =>
   Effect.runPromise(
-    loadMemory(root).pipe(Effect.provide(pathsFor(configHome)), Effect.provide(NodeServices.layer)),
+    loadMemory(root).pipe(Effect.provide(pathsFor(configHome)), Effect.provide(BunServices.layer)),
   );
 
 describe("loadMemory", () => {
@@ -124,7 +124,7 @@ describe("loadMemory", () => {
     const memory = await Effect.runPromise(
       loadMemory(root).pipe(
         Effect.provide(pathsFor(join(root, "config"))),
-        Effect.provide(NodeServices.layer),
+        Effect.provide(BunServices.layer),
         Effect.provide(
           Logger.layer([
             Logger.make(({ logLevel, message }) => {
@@ -159,7 +159,7 @@ describe("gatherEnv", () => {
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.UTC(2026, 8, 28, 12));
         return yield* gatherEnv(root);
-      }).pipe(Effect.provide(Layer.mergeAll(host, NodeServices.layer, TestClock.layer()))),
+      }).pipe(Effect.provide(Layer.mergeAll(host, BunServices.layer, TestClock.layer()))),
     );
 
   it("reads the branch from .git/HEAD, a worktree's gitdir, or a detached hash", async () => {

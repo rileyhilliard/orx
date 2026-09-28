@@ -1,5 +1,5 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { AiError } from "effect/unstable/ai";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { toUpstreamError } from "~/core/upstream";
 import { ndjson, runCli } from "./helpers/cli";
 import {
