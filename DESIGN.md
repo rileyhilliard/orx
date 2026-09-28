@@ -26,14 +26,17 @@ Top to bottom: a one-row header (`orx`, the model, the short chat id right-align
 
 Messages are separated by one blank row. A reply is its tool lines, then its text, then an error line if it failed, then its usage line (`model · 278 in / 30 out · $0.000057`). No boxes around messages, no avatars, no timestamps.
 
-The model picker is an overlay inset from the edges, with a search input and a list of model ids. It's the only bordered panel besides the composer.
+The model picker and the command list share one overlay (`src/tui/picker.tsx`), inset from the edges, with a search input and a list (the command list shows each description under its name). It's the only bordered panel besides the composer.
+
+Slash command output (`/help`, an unknown command or mode) is a few unbordered lines between the messages and the composer, `muted` (or `error`), until the next message or Esc. A permission mode other than `default` shows right-aligned in the footer, `muted`.
 
 ## Keys
 
 | Key | Does |
 | --- | --- |
-| Enter | Send the message |
-| Esc | Stop the streaming reply (it's saved, marked interrupted), or close the picker |
+| Enter | Send the message, or run a `/command` |
+| / | In an empty composer, open the command list (built-ins, custom commands, skills) |
+| Esc | Stop the streaming reply (it's saved, marked interrupted), close a list, or dismiss the /help or error lines |
 | Ctrl+P | Open the model picker (not while a reply streams) |
 | Ctrl+E | Export the chat as Markdown into the current directory |
 | Ctrl+C | Quit, stopping a reply first so it's saved; exit code 0 |

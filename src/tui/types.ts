@@ -57,4 +57,26 @@ export interface ChatBridge {
    */
   readonly exportMarkdown: () => Promise<string>;
   readonly quit: () => void;
+  /** Custom commands (`.orx/commands`, `~/.config/orx/commands`), loaded once per session. */
+  readonly listCommands: () => Promise<ReadonlyArray<UiSlashItem>>;
+  /** Skills (`.orx/skills`, `~/.config/orx/skills`), loaded once per session. */
+  readonly listSkills: () => Promise<ReadonlyArray<UiSlashItem>>;
+  /**
+   * What `/name args` sends for a custom command (it wins a clash) or a skill, or undefined
+   * when no command or skill has that name.
+   */
+  readonly expandCommand: (name: string, args: string) => Promise<UiExpansion | undefined>;
+  /** Starts a new, empty chat on the same model (`/clear`); resolves to its id. */
+  readonly newChat: () => Promise<string>;
+}
+
+export interface UiSlashItem {
+  readonly name: string;
+  readonly description: string;
+}
+
+export interface UiExpansion {
+  readonly text: string;
+  /** The model for this turn only, when a command's frontmatter names one. */
+  readonly model?: string;
 }
