@@ -15,7 +15,7 @@ Read `DESIGN.md` first: it has the color roles, the layout, the keys, and the st
 
 The deletion test. Delete the element. If nothing is lost, it was decoration. Applies to borders, titles, labels, separators, icons, badges, and hint text. Run it on every one before shipping.
 
-The squint test. Look at a capture (`bun run tui:capture -- chat --keys "hi<enter>"`) from across the room, or with the colors stripped. If you can't tell that the conversation is the main thing, the screen has no hierarchy. Hierarchy on a grid comes from brightness (`text` over `muted` over `faint`), position, and blank rows, not from frames and hue.
+The squint test. Look at a capture (`bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`) from across the room, or with the colors stripped. If you can't tell that the conversation is the main thing, the screen has no hierarchy. Hierarchy on a grid comes from brightness (`text` over `muted` over `faint`), position, and blank rows, not from frames and hue.
 
 ## Frames
 

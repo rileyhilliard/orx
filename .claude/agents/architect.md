@@ -23,6 +23,7 @@ Read `AGENTS.md` and the rules in `.claude/rules/src/` that touch the area. The 
 - Services are `Context.Service` classes composed into `AppLayer`. Swapping an implementation (JSON files to SQLite) means a new static layer on the same service.
 - Config is lazy: `--help`, `--version`, `doctor`, and `update` work with no key and a broken config file. The key never comes from a file.
 - The turn loop in `src/core/chat.ts` is hand-written (Effect AI has no step loop): retry only before the first part, save on every exit.
+- The agent's tools are behind an approval gate and inside a workspace (`agent-tools.md`): anything that changes files or runs a process asks `Permissions` through `permit`, every path resolves through `Workspace`, secret-shaped files ask or are skipped, and writes check `FileState` for stale reads. `orx mcp` has no one to approve anything, so it serves only `ChatTools` and `extractContact`, never file or shell tools.
 - The TUI gets plain functions and async iterables from the bridge; components never import Effect. Effect owns signals and the exit code.
 - Four release targets, each binary embedding one native lib; `update` replaces the binary by rename, never in place.
 - Tests never touch the network.

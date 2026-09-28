@@ -43,4 +43,4 @@ A bash script with `set -euo pipefail`, run as `curl -fsSL .../install.sh | bash
 
 ## doctor
 
-`orx doctor` (hidden) reports version, platform, compiled, paths, whether the key is set (never its value), and config errors, and never fails on bad config. `--tui` loads OpenTUI's native library and, at a terminal, creates and destroys a renderer: the release smoke uses it to prove a binary's TUI works on its platform.
+`orx doctor` (listed in `--help`, for bug reports) reports version, platform, compiled, paths, whether the key is set (never its value), and config errors, and never fails on bad config. `--tui` loads OpenTUI's native library and, at a terminal, creates and destroys a renderer: the release smoke uses it to prove a binary's TUI works on its platform.

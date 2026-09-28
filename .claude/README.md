@@ -61,6 +61,7 @@ Each file in `rules/src/` loads only when the agent touches files matching its `
 | `effect-services.md` | services, `core/`, runtime, config, errors, logging, `main.ts`: services and layers, config, tagged errors, retry, logging |
 | `cli.md` | `bin.ts`, `main.ts`, `cli.ts`, `commands/`, output and input helpers, errors: the stdout contract, exit codes, flags, the platform boundary |
 | `effect-ai.md` | the turn loop, tools, extract, `ask`, `mcp`: who owns the step loop, retry before the first part, tool schemas per provider |
+| `agent-tools.md` | `src/tools/`, the Permissions, Workspace, and FileState services, `core/session.ts`: the approval gate, path containment, secret paths, stale-edit checks, and why agent tools stay out of `orx mcp` |
 | `openrouter.md` | the provider, models list, chat, replay fixtures, the recorder: routing, usage and cost, the `llm call` log line |
 | `tui.md` | `src/tui/`, `commands/session.ts`, `commands/load-tui.ts`, `tests/tui/`, `tui-capture`, `DESIGN.md`: the bridge, terminal and signal ownership, states, TUI tests |
 | `distribution.md` | the build script, `install.sh`, `update`, `doctor`, releases, CI workflows, `e2e/`: compiled binaries, native libs, self-update |

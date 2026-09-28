@@ -52,7 +52,4 @@ Work that is deliberately not scheduled in any phase, so nobody mistakes it for 
 
 These are small, known, and not phase work; each is one PR.
 
-- `HEADLESS_DENIAL` in `src/services/permissions.ts` tells the user to "run orx chat", which no longer exists.
-- `DESIGN.md` says the footer always lists every key; since phase 1 it shows a fixed subset and `/help` lists the rest.
-- `scripts/vanilla.ts` doesn't remove `plans/`, so the vanilla tree inherits orx's product plans.
 - The coding eval has never run against a real model ([phase 1](phase-1-edits-code.md), "Still open").

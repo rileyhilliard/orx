@@ -2,7 +2,7 @@
 
 Status: EXECUTED 2026-09-28, verification step still open (the coding eval has not run against real models) | Size: XL | Depends on: none
 
-This was RFC 0001 (`plans/0001-coding-agent.md`, drafted, reviewed, and executed 2026-09-27 to 2026-09-28). It is now the record of what phase 1 designed and what it built. Where the design and the code disagree, the code wins and the disagreement is written down under "What changed during execution" or "Corrections to the design". Symbols are cited instead of line numbers, per `plans/README.md`.
+This began as the coding-agent RFC (drafted, reviewed, and executed 2026-09-27 to 2026-09-28) and is now this file: the record of what phase 1 designed and what it built. Where the design and the code disagree, the code wins and the disagreement is written down under "What changed during execution" or "Corrections to the design". Symbols are cited instead of line numbers, per `plans/README.md`.
 
 ## Why
 

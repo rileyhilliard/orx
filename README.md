@@ -1,6 +1,6 @@
 # orx
 
-A terminal client for any OpenRouter model: `orx ask` streams a reply into your terminal or a pipe, bare `orx` is a coding agent session (file and shell tools, slash commands, skills) with a model picker and per-reply tokens and cost, `orx extract` pulls structured data out of text, and `orx mcp` offers the same tools to agents over MCP. One self-contained binary that updates itself.
+A terminal client for any OpenRouter model: `orx ask` streams a reply into your terminal or a pipe, bare `orx` is a coding agent session (file and shell tools, slash commands, skills) with a model picker and per-reply tokens and cost, `orx extract` pulls structured data out of text, and `orx mcp` offers `currentTime` and `extractContact` to other agents over MCP (the file and shell tools stay in the session, behind its approvals). One self-contained binary that updates itself.
 
 Built with [Effect](https://effect.website) (CLI, AI, and MCP modules), [OpenTUI](https://github.com/sst/opentui) for the terminal UI, and [Bun](https://bun.sh), which compiles it to a single file.
 
@@ -19,7 +19,7 @@ The installer picks the binary for your OS and CPU (macOS and Linux with glibc, 
 ```bash
 orx ask "what's a monad, in one sentence"
 git diff | orx ask "review this diff"        # piped stdin is appended to the prompt
-orx ask --json "time in Tokyo?" | jq -c .   # NDJSON: text, tool-call, tool-result, done | error
+orx ask --json "time in Tokyo?" | jq -c .   # NDJSON: text, tool-call, tool-result, permission-denied, note, then done | error
 orx                                          # the coding agent, working in this directory
 orx --resume <id>                            # ids from `orx chats`
 orx ask --agent --permission-mode acceptEdits "rename fmtPrice to formatPrice"
@@ -27,6 +27,7 @@ orx models gpt                               # search models, prices per million
 orx extract "Ada Lovelace, ada@example.com, Analytical Engines Ltd"
 orx export <id> -o chat.md
 claude mcp add orx -- orx mcp                # currentTime and extractContact as MCP tools
+orx doctor                                   # version, paths, key set or not, config errors (--tui checks the TUI)
 ```
 
 Every reply is saved as a chat (the id is printed after the reply, on stderr). Results go to stdout and everything else (usage lines, logs, errors) to stderr, so pipes only see the answer. When stdin isn't a terminal, `ask` and `extract` read it to the end, so in a `while read` loop or under a job runner whose stdin stays open, give them `< /dev/null`.
@@ -113,7 +114,7 @@ bun run check                     # the gate (CI adds coverage and build:all)
 |---|---|
 | `bun run orx -- <args>` | orx from source, logging at `info` to the terminal, `logs/orx.jsonl`, and `logs/orx.log`; chats in `.orx/data` |
 | `bun run stub` / `stub:stop` | Stub OpenRouter and GitHub releases on local ports; prints the env to point orx at them |
-| `bun run tui:capture -- <args> --keys ...` | Runs orx in a pseudo-terminal, types keys, prints the screen |
+| `bun run tui:capture -- --keys ... [-- <orx flags>]` | Runs orx in a pseudo-terminal, types keys, prints the screen |
 | `bun run lint` / `format` / `typecheck` | Biome check / Biome fixes / tsc |
 | `bun run test` | vitest (Node) and the TUI tests (bun), no network |
 | `bun run e2e` | Builds `dist/orx` and tests the binary, including the TUI in a PTY |

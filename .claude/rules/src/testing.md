@@ -26,7 +26,7 @@ paths:
 
 ## Where a test goes
 
-- Commands: argv through `runCli(argv, { env, stdin, stdoutIsTerminal, host, root })` (`tests/helpers/cli.ts`), which runs the real `main` and `AppLayer` on `NodeServices` with a test `Stdio`. Assert `exitCode`, `stdout` (only the result; empty on failure), `stderr`, and `logs` (every record, debug and up). `ndjson(stdout)` parses `--json` streams. Reuse `root` across runs to see saved chats.
+- Commands: argv through `runCli(argv, { env, stdin, stdoutIsTerminal, host, root })` (`tests/helpers/cli.ts`), which runs the real `main` and `AppLayer` on `NodeServices` with a test `Stdio`. Assert `exitCode`, `stdout` (only the result; empty on failure), `stderr`, and `logs` (every record, debug and up). `askEvents(stdout)` decodes `ask --json` output with the `AskEvent` schema (a field it doesn't declare fails the test); `ndjson(stdout)` parses other NDJSON, such as `orx mcp` frames. Reuse `root` across runs to see saved chats.
 - Programs and services: `@effect/vitest` (`it.effect`) with the layers they need, for anything time-based (`TestClock`) or below the CLI.
 - TUI: `tests/tui/` with a fake `ChatBridge` (`tui.md`).
 - The compiled binary: `e2e/`, only for what only the binary can break (`distribution.md`).

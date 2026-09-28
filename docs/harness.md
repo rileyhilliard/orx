@@ -32,6 +32,7 @@ Layers are listed earliest first. "Rule" means a file in `.claude/rules/src/` th
 | Writing a secret into a file | `.env` is gitignored and `Read(./.env)` is denied; the config file schema rejects `apiKey` | `detect-secrets.ts` denies credential-shaped writes | `tests/config.test.ts` proves a key in the config file never reaches a request |
 | Installing Zod, `@effect/schema`, Ink, or the MCP SDK | `AGENTS.md` | `guard-commands.ts` denies the install | the Grit plugin flags the import |
 | A type error, including one in a caller of the edited file | none | `typecheck-on-write.ts` hands back `tsc` errors after each write | pre-push `typecheck`, CI |
+| A workspace tool that skips the approval gate or escapes the workspace (a mutating tool without `permit`, a path not through `Workspace.resolve`, a write without the stale-edit check, a file or shell tool served by `orx mcp`) | `agent-tools.md` rule | `tests/agent-tools.test.ts`, `tests/agent-write-tools.test.ts`, and `tests/agent-approval.test.ts` drive each tool against paths outside the root, symlinks, secret files, and denials; `tests/mcp.test.ts` pins `tools/list` to `currentTime` and `extractContact` | the `reviewer` agent checks the same invariants before a commit |
 | The TUI and the programs disagree (event shapes, errors) | `tui.md` rule | `tests/tui/closed-loop.test.tsx` renders `App` over the real bridge against the stub | e2e drives the binary's TUI in a PTY |
 | OpenTUI taking over signals or Ctrl+C | `tui.md` rule | `tests/tui/launch.test.ts` pins the renderer options | e2e checks Ctrl+C exits 0 and leaves the alternate screen |
 | A binary that builds but can't load its native library | `distribution.md` rule | `doctor --tui` in e2e | release.yml runs it on each OS and CPU before publishing |
@@ -82,7 +83,7 @@ Run these from the repo root in your own terminal.
 1. A hook denies a command (30 seconds): `echo '{"tool_name":"Bash","tool_input":{"command":"bun test"}}' | bun .claude/hooks/guard-commands.ts` prints a deny with the right command. `bun run test:unit tests/hooks` runs every hook test.
 2. The boundary plugin flags a platform import (30 seconds): add `import "bun:ffi";` to `src/core/models.ts`, run `bun run lint`, and remove it.
 3. Drive the CLI with no key (1 minute): `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask --bogus --json; echo $?` (stdout empty, exit 2), and `jq -c 'select(.msg=="command")' logs/orx.jsonl`.
-4. See the TUI as an agent does (30 seconds): `bun run tui:capture -- chat --keys "hi<enter>" --wait-for "in /"`.
+4. See the TUI as an agent does (30 seconds): `bun run tui:capture -- --keys "hi<enter>" --wait-for "in /"`.
 5. The `/feature` workflow (1 minute to explain): in Claude Code, `/feature <what to build>` writes an RFC in `docs/rfcs/`, has it challenged, executes it in a worktree with one subagent per work group, runs the gate and two code reviews, and opens a PR.
 
 ## Working in a worktree

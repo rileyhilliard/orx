@@ -43,6 +43,7 @@ const ROOT = join(import.meta.dirname, "..");
 /** Product files and directories, deleted before the template is copied in. */
 const REMOVE = [
   ".claude/commands/add-tool.md",
+  ".claude/rules/src/agent-tools.md",
   "docs/rfcs",
   "evals",
   "plans",
