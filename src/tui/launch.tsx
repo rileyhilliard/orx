@@ -241,7 +241,10 @@ export const makeBridge = <R = never, M = never>(
                   chat = saved;
                 }),
               ),
-              Effect.ignore,
+              // The turn's own outcome is already shown; a failed reload keeps the old chat.
+              Effect.catchCause((cause) =>
+                Effect.logWarning("reloading the chat after a turn failed", cause),
+              ),
             ),
           ),
           Stream.toAsyncIterableWith(context),
@@ -258,7 +261,13 @@ export const makeBridge = <R = never, M = never>(
                 .filter((m) => m.supportsTools)
                 .map((m) => ({ id: m.id, name: m.name })),
             })),
-            Effect.orElseSucceed(() => ({ available: false, models: [] })),
+            // The picker falls back to the current model; the log says why.
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning("listing models failed", cause), {
+                available: false,
+                models: [],
+              }),
+            ),
           ),
         ),
       exportMarkdown: () => {
@@ -301,9 +310,14 @@ export const makeBridge = <R = never, M = never>(
             if (command) {
               // A command's own model must be able to call tools, like the session's.
               return yield* expandSessionCommand(command, args).pipe(
-                Effect.catchTag("UnknownModel", (error) =>
-                  Effect.succeed({ error: `/${name}: ${error.message}` }),
-                ),
+                Effect.catchCause((cause) => {
+                  const error = cause.reasons.find(Cause.isFailReason)?.error;
+                  if (isAppError(error))
+                    return Effect.succeed({ error: `/${name}: ${error.message}` });
+                  return Effect.as(Effect.logError("expanding a command failed", cause), {
+                    error: `/${name} failed; the log has the details.`,
+                  });
+                }),
               );
             }
             const skill = skills.find((k) => k.name === name);
