@@ -26,10 +26,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
+      # The grep tool uses rg when it's on PATH; tests/agent-tools.test.ts fails in CI without it.
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
       # Every platform's OpenTUI native package, so build:all can embed each target's.
       - run: bun install --frozen-lockfile --os='*' --cpu='*'
       - run: bun run lint
       - run: bun run typecheck
+      # The unit tests, with a coverage report in the failure artifact. No thresholds: a report, not a gate.
       - run: bun run coverage
       - run: bun run test:tui
       # Builds dist/orx, then drives it in a pseudo-terminal against the stubs.

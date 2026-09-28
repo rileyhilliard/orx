@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
+      # The grep tool's rg path is tested; tests/agent-tools.test.ts fails in CI without rg.
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: bun install --frozen-lockfile --os='*' --cpu='*'
       - name: Tag matches package.json
         run: |
