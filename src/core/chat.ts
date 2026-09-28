@@ -1,5 +1,5 @@
 import { OpenRouterLanguageModel } from "@effect/ai-openrouter";
-import { Cause, Clock, Duration, Effect, Exit, Option, Ref, Stream } from "effect";
+import { Cause, Clock, Duration, Effect, Exit, Option, Ref, Schema, Stream } from "effect";
 import { AiError, LanguageModel, Prompt, Response, Toolkit } from "effect/unstable/ai";
 import type { AssistantMessage, ChatId, ChatMessage, StoredChat, ToolStep, Usage } from "~/schemas";
 import { loadConfig } from "../config";
@@ -183,15 +183,22 @@ interface Activity {
 }
 
 /** OpenRouter's provider and cost, from a finish part's metadata. */
-const readOpenRouter = (part: Response.FinishPart) => {
-  const openrouter = (part.metadata as Record<string, unknown> | undefined)?.openrouter as
-    | { provider?: unknown; usage?: { cost?: unknown } }
-    | undefined;
-  return {
-    provider: typeof openrouter?.provider === "string" ? openrouter.provider : undefined,
-    cost: typeof openrouter?.usage?.cost === "number" ? openrouter.usage.cost : undefined,
-  };
-};
+const decodeProvider = Schema.decodeUnknownOption(
+  Schema.Struct({ openrouter: Schema.Struct({ provider: Schema.String }) }),
+);
+const decodeCost = Schema.decodeUnknownOption(
+  Schema.Struct({ openrouter: Schema.Struct({ usage: Schema.Struct({ cost: Schema.Number }) }) }),
+);
+
+const readOpenRouter = (part: Response.FinishPart) => ({
+  // Decoded apart, so a malformed field loses only itself.
+  provider: Option.getOrUndefined(
+    Option.map(decodeProvider(part.metadata), (m) => m.openrouter.provider),
+  ),
+  cost: Option.getOrUndefined(
+    Option.map(decodeCost(part.metadata), (m) => m.openrouter.usage.cost),
+  ),
+});
 
 /** OpenRouter's error object in a stream chunk (the provider passes it through as-is). */
 interface StreamErrorBody {

@@ -16,10 +16,10 @@ export interface CaseRun {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   /** USD, from OpenRouter's usage accounting. */
-  readonly cost?: number;
-  readonly provider?: string;
+  readonly cost?: number | undefined;
+  readonly provider?: string | undefined;
   /** The model id OpenRouter reports serving (differs from `model` after a fallback). */
-  readonly servedModel?: string;
+  readonly servedModel?: string | undefined;
 }
 
 /**

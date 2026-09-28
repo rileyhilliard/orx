@@ -195,7 +195,7 @@ export const Picker = <T,>({
       border
       borderColor={theme.accent}
       title={title}
-      bottomTitle={matches.length > rows ? ` ${selected + 1} of ${matches.length} ` : undefined}
+      {...(matches.length > rows ? { bottomTitle: ` ${selected + 1} of ${matches.length} ` } : {})}
       bottomTitleAlignment="right"
       flexDirection="column"
       backgroundColor={theme.selectedBg}

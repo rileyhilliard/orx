@@ -58,12 +58,12 @@ export type HookResult = {
   stdout: string;
   stderr: string;
   /** stdout parsed as JSON, when it is JSON. */
-  output?: HookOutput;
+  output?: HookOutput | undefined;
 };
 
 export type RunOptions = {
   /** Merged over the test process env. CLAUDE_PROJECT_DIR defaults to the repo. */
-  env?: Record<string, string | undefined>;
+  env?: Record<string, string | undefined> | undefined;
   cwd?: string;
   /** The tool name for matching, when the payload doesn't carry one (a raw string). */
   tool?: string;

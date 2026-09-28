@@ -338,7 +338,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     if (key.name === "tab" && key.shift && !overlay) {
       // yolo isn't in the cycle (only --dangerously-skip-permissions sets it), so Shift+Tab from
       // yolo goes to default and can't come back.
-      const next = MODES[(MODES.indexOf(mode as (typeof MODES)[number]) + 1) % MODES.length];
+      const next = MODES[((MODES as ReadonlyArray<UiMode>).indexOf(mode) + 1) % MODES.length];
       if (next === undefined) return;
       setMode(next);
       bridge.setMode(next).catch(() => setStatus("Couldn't change the mode."));

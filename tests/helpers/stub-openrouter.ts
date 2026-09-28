@@ -70,7 +70,7 @@ export interface StubStep {
 
 export interface ReplayOptions {
   /** Write each body in pieces of this many bytes (default: whole). Splits lines and characters. */
-  chunkSize?: number;
+  chunkSize?: number | undefined;
 }
 
 /** An HTTP error for POST /chat/completions, the way OpenRouter fails before a stream starts. */
