@@ -294,6 +294,7 @@ export const makeBridge = <R = never, M = never>(
             s.skills.map((k) => ({ name: k.name, description: k.description })),
           ),
         ),
+      loadWarnings: () => run(Effect.map(slash, (s) => s.warnings)),
       expandCommand: (name, args) =>
         run(
           Effect.gen(function* () {

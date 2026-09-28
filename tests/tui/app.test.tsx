@@ -49,6 +49,7 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
       { name: "pdf", description: "Fill PDF forms" },
       { name: "review", description: "A skill the command shadows" },
     ],
+    loadWarnings: async () => [],
     expandCommand: async (name, args) => {
       if (name === "review") return { text: `Review ${args}`, model: "acme/reviewer" };
       if (name === "pdf") return { text: `PDF steps${args ? `\n\nARGUMENTS: ${args}` : ""}` };
@@ -83,6 +84,26 @@ describe("App", () => {
     const frame = captureCharFrame();
     expect(frame).toContain("openai/gpt-test");
     expect(frame).toContain("Ctrl+P model");
+  });
+
+  it("shows what went wrong loading commands and skills when it starts, until Esc", async () => {
+    const { bridge } = fakeBridge([], {
+      loadWarnings: async () => [
+        "/work/.orx/skills/pdf/SKILL.md: Missing key",
+        'Skill "review" has a command\'s name; /review runs the command',
+      ],
+    });
+    const setup = await render(bridge);
+    const frame = await waitForScreen(setup, (f) => f.includes("Missing key"), 2000);
+    expect(frame).toContain("/review runs the command");
+    // Above the composer, like /help's lines.
+    const lines = frame.split("\n");
+    const warning = lines.findIndex((l) => l.includes("Missing key"));
+    const composer = lines.findIndex((l) => l.includes("Message"));
+    expect(warning).toBeGreaterThan(0);
+    expect(warning).toBeLessThan(composer);
+    setup.mockInput.pressEscape();
+    await waitForScreen(setup, (f) => !f.includes("Missing key"), 2000);
   });
 
   it("fits the footer and a non-default mode in 80 columns", async () => {

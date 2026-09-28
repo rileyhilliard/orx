@@ -61,6 +61,7 @@ The footer shows the keys that fit in 80 columns next to the mode (`@ files · /
 - Error: the partial reply stays, with the error line under it. A retryable error says "(send again to retry)"; a non-retryable one (a rejected key) says only what happened.
 - Models list unavailable: the picker says so in the error color, and Esc closes it; chat keeps the current model.
 - A custom command whose `model:` is unknown or can't call tools: the error line says which and where to change it, and nothing is sent.
+- Custom commands or skills that didn't load cleanly (a bad file, a skill over its limits, a skill named like a command): when the session starts, one `muted` line per warning where `/help`'s lines go, until the next message or Esc.
 
 ## Do and don't
 

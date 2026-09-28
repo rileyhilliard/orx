@@ -96,6 +96,11 @@ export interface ChatBridge {
   /** Skills (`.orx/skills`, `~/.config/orx/skills`), loaded once per session. */
   readonly listSkills: () => Promise<ReadonlyArray<UiSlashItem>>;
   /**
+   * What loading the commands and skills warned about (a file that didn't load, a skill over
+   * its size limits, a skill named like a command), one line each; shown when the session starts.
+   */
+  readonly loadWarnings: () => Promise<ReadonlyArray<string>>;
+  /**
    * What `/name args` sends for a custom command (it wins a clash) or a skill, or undefined
    * when no command or skill has that name. A command whose `model:` is unknown or can't call
    * tools resolves to `{ error }` instead, the line to show.
