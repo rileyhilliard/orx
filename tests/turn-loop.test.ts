@@ -1,4 +1,4 @@
-import { Effect, Logger, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Logger, Option, Schema, Stream } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTurn, type TurnEvent } from "~/core/chat";
@@ -77,13 +77,20 @@ const saved = (reply: AssistantMessage | undefined) => {
 describe("a tool call to a tool that doesn't exist", () => {
   // Effect AI decodes each step's parts against the toolkit, so a call to a name it doesn't have
   // fails the step (InvalidOutputError) before orx sees the call: retried before any output,
-  // a failed turn after it. What must hold is that the saved reply never carries the call.
+  // a failed turn after it. The error doesn't carry the name the model called, so orx can't
+  // answer the call and go on. What must hold is that the saved reply never carries the call.
   it("fails the turn after text, and the saved reply replays with no unanswered call", async () => {
     useStub();
     stub.steps = [{ text: "Let me check.", toolCalls: [{ name: "nope", arguments: "{}" }] }];
     const first: ChatMessage[] = [{ role: "user", text: "do it" }];
     const { exit, reply } = await turn(first);
     expect(exit._tag).toBe("Failure");
+    // The user is told the model's output was the problem, not the network.
+    const error = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
+    expect(Option.getOrUndefined(error)).toMatchObject({
+      _tag: "UpstreamUnavailable",
+      message: expect.stringContaining("a call to a tool orx doesn't have"),
+    });
     expect(reply).toMatchObject({ text: "Let me check.", interrupted: true, tools: [] });
 
     const next = await turn([...first, saved(reply), { role: "user", text: "again" }]);

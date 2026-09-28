@@ -10,7 +10,7 @@ import { OpenRouterModels } from "../services/OpenRouterModels";
 import { type ApprovalEvent, Permissions } from "../services/permissions";
 import { ChatTools, type ChatToolsLive } from "../tools";
 import { ATTACHMENT_OPTIONS, budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
-import { isContextLengthError, timedOut, toUpstreamError } from "./upstream";
+import { isContextLengthError, isRetryableUpstream, timedOut, toUpstreamError } from "./upstream";
 
 /** What the chat tools' handlers need (ChatToolsLive in the app, the same layer in tests). */
 export type ChatToolHandlers = Layer.Success<typeof ChatToolsLive>;
@@ -385,7 +385,9 @@ const step = <R>(options: StepOptions<R>) => {
                     yield* Effect.logWarning("Prompt too long for the model; eliding and retrying");
                     return run(yield* options.shorter, retriesLeft, delay, true);
                   }
-                  if (started || retriesLeft === 0 || !error.isRetryable) return Stream.fail(error);
+                  if (started || retriesLeft === 0 || !isRetryableUpstream(error)) {
+                    return Stream.fail(error);
+                  }
                   const retryAfter = error.retryAfter;
                   if (
                     retryAfter !== undefined &&

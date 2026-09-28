@@ -2,8 +2,21 @@ import { Option, Schema } from "effect";
 import type { AiError } from "effect/unstable/ai";
 import { UpstreamUnavailable } from "../errors";
 
-const statusOf = (reason: AiError.AiErrorReason): number | undefined =>
-  "http" in reason ? reason.http?.response?.status : undefined;
+/**
+ * OpenRouter's status for a failure: the HTTP status, or for an error it sent after the stream
+ * started, the code in the error chunk (`streamErrorReason` in chat.ts keeps it in the reason's
+ * metadata), so a mid-stream 503 reads like one before the stream.
+ */
+const statusOf = (reason: AiError.AiErrorReason): number | undefined => {
+  const status = "http" in reason ? reason.http?.response?.status : undefined;
+  if (status !== undefined) return status;
+  const openrouter = "metadata" in reason ? reason.metadata.openrouter : undefined;
+  const code =
+    typeof openrouter === "object" && openrouter !== null && !Array.isArray(openrouter)
+      ? openrouter.errorCode
+      : undefined;
+  return typeof code === "number" ? code : undefined;
+};
 
 /** OpenRouter's own reason, on one line and capped, for logs and evals. Never headers. */
 export const upstreamDetail = (error: AiError.AiError): string => {
@@ -107,6 +120,13 @@ export const toUpstreamError = (error: AiError.AiError): UpstreamUnavailable => 
         `The ${reason.toolName} tool failed inside orx (${reason._tag}); that's a bug in orx or the tool, not the network.`,
         error.isRetryable,
       );
+    case "InvalidOutputError":
+      // Effect AI decodes the model's parts against the toolkit, so this is also a call to a
+      // tool orx doesn't have.
+      return fail(
+        "The model's output didn't match what orx expects (a call to a tool orx doesn't have, or a malformed part); that's the model, not the network. Try again or pick another model.",
+        error.isRetryable,
+      );
     case "UnsupportedSchemaError":
     case "ToolkitRequiredError":
       return fail(
@@ -120,6 +140,13 @@ export const toUpstreamError = (error: AiError.AiError): UpstreamUnavailable => 
       );
   }
 };
+
+/**
+ * Whether trying the same request again can succeed, by the same rules as the message the
+ * user sees: every automatic retry (a turn's step, extract) decides with this.
+ */
+export const isRetryableUpstream = (error: AiError.AiError): boolean =>
+  toUpstreamError(error).retryable;
 
 export const timedOut = (what: string) =>
   new UpstreamUnavailable({ message: `${what} took too long.`, retryable: true });

@@ -52,7 +52,8 @@ describe("a chat turn", () => {
   });
 
   it("retries a failure before any output, then succeeds", async () => {
-    stub.failCompletions = { status: 503, times: 1 };
+    // A 502 (a transient provider failure); a 503 means no provider can serve it, not retried.
+    stub.failCompletions = { status: 502, times: 1 };
     const run = await runCli(["ask", "hi"], { env: { OPENROUTER_BASE_URL: stub.baseUrl } });
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(2);
