@@ -27,6 +27,27 @@ describe("stdout contract and exit codes", () => {
     expect(run.stdout).toMatch(/^orx v\d+\.\d+\.\d+/);
   });
 
+  // Effect's CLI formatter looks at the global process.stdout unless told otherwise, so help and
+  // --version would come out colored in a pipe whenever the test runner (or bin.ts's parent)
+  // had a terminal. The decision follows orx's own stdout.
+  it("colors help and --version only when orx's stdout is a terminal", async () => {
+    const isTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    try {
+      const piped = await runCli(["--version"], { env: { NO_COLOR: "" } });
+      expect(piped.stdout).toMatch(/^orx v\d+\.\d+\.\d+\n$/);
+      const terminal = await runCli(["--version"], {
+        env: { NO_COLOR: "" },
+        stdoutIsTerminal: true,
+      });
+      expect(terminal.stdout).toContain("\x1b[");
+      const noColor = await runCli(["--help"], { env: { NO_COLOR: "1" }, stdoutIsTerminal: true });
+      expect(noColor.stdout).not.toContain("\x1b[");
+    } finally {
+      process.stdout.isTTY = isTTY;
+    }
+  });
+
   it("exits 2 on an unknown flag with nothing on stdout", async () => {
     const run = await runCli(["ask", "--bogus"]);
     expect(run.exitCode).toBe(2);

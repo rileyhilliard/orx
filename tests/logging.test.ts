@@ -52,6 +52,22 @@ describe("toRecord (the JSON line shape)", () => {
     expect(record.error).toMatch(/boom/);
   });
 
+  // Bun sometimes builds an Error with no `stack` (seen in about one full test run in twelve),
+  // and Cause.pretty renders a stackless error as "". A stack trace limit of 0 does the same
+  // every time.
+  it("keeps the error's message when the runtime gives it no stack", () => {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
+    try {
+      const failed = toRecord(entry(["failed"], {}, Cause.fail("nope")));
+      const died = toRecord(entry(["defect"], {}, Cause.die(new TypeError("boom"))));
+      expect(failed.error).toBe("Error: nope");
+      expect(died.error).toBe("TypeError: boom");
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
+  });
+
   it("renames an annotation that would overwrite a record field", () => {
     const record = toRecord(entry("real message", { msg: "annotation", level: "x" }));
     expect(record).toMatchObject({

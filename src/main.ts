@@ -1,6 +1,7 @@
-import { Console, Effect, type Exit, Option } from "effect";
-import { Command } from "effect/unstable/cli";
+import { Console, Effect, type Exit, Option, Stdio } from "effect";
+import { CliOutput, Command } from "effect/unstable/cli";
 import { cli } from "./cli";
+import { cliColorConfig } from "./config";
 import { defectOf, exitCodeForOutcome, type Outcome, outcomeOf } from "./errors";
 import { VERSION } from "./version";
 
@@ -81,7 +82,12 @@ export const main = ({ argv, stdout, stderr }: MainIO) => {
           }),
         );
       });
-    const run = Command.runWith(cli, { version: VERSION, renderErrors: false })(argv);
+    const colors = yield* cliColorConfig(yield* (yield* Stdio.Stdio).stdoutIsTerminal).pipe(
+      Effect.orElseSucceed(() => false),
+    );
+    const run = Command.runWith(cli, { version: VERSION, renderErrors: false })(argv).pipe(
+      Effect.provide(CliOutput.layer(CliOutput.defaultFormatter({ colors }))),
+    );
     const exit = yield* (
       argv.includes("--wizard")
         ? run

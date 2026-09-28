@@ -75,7 +75,10 @@ export const toRecord = (entry: LogEntry): LogRecord => {
     record.detail = rest.length === 1 ? serialize(rest[0]) : rest.map(serialize);
   }
   if (entry.cause.reasons.length > 0) {
-    record.error = Cause.pretty(entry.cause);
+    // Cause.pretty, except that an Error Bun built without a stack still shows its message.
+    record.error = Cause.prettyErrors(entry.cause, { includeCauseInStack: true })
+      .map((error) => error.stack ?? `${error.name}: ${error.message}`)
+      .join("\n");
   }
   return record as LogRecord;
 };

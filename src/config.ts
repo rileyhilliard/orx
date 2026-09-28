@@ -338,6 +338,25 @@ export const logConfig: Config.Config<LoggerOptions> = Config.all({
   })),
 );
 
+/**
+ * Whether the CLI's own help and --version may use color. Effect's formatter would check the
+ * global process.stdout; orx passes whether its Stdio's stdout is a terminal.
+ */
+export const cliColorConfig = (stdoutIsTerminal: boolean) =>
+  Config.all({
+    noColor: optionalString("NO_COLOR"),
+    forceColor: optionalString("FORCE_COLOR"),
+  }).pipe(
+    Config.map(
+      ({ noColor, forceColor }) =>
+        Option.isNone(noColor) &&
+        Option.match(forceColor, {
+          onNone: () => stdoutIsTerminal,
+          onSome: (value) => value !== "0",
+        }),
+    ),
+  );
+
 /** Whether human-facing stderr lines (Output.note) may use color. */
 export const outputConfig = Config.all({
   noColor: optionalString("NO_COLOR"),
