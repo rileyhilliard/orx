@@ -2,7 +2,7 @@
 
 Status: PROPOSED 2026-09-28 | Size: XL (seven PR-sized steps) | Depends on: [phase 2](phase-2-delegates.md) steps 2b (permission rules) and 2f (agent files)
 
-Phase 3 is about leaving orx alone with a task for twenty minutes and coming back to something you can trust or undo. Claims about the code were checked at `a1b39e5`; recheck each before the step that relies on it (`plans/README.md`).
+Phase 3 is about leaving orx alone with a task for twenty minutes and coming back to something you can trust or undo. Claims about the code were checked at `a1b39e5`; recheck each before the step that relies on it (`README.md` in this folder).
 
 ## Summary
 
@@ -28,7 +28,7 @@ The same developer as phase 2, now running longer tasks: a refactor across a pac
 | "Undo what it just did" | `git checkout`, if the repo was clean and it's a git repo at all | `/rewind` to any earlier message: code, conversation, or both |
 | "Start the dev server and check the page" | `bash` blocks until the command exits, 10 minutes at most | `bash` with `run_in_background`, then `bash_output` |
 | "Read the docs for this library version" | Nothing; `:online` models search but can't read a given URL | `web_fetch` |
-| "Use my Linear, database, or browser MCP servers" | orx serves MCP but can't consume it | MCP client |
+| "Use my Linear, database, or browser MCP servers" | orx can't use MCP servers | MCP client |
 | "This repo formats on every edit and forbids `git push`" | Only memory files, which the model may ignore | Hooks and project rules |
 | "My team's repo should set this up for everyone" | Only user-level config | Project settings, behind trust |
 
@@ -130,9 +130,7 @@ Permissions: a new `web_fetch` request kind with a `domain` field; rules take `W
 
 Servers come from `mcpServers` in the user's config file and from a trusted project's `.mcp.json`, in Claude Code's shape: `{command, args, env}` for stdio, `{type: "http", url, headers}` for streamable HTTP, with `${VAR}` expanded from the environment through `src/config.ts`. An `McpClients` service connects to each at session start, lists tools, and exposes them through `Tool.dynamic` (Effect AI builds a tool from a raw JSON Schema, which is what MCP gives). Names are `mcp__<server>__<tool>`, as in Claude Code, so rules and agent files copy across. Each call goes through `Permissions` as kind `mcp`: ask by default, `mcp__server__tool` rules to allow. Output is capped like `bash`'s. A server that fails to start is a load warning and its tools are absent; it doesn't stop the session.
 
-Transport: Effect ships `McpSchema` (including the `ClientRpcs` a client sends) and the RPC machinery `McpServer` uses, but no packaged client. Building the client on `McpSchema` plus Effect's RPC client keeps one stack and one schema library; `@modelcontextprotocol/sdk` is the fallback if HTTP transport or session handling turns out to be large. Spike it first. A test fixture is free: orx can connect to `orx mcp` itself over stdio.
-
-`orx mcp` keeps serving `ChatTools` only. Serving the agent's tools there would bypass the gate, and nothing in phase 3 changes that.
+Transport: Effect ships `McpSchema` (including the `ClientRpcs` a client sends) and the RPC machinery `McpServer` uses, but no packaged client. Building the client on `McpSchema` plus Effect's RPC client keeps one stack and one schema library; `@modelcontextprotocol/sdk` is the fallback if HTTP transport or session handling turns out to be large. Spike it first. The test fixture is a small stdio MCP server in `tests/helpers/`, built on Effect's `McpServer`.
 
 ### Hooks (3f)
 
@@ -169,7 +167,7 @@ Each step is one PR and leaves `bun run check` green.
 - **Checkpoints:** bun test against a temp workspace: a turn with three edits and a created file rewinds to byte-identical files; an externally modified file is skipped and reported; a subagent's edit is rewound with the parent's message; retention prunes. `tests/tui` for the picker and the three choices.
 - **Jobs:** a stub-scripted turn starts `sleep 30 && echo done` in the background, reads output, kills it; ending the session kills a job (process gone); `bash_output` on an unknown job is a tool failure.
 - **web_fetch:** a local HTTP stub (like `stub-releases.ts`) serving HTML, a redirect to another domain (refused), a 10 MB body (capped); the domain rule allowing one host; `prompt` mode against the stub OpenRouter, cost added to the reply.
-- **MCP:** orx as client to `orx mcp` over stdio, listing and calling `currentTime`; a server that fails to start; an `mcp__` rule.
+- **MCP:** orx as client to the stub stdio server, listing and calling its tool; a server that fails to start; an `mcp__` rule.
 - **Hooks:** a `PreToolUse` script exiting 2 blocks an edit and the model sees stderr; `PostToolUse` context appended; an untrusted project's hooks don't run.
 - **Trust:** untrusted project settings ignored in the session and headless; trusting stores the hash; editing a hook re-asks.
 - **Sandbox:** in e2e, since it needs the real binary and OS: a sandboxed `bash` can write inside the workspace and not outside it, and can't reach the network; `doctor` reports availability. The CI job runs on macOS and Linux (bubblewrap installed in the Linux job); `rr` covers the two Macs.
@@ -179,7 +177,7 @@ Each step is one PR and leaves `bun run check` green.
 
 - A 10-edit turn rewinds to byte-identical files, in a git repo and outside one.
 - With the sandbox on, `rename-across-files` passes in `acceptEdits` headless with no denied calls and no `yolo`.
-- orx as an MCP client drives `orx mcp` in a test, and a real stdio server (a filesystem or database server) works by hand with a config copied from Claude Code's `.mcp.json`.
+- orx as an MCP client drives the stub server in a test, and a real stdio server (a filesystem or database server) works by hand with a config copied from Claude Code's `.mcp.json`.
 - A Claude Code `PostToolUse` formatter hook, copied unchanged from a `.claude/settings.json`, runs in orx.
 - The trust panel shows once per workspace and again only when the settings change.
 

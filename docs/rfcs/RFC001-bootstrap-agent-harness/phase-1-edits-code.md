@@ -1,8 +1,8 @@
 # Phase 1: it edits code
 
-Status: EXECUTED 2026-09-28, verification step still open (the coding eval has not run against real models) | Size: XL | Depends on: none
+Status: EXECUTED 2026-09-28 | Size: XL | Depends on: none
 
-This began as the coding-agent RFC (drafted, reviewed, and executed 2026-09-27 to 2026-09-28) and is now this file: the record of what phase 1 designed and what it built. Where the design and the code disagree, the code wins and the disagreement is written down under "What changed during execution" or "Corrections to the design". Symbols are cited instead of line numbers, per `plans/README.md`.
+This began as the coding-agent RFC (drafted, reviewed, and executed 2026-09-27 to 2026-09-28) and is now this file: the record of what phase 1 designed and what it built. Where the design and the code disagree, the code wins and the disagreement is written down under "What changed during execution" or "Corrections to the design". Symbols are cited instead of line numbers, per this folder's `README.md`.
 
 ## Why
 
@@ -25,7 +25,7 @@ Out, and now tracked in [phase 2](phase-2-delegates.md), [phase 3](phase-3-runs-
 | Eval | `53611cf` | The `rename-across-files` case in `evals/cases.ts` |
 | Docs | `a1b39e5` | README, AGENTS.md architecture map, DESIGN.md for the approval panel and pickers |
 
-Everything in scope shipped. The one thing the RFC made a condition of calling phase 1 done, running the coding eval against two or three real models, has not happened (see "Still open").
+Everything in scope shipped, and the coding eval the RFC made a condition of calling phase 1 done passed on three of four real models (see "Eval results").
 
 ## Design, as built
 
@@ -43,7 +43,7 @@ The root is the process cwd at launch, or `--cwd <dir>` on `orx` and `ask --agen
 
 ### Tools
 
-`AgentTools` (`src/tools/agent.ts`) holds the agent's tools, one file each, with schemas in `src/schemas/tools.ts`. It is separate from `ChatTools` because `orx mcp` serves `ChatTools` (`McpTools` in `src/tools/mcp.ts` merges them), and file and shell tools over MCP would bypass the approval gate; `orx mcp` still serves `currentTime` and `extractContact` only. `SessionTools` in `src/core/session.ts` merges `AgentTools` with `SkillTools`. Tools use `failureMode: "return"` with a `ToolFailure` schema, so bad input and errors reach the model as tool results. Handlers get `FileSystem`, `Path`, `ChildProcessSpawner`, `Workspace`, `FileState`, and `Permissions` by capturing `Effect.context` inside `toLayer(Effect.gen(...))`. Output limits are constants in `src/tools/limits.ts`.
+`AgentTools` (`src/tools/agent.ts`) holds the agent's tools, one file each, with schemas in `src/schemas/tools.ts`. It was built separate from `ChatTools` because `orx mcp` served `ChatTools`, and file and shell tools over MCP would bypass the approval gate. (`orx mcp`, `ChatTools`, and `currentTime` were removed on 2026-09-28; `AgentTools` is now the only toolkit.) `SessionTools` in `src/core/session.ts` merges `AgentTools` with `SkillTools`. Tools use `failureMode: "return"` with a `ToolFailure` schema, so bad input and errors reach the model as tool results. Handlers get `FileSystem`, `Path`, `ChildProcessSpawner`, `Workspace`, `FileState`, and `Permissions` by capturing `Effect.context` inside `toLayer(Effect.gen(...))`. Output limits are constants in `src/tools/limits.ts`.
 
 - `read {path, offset?, limit?}`: numbered lines (`cat -n` style), 2000 lines by default, lines over 2000 chars cut, notes for empty, binary, or offset past the end; refuses files over 10 MB. Records `{mtimeMs, size, hash}` in `FileState`.
 - `write {path, content}`: creates parent dirs; an existing file must be in `FileState` and unchanged on disk, or the tool says "read it first" or "changed since you read it". UTF-8 only; a byte order mark is kept.
@@ -112,7 +112,7 @@ One line per tool call: running, then `→ read src/x.ts · 120 lines` or `→ b
 
 ### Repo conventions this touched
 
-`scripts/vanilla.ts` deletes an explicit `REMOVE` list; every new product file went on it in the PR that created it, and `bun run vanilla` also drops the `diff`, `ignore`, and `picomatch` dependencies. New env vars went in `config.ts`, `.env.example`, and the README. The stub OpenRouter gained scripted `steps` with several tool calls, text plus tool calls, reasoning details, and slow chunks.
+New product files went on `scripts/vanilla.ts`'s `REMOVE` list (`bun run vanilla` and its template were removed afterwards, on 2026-09-28, with `orx extract` and `orx mcp`). New env vars went in `config.ts`, `.env.example`, and the README. The stub OpenRouter gained scripted `steps` with several tool calls, text plus tool calls, reasoning details, and slow chunks.
 
 ## Verification, as planned
 
@@ -164,8 +164,20 @@ Found while turning the RFC into this record, checked against the code at `a1b39
 - The scrubbed shell env removes `OPENROUTER_*` and `ORX_*`. Other credentials in the user's shell (`AWS_*`, `GITHUB_TOKEN`) reach `bash`. That matches the RFC's wording ("no orx secrets") but is worth knowing; [phase 3](phase-3-runs-unattended.md) revisits it with the sandbox.
 - Custom command and skill loading is shared through helpers in `src/core/commands.ts` (`parseMarkdown`, `decodeFrontmatter`, `slashDirs`); there is no separate loader module.
 
+## Eval results
+
+`bun run eval` on 2026-09-28, `rename-across-files` through `ask --agent --permission-mode acceptEdits`, one run per model:
+
+| Model | Result | Tool calls | Tokens in / out | Cost | Latency |
+| --- | --- | --- | --- | --- | --- |
+| `z-ai/glm-5.3-flash` | pass | 12 (grep, 4 read, 6 edit, grep) | 12,303 / 539 | $0.0021 | 8.4 s |
+| `openai/gpt-6-luna` | pass | 10 (grep, 4 read, 4 edit, grep) | 10,190 / 424 | $0.0006 | 9.0 s |
+| `deepseek/deepseek-v4-flash` | pass | 12 (grep, 4 read, 6 edit, grep) | 14,912 / 971 | $0.0008 | 11.6 s |
+| `qwen/qwen3-coder-30b-a3b-instruct` | fail | 0 | 2,186 / 54 | $0.0002 | 1.9 s |
+
+The three passing models took the same path: search, read every hit, edit, then search again to confirm. The qwen failure is the model's: it ends a step with `finish_reason: stop` and no text or tool call. In the eval run it did that on the first step; rerun by hand, it made three tool calls first and then stopped the same way, with the files unchanged. orx reports that as a finished turn, which is correct: the model said it was done. One run per model is a smoke test, not a pass rate.
+
 ## Still open
 
-- **Run the coding eval against real models.** `rename-across-files` has never run against a real model: there is no `evals/results/` in the checkout or the main tree. The RFC made this the gate for calling phase 1 done. Run `bun run eval --models <two or three tool-capable models>` (for example one Anthropic, one OpenAI, one open-weight model) and record pass rates, steps, and cost here. It needs a key and costs a little money, so it's a user action.
 - **Tune the elision threshold.** `ELIDE_AT` (0.6) and `PROTECTED_STEPS` (2) are guesses. Nothing measures them yet: `rename-across-files` is too small to reach 60% of any current window. Tuning needs a long-context case (a task that reads more than the window can hold, so elision has to fire) and a comparison of pass rate and cost at, say, 0.5, 0.6, and 0.75. [Phase 2's](phase-2-delegates.md) compaction work depends on the answer, so the case is scheduled there.
 - **Open question from the RFC, settled:** `.orx/` is both `bun run orx`'s data dir in this checkout (`.orx/data`) and the project commands and skills dir. Nobody objected; it stays.

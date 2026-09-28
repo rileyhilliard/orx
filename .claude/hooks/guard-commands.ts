@@ -4,7 +4,7 @@
 //   @effect/vitest, or jest                 @effect/vitest were removed
 //   installing zod, @effect/schema,         Effect Schema is the schema library; @effect/schema and
 //   @effect/platform (v3), ink,             @effect/platform are Effect 3; the TUI is OpenTUI; MCP
-//   @modelcontextprotocol/sdk               is Effect's McpServer
+//   @modelcontextprotocol/sdk               goes through Effect's MCP modules
 //   npm / pnpm / yarn installs              bun is the package manager (bun.lock)
 //
 // Commands are read the way bash runs them (see _shell.ts), so a quoted mention (a commit message,
@@ -30,7 +30,7 @@ const BANNED: Record<string, string> = {
   jest: RUNNER,
   ink: "The TUI is OpenTUI (@opentui/react), in src/tui/. Load the opentui skill.",
   "@modelcontextprotocol/sdk":
-    "orx mcp is Effect's McpServer (effect/unstable/ai), serving the Toolkit in src/tools/mcp.ts.",
+    "MCP goes through Effect's MCP modules (McpServer, McpSchema in effect/unstable/ai), as phase 3 of the roadmap plans for the MCP client.",
 };
 
 /** The package name in an install spec: `zod@3`, `@effect/platform@4.0.0` -> the name. */

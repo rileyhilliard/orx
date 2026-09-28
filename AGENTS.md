@@ -4,7 +4,7 @@ Instructions for coding agents working in this repository. Keep this file under 
 
 ## Overview
 
-orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), bare `orx` is the coding agent TUI (workspace tools, slash commands, skills) with a model picker, per-reply tokens and cost, and Markdown export, `orx extract` is a structured-output example, `orx mcp` serves `currentTime` and `extractContact` over MCP (never the workspace tools, which need the approval gate), and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, MCP is Effect's `McpServer`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, test runner), Biome 2, TypeScript 7 (`tsc`).
+orx is a terminal client for OpenRouter, compiled to one binary with `bun build --compile`: `orx ask` streams a reply (pipe-friendly, `--json` for NDJSON), bare `orx` is the coding agent TUI (workspace tools, slash commands, skills) with a model picker, per-reply tokens and cost, and Markdown export, and `orx update` replaces the binary from GitHub Releases. Code is Effect 4 (`4.0.0-rc.117`): the CLI is `effect/unstable/cli`, model calls are Effect AI with `@effect/ai-openrouter`, validation is Effect Schema. The TUI is OpenTUI (`@opentui/core` + `@opentui/react` 0.5.12) on React 19. Tooling: bun 1.4 (runtime, package manager, compiler, test runner), Biome 2, TypeScript 7 (`tsc`).
 
 ## Commands
 
@@ -15,6 +15,7 @@ Run these from the repo root. They are `package.json` scripts (plus `bun test <f
 | `bun install` | Dependencies, then `scripts/prepare.ts` installs the git hooks (skipped when `CI` is set) |
 | `bun run orx -- <args>` | orx from source, with `LOG_LEVEL=info`, logs in `logs/orx.jsonl` and `logs/orx.log`, chats in `.orx/data` |
 | `bun run stub` / `stub:stop` | A stub OpenRouter and stub releases on local ports, detached; prints `export` lines (`eval "$(bun run --silent stub)"`) |
+| `bun run demo [dir]` | The `rename-across-files` eval's small TypeScript project in a fresh git repo (a temp dir by default), for trying the agent by hand |
 | `bun run tui:capture -- --keys "hi<enter>"` | Runs orx in a pseudo-terminal, types the keys, prints the screen as text (`--wait-for <text>`, `--bin dist/orx`; orx's own flags after a second `--`) |
 | `bun run lint` | `biome check .` (lint, format, import order, `biome-plugins/boundaries.grit`) |
 | `bun run format` | `biome check --write .` |
@@ -25,10 +26,9 @@ Run these from the repo root. They are `package.json` scripts (plus `bun test <f
 | `bun run e2e` | Builds `dist/orx`, then `bun test ./e2e`: the binary as a process and in a PTY, against the stubs |
 | `bun run check` | The full gate: lint, typecheck, test, e2e. Run it before calling work done. CI also installs every target's native package (`bun install --os='*' --cpu='*'`), runs `coverage` in place of `test`, and ends with `build:all` |
 | `bun run build` / `build:all` | `dist/orx` for this machine / every release target plus `dist/SHA256SUMS` (needs `bun install --os='*' --cpu='*'`) |
-| `bun run eval --models a,b` | `evals/cases.ts` against real models through orx's own programs. Needs a key, costs money, never in CI |
+| `bun run eval --models a,b` | `evals/cases.ts` (coding tasks) against real models through `orx ask --agent` in a temp workspace. Needs a key, costs money, never in CI |
 | `bun run record:openrouter` | Re-records `tests/fixtures/openrouter/` from real OpenRouter streams. Needs a key |
 | `bun run clean` | Remove `dist/`, `coverage/`, `logs/` |
-| `bun run vanilla -- --name <name>` | On a new branch (`--branch`, default `vanilla`), strip orx down to a blank-slate CLI: deletes the product (chat, models, extract, chats, export, mcp, tools, evals, fixtures), copies `template/vanilla/` over what referenced it, with `--name` renames orx to `<name>`, runs `bun run check` (`--no-check` skips it), commits. Needs a clean tree; ignored files stay out of it. `--verify` does it to HEAD in a throwaway worktree |
 | `rr check` / `rr test` / `rr test -- ./tests/<file> -t "<name>"` / `rr tui -- ./tests/tui/<file>` | The same scripts on a remote Mac (`.rr.yaml`: m4-mini, m1-mini), synced with rsync; see Remote runs below |
 
 Remote runs: `rr <task>` syncs the tree you run it from (in a worktree, its root) and runs the task on the first free host; each task checks bun >= 1.4.2 and runs `bun install --frozen-lockfile` first. `rr run "<one quoted command>"` runs anything else, e.g. `rr run 'eval "$(bun run --silent stub)" && bun run orx -- ask hi --json; bun run stub:stop'` (stop the stub in the same run). The remote has no `.git`, `.env`, or key. Pull files into a gitignored dir: `rr pull logs/orx.jsonl --dest logs/remote/` (without `--dest` they land in the repo root and sync back). Read the result event's `log_file` instead of rerunning, and don't pipe rr through `tail`.
@@ -44,25 +44,24 @@ src/
                     one `command` log line. Platform-free; tests run it through tests/helpers/cli.ts
   cli.ts            the command tree
   commands/         one file per command, thin: decode -> one program -> render via Output.
-                    session.ts (bare `orx`), ask, models, extract, chats, export, mcp, update,
-                    doctor; shared.ts flags; load-tui.ts (the dynamic TUI import -> TuiUnavailable)
+                    session.ts (bare `orx`), ask, models, chats, export, update, doctor;
+                    shared.ts flags; load-tui.ts (the dynamic TUI import -> TuiUnavailable)
   core/             programs: chat.ts (the turn loop, a Stream of TurnEvents), session.ts (builds a
                     coding session: root, system prompt, tool layer), prompt.ts (system prompt,
                     AGENTS.md memory), context.ts (eliding old tool outputs and attachments, cache
                     breakpoints), mentions.ts (`@path` attachments), commands.ts + skills.ts (from
-                    .orx/ and ~/.config/orx/), models.ts, extract.ts, export.ts, update.ts,
+                    .orx/ and ~/.config/orx/), models.ts, export.ts, update.ts,
                     upstream.ts (AiError -> UpstreamUnavailable), input.ts, format.ts, stdin.ts,
-                    mcp-stdio.ts, files.ts (writing a file the user named, e.g. `export -o`)
+                    files.ts (writing a file the user named, e.g. `export -o`)
   services/         Context.Service + static layers: Llm, OpenRouterModels (10 min cache), ChatStore
                     (JSON files; layerMemory), Releases, Output (the only stdout writer), Host; per
                     session: Workspace (root, path containment, secret paths), FileState (what the
                     model read, for stale-edit checks), Permissions (modes, approvals)
-  tools/            Effect AI tools: ChatTools (chat + mcp), mcp.ts adds extractContact; AgentTools
-                    (read, glob, grep, write, edit, bash) and SkillTools for the session. read, write,
-                    edit, and bash ask Permissions through permit.ts; glob and grep stay in the
-                    Workspace and skip secret files themselves; limits.ts caps tool output.
-                    AgentTools stays out of ChatTools: `orx mcp` serves ChatTools, and file and shell
-                    tools there would bypass the approval gate (.claude/rules/src/agent-tools.md)
+  tools/            Effect AI tools for the coding agent: AgentTools (read, glob, grep, write, edit,
+                    bash) and SkillTools. read, write, edit, and bash ask Permissions through
+                    permit.ts; glob and grep stay in the Workspace and skip secret files themselves;
+                    limits.ts caps tool output (.claude/rules/src/agent-tools.md). Plain `ask`
+                    sends no tools
   schemas/          Effect Schema per domain, including the config file and the NDJSON events
   config.ts         every env var and the config file via Effect Config; Paths; logConfig
   version.ts        VERSION from package.json (release.yml checks the tag matches)
@@ -75,38 +74,37 @@ src/
                     line per tool call), commands.ts (slash parsing, built-ins, keys), types.ts (the
                     bridge), theme.ts, printable.ts (strips control characters from model text)
 scripts/            build.ts (native-lib plugin), orx-dev.ts, stub.ts + stub-server.ts, tui-capture.ts,
-                    record-openrouter.ts, prepare.ts, vanilla.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
+                    record-openrouter.ts, prepare.ts, demo.ts; lib/ (pty.ts, stub-pid.ts, script-layer.ts,
                     recording.ts)
-template/vanilla/   the files bun run vanilla writes over the tree (biome and tsc skip it)
 install.sh          curl | bash installer: OS/arch, SHA256SUMS check, ~/.local/bin
-evals/              bun run eval: cases.ts, run.ts, score.ts (pure, unit-tested)
-tests/              bun test; helpers/ (cli.ts runs main, effect.ts runTest, env.ts, wait.ts,
+evals/              bun run eval: coding cases.ts, run.ts, score.ts (pure, unit-tested)
+tests/              bun test; helpers/ (cli.ts runs main, effect.ts runTest, env.ts, wait.ts, tools.ts,
                     stub-openrouter.ts, stub-releases.ts); fixtures/openrouter/ recorded streams; tui/
                     (testRender, closed loop)
 e2e/                bun test against dist/orx
-docs/               harness.md, rfcs/
-plans/              the coding agent's roadmap: README.md (phase map), one file per phase, follow-ups.md
+docs/               harness.md; rfcs/RFC001-bootstrap-agent-harness/ (the coding agent's roadmap:
+                    README.md phase map, one file per phase, follow-ups.md)
 ```
 
 Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs one handler. A handler decodes its input, runs one program from `core/`, and renders the result through `Output`. Config loads on first use (`loadConfig`), so `--help`, `--version`, `doctor`, and `update` work with a broken config file. For a chat turn, `core/chat.ts` streams one model step at a time through Effect AI, runs tool calls, and re-prompts until the model stops or `MAX_TOOL_STEPS`; the finished chat is saved before the `finish` event, and the stream's `onExit` logs one `llm call` line and saves a partial reply marked `interrupted` when the turn didn't finish.
 
 ## Conventions
 
-- stdout carries results only, and only through `Output`. Logs, notes (`Output.note`), and errors go to stderr. `main.ts` holds the CLI's own Console output (help, `--version`) and sends it to stdout on success, stderr on a usage error. `orx mcp` depends on this: one stray stdout line corrupts JSON-RPC.
-- Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig` / `TuiUnavailable`, 4 `UpstreamUnavailable`, 5 `InvalidModelOutput`, 6 `PermissionDenied`, 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the README table.
+- stdout carries results only, and only through `Output`. Logs, notes (`Output.note`), and errors go to stderr. `main.ts` holds the CLI's own Console output (help, `--version`) and sends it to stdout on success, stderr on a usage error. Pipes depend on this: one stray stdout line corrupts `ask --json`.
+- Exit codes: 0 ok (and help), 1 defect, 2 usage error / `BadInput` / `NotFound` / `UnknownModel` / `NotInteractive`, 3 `NotConfigured` / `InvalidConfig` / `TuiUnavailable`, 4 `UpstreamUnavailable`, 6 `PermissionDenied` (5 is retired: it was `orx extract`'s invalid output), 130 interrupted. A new error needs a decision in `exitCodeFor` and `retryableFor` (both exhaustive) and a line in the README table.
 - `--json` makes results machine-readable (NDJSON `AskEvent`s for `ask`) and errors `{"error":{tag,message,retryable}}` on stderr.
 - Platform boundary: only `src/bin.ts` and `src/tui/**` may import `bun`, `bun:*`, `@effect/platform-bun`, or `@opentui/*`, or use the `Bun` global. Everything else is platform-free: it uses Effect's `FileSystem`, `Path`, `Stdio`, `HttpClient`, which `bin.ts` provides (`BunServices`). The session (bare `orx`) and `doctor` reach the TUI only by dynamic `import("../tui/launch")`.
 - TUI components never import `effect`; they get a `ChatBridge` (plain promises and async iterables) from `launch.tsx`. Colors come from `tui/theme.ts` only.
 - Only `src/config.ts` reads the environment (`bin.ts` also clears `DEV`, which would load OpenTUI's devtools). Empty values count as unset. A new var goes in `config.ts`, `.env.example`, and the README table; one the config file should also set goes in `schemas/config-file.ts` and `fileToEnv`.
 - Each service is a `Context.Service` class with static layers: `X.layer`, plus `X.layerMemory` where tests need fresh state.
-- Streaming model calls retry only before the first part is emitted (`step` in `core/chat.ts`); non-streaming calls (models list, extract, releases) use Effect retry + timeout.
+- Streaming model calls retry only before the first part is emitted (`step` in `core/chat.ts`); non-streaming calls (models list, releases) use Effect retry + timeout.
 - Chats are JSON files in `$ORX_DATA_DIR/chats/`, written to a temp file and renamed. Two processes saving one chat: the last write wins.
 - `dist/`, `coverage/`, `bun.lock`, and `tests/fixtures/openrouter/` are generated; regenerate them with their command instead of editing.
 
 ## Schemas
 
 - Schemas live in `src/schemas/`, one file per domain, re-exported from `index.ts`. A schema and its type share a name. Ids are branded (`ChatId`).
-- Decode at every trust boundary: argv values and stdin (`decodeInput`), env and the config file (Effect Config, `onExcessProperty: "error"`), third-party responses (models list, releases), and model output (extract decodes the model's object again).
+- Decode at every trust boundary: argv values and stdin (`decodeInput`), env and the config file (Effect Config, `onExcessProperty: "error"`), third-party responses (models list, releases), and model output (tool handlers decode their input).
 - Domain errors are `Schema.TaggedError` classes in `src/errors.ts`.
 - Effect AI tool parameter schemas become open JSON Schema objects (`additionalProperties: true`) and there is no option to close them; the handler still decodes its input. Zod is present only as a transitive dependency; never use it.
 
@@ -114,10 +112,10 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 
 - `bun test` (`bun:test`) for everything; every file under `tests/` shares one process, so a test puts back what it changes (`restoreEnv`, `mock.restore()`, closed stubs). `tests/helpers/cli.ts` `runCli(argv, { env, stdin })` runs the real `main` and `AppLayer` with `BunServices` and a captured `Stdio`, and returns `{ exitCode, stdout, stderr, logs }`. Prefer it: it tests the contract a user sees. Parse `ask --json` output with `askEvents(stdout)`, which decodes each line with `AskEvent` and fails on undeclared fields.
 - `grep`'s `rg` path is tested only where `rg` (ripgrep) is on PATH: install it locally or those tests skip. In CI (`CI` set) a missing `rg` fails `tests/agent-tools.test.ts`.
-- `tests/helpers/stub-openrouter.ts` stands in for OpenRouter (`/models`, streaming and non-streaming `/chat/completions`, failures, `hangAfter`, `dropAfter`, scripted `toolCalls`, `steps` with several tool calls, text, reasoning details, slow chunks, a `finishReason`, or a mid-stream `error`, `replay(fixtures)`); `stub-releases.ts` for GitHub releases. `tests/openrouter-replay.test.ts` replays the recorded bodies in `tests/fixtures/openrouter/` through the real provider and checks text, tokens, and cost against the recordings. Point `OPENROUTER_BASE_URL` / `ORX_RELEASES_URL` at them. Nothing is module-mocked.
+- `tests/helpers/stub-openrouter.ts` stands in for OpenRouter (`/models`, streaming `/chat/completions`, failures, `hangAfter`, `dropAfter`, scripted `toolCalls`, `steps` with several tool calls, text, reasoning details, slow chunks, a `finishReason`, or a mid-stream `error`, `replay(fixtures)`); `stub-releases.ts` for GitHub releases. `tests/openrouter-replay.test.ts` replays the recorded bodies in `tests/fixtures/openrouter/` through the real provider and checks text, tokens, and cost against the recordings; its tool turn uses the test-only `currentTime` tool in `tests/helpers/tools.ts`, which `record:openrouter` offers too. Point `OPENROUTER_BASE_URL` / `ORX_RELEASES_URL` at them. Nothing is module-mocked.
 - `tests/isolation.ts` runs before every `bun test` run (the `bunfig.toml` preload): no key, unreachable URLs, config, data, and HOME in a temp dir. No test can reach the network or your real files.
 - `tests/tui/`: components with `@opentui/react/test-utils` and a fake bridge, `closed-loop.test.tsx` with the real bridge and programs against the stub, and a pin on the renderer options.
-- `e2e/` (outside `bunfig.toml`'s root, run by `bun run e2e`) spawns `dist/orx` with an env built from scratch: exit codes and empty stdout, piped `ask --json`, `.env` ignored, the native library, `mcp`, the TUI in a PTY, install.sh, `update --check`. Keep it to what only the binary shows.
+- `e2e/` (outside `bunfig.toml`'s root, run by `bun run e2e`) spawns `dist/orx` with an env built from scratch: exit codes and empty stdout, piped `ask --json`, `.env` ignored, the native library, the TUI in a PTY, install.sh, `update --check`. Keep it to what only the binary shows.
 - A bug fix starts with a test that reproduces it. Weakening or skipping a test to get green is a failure, not a fix.
 
 ## Error handling
@@ -143,15 +141,12 @@ Things in the tree that exist to get a build through, not because they are right
 | `package.json`: `effect`, `@effect/platform-bun`, `@effect/ai-openrouter` pinned to exactly `4.0.0-rc.117`, plus an `overrides` pin on `@effect/platform-node-shared` (`@effect/platform-bun` depends on it with a caret range) | RCs break APIs between releases, and every Effect package must match; bump all together, run `bun run check`, update the `effect` skill | `effect` 4.0.0 is stable; switch to `^4` ranges |
 | `scripts/build.ts` native-lib plugin | a compiled binary would embed every platform's `@opentui/core-*` package it can resolve; the plugin keeps the target's only | OpenTUI or Bun select the native package per compile target |
 | `src/bin.ts` deletes `process.env.DEV` | `@opentui/react` loads its devtools when `DEV=true`, which a user's shell may set | OpenTUI stops reading `DEV` |
-| `src/core/mcp-stdio.ts` | Effect's stdio MCP transport stops when stdin closes and drops in-flight requests; the wrapper holds stdin open until every request has a response (or is cancelled), for at most 30 seconds | the transport drains pending requests on EOF |
-| `src/commands/mcp.ts` runs the server in a child fiber | the stdio transport interrupts the fiber that started it on EOF, which would make every session exit 130 | the transport ends normally on EOF |
 | `provider` is always null in `llm call` lines and replies | `@effect/ai-openrouter`'s chunk schema drops OpenRouter's `provider` field; `readOpenRouter` in `core/chat.ts` reads it when present | the provider keeps `provider` (`tests/openrouter-replay.test.ts` can then assert it) |
 | `src/tui/app.tsx` sets the composer through a ref (`input.value = ...`) and calls `focus()` when a list closes | a controlled `value` drops a keystroke typed just before Enter (both states batch to the same value), and flipping `focused` back after an overlay's input unmounts leaves nothing focused | a controlled `<input>` and the `focused` prop alone pass `tests/tui/app.test.tsx` |
 
 ## CI
 
 - `.github/workflows/ci.yml`, one job `ci-ok` (the required check) on push to `main`, pull requests, and manual dispatch; `contents: read`. Steps: setup-bun (from `packageManager`), ripgrep (apt), `bun install --frozen-lockfile --os='*' --cpu='*'`, lint, typecheck, coverage (every test under `tests/`, with a report; no thresholds), e2e, build:all. No setup-node: the `tsc` and `biome` shims run on the image's Node (unpinned); where no `node` is on PATH, `bun run` aliases it to bun. No `OPENROUTER_API_KEY`: tests never touch the network.
-- `.github/workflows/vanilla.yml` runs `bun run vanilla -- --verify --name demo` on the same triggers. `template/vanilla/` holds rewritten copies of files main also has (`src/cli.ts`, `src/config.ts`, `AGENTS.md`, ...); when a change to one of those should reach the vanilla result, make it in the template copy too. Biome, tsc, and the hooks skip `template/`, so the workflow (or a local `bun run vanilla -- --verify`) is what checks it: it fails when the template no longer builds against main.
 - `.github/workflows/release.yml` on a `v*` tag: checks the tag matches `package.json`, runs the gate and `build:all`, smoke-tests each binary on its own OS and CPU (`--version`, `doctor --tui`), then publishes binaries, `SHA256SUMS`, and `install.sh` (`contents: write` in that job only).
 - Actions are pinned to major tags.
 
@@ -162,7 +157,7 @@ Things in the tree that exist to get a build through, not because they are right
 
 ## Deferred
 
-Explicitly out of scope for now, so nobody mistakes them for forgotten work. `plans/follow-ups.md` lists these and the agent's own deferred work, each with what would bring it in.
+Explicitly out of scope for now, so nobody mistakes them for forgotten work. `docs/rfcs/RFC001-bootstrap-agent-harness/follow-ups.md` lists these and the agent's own deferred work, each with what would bring it in.
 
 - musl Linux (OpenTUI needs `OPENTUI_LIBC=musl` at runtime) and Windows (needs install.ps1 and a smoke job). npm distribution.
 - Code signing and notarization of the macOS binaries.
@@ -174,8 +169,6 @@ Steps only a human can do. Check here before reporting one of these as a problem
 
 - Put an OpenRouter key in `.env` (for `bun run orx`) or your shell (installed orx) as `OPENROUTER_API_KEY`, and set a credit limit on it at openrouter.ai. Confirm: `bun run orx -- ask hi` streams a real reply.
 - Create the GitHub repo and, if it isn't `rileyhilliard/orx`, change `DEFAULT_RELEASES_REPO` in `src/config.ts` and the URL in `install.sh` before the first tag.
-- Run `bun run record:openrouter` once: the fixtures were recorded through the AI SDK provider in rra, and re-recording through `@effect/ai-openrouter` confirms cost still arrives.
-- Run the `rename-across-files` coding eval against two or three real tool-capable models (`bun run eval --models a,b,c`) and record pass rates, steps, and cost in `plans/phase-1-edits-code.md` under "Still open". It has never run against a real model.
 
 ## Deeper context
 
@@ -184,8 +177,7 @@ Steps only a human can do. Check here before reporting one of these as a problem
 | Install, configuration, exit codes, commands for humans | `README.md` |
 | Claude Code hooks, rules, commands, agents, settings | `.claude/README.md`, `.claude/rules/src/` |
 | Which layer catches which mistake, one `orx ask` turn as a diagram | `docs/harness.md` |
-| Why this repo is shaped the way it is | `docs/rfcs/` |
-| What the coding agent is building next, phase status, what phase 1 shipped | `plans/README.md` |
+| What the coding agent is building next, phase status, what phase 1 shipped | `docs/rfcs/RFC001-bootstrap-agent-harness/README.md` |
 | Effect 4 APIs (cli, ai, platform-bun), v3 names that are gone | `.agents/skills/effect/SKILL.md` |
 | OpenTUI APIs, the test renderer | `.agents/skills/opentui/SKILL.md` |
 | TUI design: tokens, layout, keys; avoiding generic TUI patterns | `DESIGN.md`, `.agents/skills/tui-design-slop/SKILL.md` |

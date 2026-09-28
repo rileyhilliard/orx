@@ -27,7 +27,7 @@ Every file runs in one process, one after another, sharing `process.env`, module
 
 ## Where a test goes
 
-- Commands: argv through `runCli(argv, { env, stdin, stdoutIsTerminal, host, root })` (`tests/helpers/cli.ts`), which runs the real `main` and `AppLayer` on `BunServices` with a test `Stdio`. Assert `exitCode`, `stdout` (only the result; empty on failure), `stderr`, and `logs` (every record, debug and up). `askEvents(stdout)` decodes `ask --json` output with the `AskEvent` schema (a field it doesn't declare fails the test); `ndjson(stdout)` parses other NDJSON, such as `orx mcp` frames. Reuse `root` across runs to see saved chats.
+- Commands: argv through `runCli(argv, { env, stdin, stdoutIsTerminal, host, root })` (`tests/helpers/cli.ts`), which runs the real `main` and `AppLayer` on `BunServices` with a test `Stdio`. Assert `exitCode`, `stdout` (only the result; empty on failure), `stderr`, and `logs` (every record, debug and up). `askEvents(stdout)` decodes `ask --json` output with the `AskEvent` schema (a field it doesn't declare fails the test). Reuse `root` across runs to see saved chats.
 - Programs and services: an Effect body run with `runTest` (`tests/helpers/effect.ts`) and the layers it needs, for anything time-based (`TestClock`) or below the CLI.
 - TUI: `tests/tui/` with a fake `ChatBridge` (`tui.md`).
 - The compiled binary: `e2e/`, only for what only the binary can break (`distribution.md`).
@@ -35,7 +35,7 @@ Every file runs in one process, one after another, sharing `process.env`, module
 ## Required coverage
 
 - Every tagged error a command can produce, asserted by exit code and `retryable` through `runCli`, with stdout empty and the `--json` error shape on stderr.
-- The stdout contract: help on stdout for `--help`, nothing on stdout for a bad flag, `--json` errors as JSON on stderr, `orx mcp` writing only JSON-RPC frames (`tests/cli-contract.test.ts`, `tests/mcp.test.ts`).
+- The stdout contract: help on stdout for `--help`, nothing on stdout for a bad flag, `--json` errors as JSON on stderr, `ask --json` writing only `AskEvent`s (`tests/cli-contract.test.ts`).
 - The turn loop (`effect-ai.md`, Tests), the OpenRouter request body for each setting, the models cache TTL with `TestClock`, and retry schedules.
 - A key in the config file never reaching a request; a broken config file not breaking `--help`, `--version`, `doctor`, or `update`.
 - `update`: checksum mismatch changes nothing, running from source refuses, a read-only install dir exits 6.

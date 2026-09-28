@@ -1,6 +1,6 @@
 # Plans
 
-The roadmap for orx as a coding agent: what it's building, in what order, and what already shipped. One file per phase, plus a list of what's deliberately left out. `docs/rfcs/` is different: it records why the repository and its harness are shaped the way they are. A `/feature` RFC for one step of a phase goes in `docs/rfcs/` as before and links the phase file it implements.
+The roadmap for orx as a coding agent: what it's building, in what order, and what already shipped. One file per phase, plus a list of what's deliberately left out. A `/feature` RFC for one step of a phase goes in `docs/rfcs/` beside this folder and links the phase file it implements.
 
 ## What orx is building, and why
 
@@ -10,7 +10,7 @@ orx is a Claude Code-style coding agent that runs on any tool-capable OpenRouter
 
 | Phase | File | Status | In one line |
 | --- | --- | --- | --- |
-| 1 | [phase-1-edits-code.md](phase-1-edits-code.md) | Done (2026-09-28); the coding eval hasn't run against real models yet | Reads, edits, and runs commands in a workspace behind an approval gate, with slash commands, skills, and `@` files |
+| 1 | [phase-1-edits-code.md](phase-1-edits-code.md) | Done (2026-09-28); the coding eval passes on 3 of 4 cheap models | Reads, edits, and runs commands in a workspace behind an approval gate, with slash commands, skills, and `@` files |
 | 2 | [phase-2-delegates.md](phase-2-delegates.md) | Proposed | Subagents on cheaper models with their own cost, agent files, `.claude/` compatibility, todos, compaction, permission rules |
 | 3 | [phase-3-runs-unattended.md](phase-3-runs-unattended.md) | Proposed | Workspace trust, `/rewind`, background commands, `web_fetch`, an MCP client, hooks, an OS sandbox for `bash` |
 | n/a | [follow-ups.md](follow-ups.md) | Tracking | Out of scope on purpose, each with the trigger that would bring it in |
@@ -52,7 +52,7 @@ Plans are hypotheses, not specifications. Check each claim about the code before
 
 ## Related
 
-- [`AGENTS.md`](../AGENTS.md): the architecture map and conventions the plans build on.
-- [`README.md`](../README.md): the coding agent as users see it, including permission modes and configuration.
-- [`DESIGN.md`](../DESIGN.md): the TUI's color roles, layout, and keys, which every phase's TUI work follows.
-- [`docs/harness.md`](../docs/harness.md) and [`docs/rfcs/`](../docs/rfcs/): how the repository's own guardrails work and why.
+- [`AGENTS.md`](../../../AGENTS.md): the architecture map and conventions the plans build on.
+- [`README.md`](../../../README.md): the coding agent as users see it, including permission modes and configuration.
+- [`DESIGN.md`](../../../DESIGN.md): the TUI's color roles, layout, and keys, which every phase's TUI work follows.
+- [`docs/harness.md`](../../harness.md) and [`docs/rfcs/`](../): how the repository's own guardrails work and why.

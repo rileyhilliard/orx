@@ -15,7 +15,7 @@ The terminal's own background shows through: orx never paints a full-screen fill
 | Muted | `theme.muted` | The model id in the header, placeholders, the empty-state line, a denied tool call |
 | Faint | `theme.faint` | Usage lines, key hints, the chat id, an approval's scroll position: present but out of the way |
 | Accent | `theme.accent` | The `orx` wordmark and the picker's border. One job per screen |
-| Tool | `theme.tool` | Tool call lines (`→ currentTime({...})`) and the approval panel's summary |
+| Tool | `theme.tool` | Tool call lines (`→ read({...})`) and the approval panel's summary |
 | Error | `theme.error` | The error line under a reply, and nothing else |
 | Border | `theme.border` | The composer frame (`theme.faint` while a reply streams), and a list's highlighted row |
 | Selected | `theme.selectedBg` | A list's background, so it reads as a layer over the chat |

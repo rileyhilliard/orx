@@ -5,7 +5,7 @@ argument-hint: "<what the command does>"
 
 Add a command: $ARGUMENTS
 
-`orx extract` is the smallest complete slice, so use it as the template: `src/schemas/extract.ts`, `src/core/extract.ts`, `src/commands/extract.ts`, and its cases in the tests. `orx export` shows a command that reads saved state and writes a file. Read the rules for the paths you touch (`cli.md`, `effect-services.md`, `testing.md`, and `effect-ai.md` if it calls a model) and load the `effect` skill before writing Effect code.
+`orx export` is the smallest complete slice, so use it as the template: `src/core/export.ts`, `src/commands/export.ts`, and its cases in the tests; it reads saved state and writes a file. `orx models` shows one that calls OpenRouter through a cached service. Read the rules for the paths you touch (`cli.md`, `effect-services.md`, `testing.md`, and `effect-ai.md` if it calls a model) and load the `effect` skill before writing Effect code.
 
 If the request is ambiguous (what goes in, what comes out on stdout and with `--json`, what counts as failure and which exit code), state your assumptions in one short list before writing code, and ask if a wrong guess would be expensive to undo. The argv shape and exit codes are an interface scripts will depend on.
 

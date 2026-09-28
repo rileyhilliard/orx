@@ -9,7 +9,7 @@ paths:
 
 # Agent tools: the approval gate and the workspace
 
-`AgentTools` (`src/tools/agent.ts`: `read`, `glob`, `grep`, `write`, `edit`, `bash`, plus `currentTime`) and `SkillTools` make up the session's toolkit (`SessionTools` in `src/core/session.ts`), which bare `orx` and `ask --agent` both use. These tools touch the user's files and run their shell, so the invariants below are safety properties, not style. A change that breaks one is a blocker even if every test passes.
+`AgentTools` (`src/tools/agent.ts`: `read`, `glob`, `grep`, `write`, `edit`, `bash`) and `SkillTools` make up the session's toolkit (`SessionTools` in `src/core/session.ts`), which bare `orx` and `ask --agent` both use. These tools touch the user's files and run their shell, so the invariants below are safety properties, not style. A change that breaks one is a blocker even if every test passes.
 
 ## Invariants
 
@@ -17,8 +17,8 @@ paths:
 - **Every path goes through the Workspace.** A path from the model is resolved with `Workspace.resolve` (realpathed through its nearest existing ancestor, symlinks included, and refused outside the root) before any file operation: `glob`, `grep`, `write`, and `edit` do this. `read` uses `resolveReadable`, which also accepts a loaded skill's directory (`addReadRoot`); nothing that writes may use it. Show paths to the model with `Workspace.display`. `bash` takes no path: it runs with the workspace root as its cwd and the key scrubbed from its env, and the approval is its only boundary (it isn't sandboxed).
 - **Secrets stay out of the model's context.** `isSecretPath` (`.env*`, `*.pem`, `*.key`, `id_*`) decides it. `read`, `write`, and `edit` pass the displayed path to `permit`, and `decide` asks for a secret path in every mode but `yolo` (headless, that's a denial). `grep` never searches a secret file's contents: it checks `isSecretPath` on each file (and its real path) and excludes them from `rg` with globs, then says how many it skipped. `glob` lists names only, so it may list them.
 - **No write over a file the model hasn't seen.** `write` and `edit` run inside `FileState.withLock(path)`: check `FileState.checkFresh` (refuse `not-read` and `stale`), build the diff, `permit` with the diff, then check again after the answer (`ensureResolvesTo` for a symlink swapped in while the panel was open, `checkFresh` for a file edited meanwhile), write, and `FileState.record` the new bytes. `write` creating a new file skips the freshness check but fails if the file appeared during the approval. Parallel edits to one file serialize on the lock.
-- **AgentTools never joins ChatTools or McpTools.** `orx mcp` serves `McpTools` (`ChatTools` plus `extractContact`) with no approval gate: there's no one to ask, and `Permissions` isn't in its layer. A file or shell tool there would run whatever an MCP client sends. `tests/mcp.test.ts` pins `tools/list` to exactly `currentTime` and `extractContact`; `tests/agent-tools.test.ts` pins `AgentTools`'s tool names.
-- **A handler defect is a tool failure, not a crashed turn.** Each handler in `FileToolsLive` is wrapped with `catchToolDefect` (the `guard` in `agent.ts`), which logs the defect once and returns a `ToolFailure` the model can route around.
+- **No tool is served outside the session.** orx has no MCP server; if one comes back, it must not serve `AgentTools`, since nothing there could answer an approval. `tests/agent-tools.test.ts` pins `AgentTools`'s tool names.
+- **A handler defect is a tool failure, not a crashed turn.** Each handler in `AgentToolsLive` is wrapped with `catchToolDefect` (the `guard` in `agent.ts`), which logs the defect once and returns a `ToolFailure` the model can route around.
 
 ## Tests
 

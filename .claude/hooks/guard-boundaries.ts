@@ -7,7 +7,7 @@
 //                             and gets Effect's FileSystem, Path, Stdio, HttpClient from src/bin.ts
 //   process.env               only in src/config.ts (Effect Config) and src/bin.ts (the DEV clear)
 //   console.*                 nowhere in src/: results go through Output, diagnostics through
-//                             Effect.log*; a stray stdout line corrupts `--json` and `orx mcp`
+//                             Effect.log*; a stray stdout line corrupts `--json`
 //   process.stdout            only in src/bin.ts, which hands main its stdout writer
 //   process.stderr            only in src/bin.ts (main's stderr writer, the startup failure),
 //                             src/logging.ts (the terminal log sink and its one "can't write the
@@ -95,12 +95,12 @@ function reasonsFor(file: string, lines: string[]): string[] {
   }
   if (has(CONSOLE)) {
     reasons.push(
-      "calls console.*. stdout carries results only: write results through the Output service (src/services/Output.ts), notes for the person through Output.note, and diagnostics with Effect.logInfo/logWarning/logError. A stray stdout line breaks --json and corrupts orx mcp's JSON-RPC.",
+      "calls console.*. stdout carries results only: write results through the Output service (src/services/Output.ts), notes for the person through Output.note, and diagnostics with Effect.logInfo/logWarning/logError. A stray stdout line breaks --json and pipes.",
     );
   }
   if (file !== "bin.ts" && has(PROCESS_STDOUT)) {
     reasons.push(
-      "uses process.stdout. Only src/bin.ts touches it (it hands main the stdout writer): write results through the Output service (src/services/Output.ts). A stray stdout write breaks --json and corrupts orx mcp's JSON-RPC.",
+      "uses process.stdout. Only src/bin.ts touches it (it hands main the stdout writer): write results through the Output service (src/services/Output.ts). A stray stdout write breaks --json and pipes.",
     );
   }
   if (!STDERR_FILES.has(file) && has(PROCESS_STDERR)) {

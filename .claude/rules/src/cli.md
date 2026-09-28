@@ -27,7 +27,7 @@ The core is platform-free and gets its platform from `bin.ts`: only `src/bin.ts`
 
 ## stdout contract
 
-stdout carries results only; `orx ... | jq` and `orx mcp` (where one stray line corrupts JSON-RPC) depend on it.
+stdout carries results only; `orx ... | jq` and `ask --json` consumers depend on it.
 
 - Results go through the `Output` service (`write`, `line`, `json`). Notes for the person (usage after a reply, a tool call, a hint) go through `Output.note`, which writes stderr. Logs go to stderr and the log file (`logging.ts`). No `console.*` anywhere in `src/`; `process.stdout` only in `bin.ts`, and `process.stderr` only in `bin.ts`, `logging.ts` (the terminal sink), and `config.ts` (the color default's TTY check). Both guards deny the rest.
 - `effect/unstable/cli` prints help, `--version`, completions, and (with `renderErrors` on) parse errors through Effect's `Console`, a `Context.Reference` whose default is the global console, so all of it lands on stdout, including the help it prints for a usage error. `main` runs `Command.runWith(cli, { version, renderErrors: false })(argv)` with a holding `Console` and flushes what it held to stdout only for `ok`/`help` outcomes; errors are rendered by `main` on stderr, as `{"error":{tag,message,retryable}}` when argv contains `--json` (parse errors happen before any handler sees its flags). `--wizard` is interactive and prints as it goes.
@@ -37,7 +37,7 @@ stdout carries results only; `orx ... | jq` and `orx mcp` (where one stray line 
 
 ## Exit codes
 
-`exitCodeForOutcome` in `src/errors.ts` is the only mapping: 0 ok, `--help`, and quitting the session (bare `orx`, which starts the TUI) with Ctrl+C; 1 defect; 2 usage (`CliError`), `BadInput`, `NotFound`, `UnknownModel`, `NotInteractive`; 3 `NotConfigured`, `InvalidConfig`, `TuiUnavailable` (the TUI couldn't load; `doctor --tui` reports why); 4 `UpstreamUnavailable`; 5 `InvalidModelOutput`; 6 `PermissionDenied`; 130 interrupted by a signal. They are documented in the README; changing one is a breaking change for scripts. A new tagged error needs a case in `exitCodeFor` and `retryableFor` (both exhaustive) and a test that asserts its code through `runCli`.
+`exitCodeForOutcome` in `src/errors.ts` is the only mapping: 0 ok, `--help`, and quitting the session (bare `orx`, which starts the TUI) with Ctrl+C; 1 defect; 2 usage (`CliError`), `BadInput`, `NotFound`, `UnknownModel`, `NotInteractive`; 3 `NotConfigured`, `InvalidConfig`, `TuiUnavailable` (the TUI couldn't load; `doctor --tui` reports why); 4 `UpstreamUnavailable`; 6 `PermissionDenied` (5 is retired, from the removed `orx extract`); 130 interrupted by a signal. They are documented in the README; changing one is a breaking change for scripts. A new tagged error needs a case in `exitCodeFor` and `retryableFor` (both exhaustive) and a test that asserts its code through `runCli`.
 
 ## Logging per invocation
 

@@ -2,7 +2,7 @@
 
 Status: PROPOSED 2026-09-28 | Size: XL (eight PR-sized steps) | Depends on: [phase 1](phase-1-edits-code.md), including its open eval run
 
-Phase 2 lets orx hand work to subagents, keep long sessions going past the context window, and pick up an existing `.claude/` setup without rewriting it. Every claim about the code below was checked at `a1b39e5`; per `plans/README.md`, treat each one as a hypothesis to recheck before the step that relies on it.
+Phase 2 lets orx hand work to subagents, keep long sessions going past the context window, and pick up an existing `.claude/` setup without rewriting it. Every claim about the code below was checked at `a1b39e5`; per this folder's `README.md`, treat each one as a hypothesis to recheck before the step that relies on it.
 
 ## Summary
 
@@ -207,7 +207,7 @@ Automatic compaction runs only at the start of a turn, when the estimated prompt
 
 ## Sequencing
 
-Each step is one PR and leaves `bun run check` green. New product files go on `scripts/vanilla.ts`'s `REMOVE` list in the PR that adds them; changes to `src/config.ts` are mirrored in `template/vanilla/src/config.ts` where they apply.
+Each step is one PR and leaves `bun run check` green.
 
 | Step | Ships | Depends on | Size |
 | --- | --- | --- | --- |
@@ -249,7 +249,7 @@ orx has no telemetry and shouldn't grow any, so these come from evals and local 
 - **Compatibility that looks complete and isn't.** A `.claude/` command built around `allowed-tools` prompts far more in orx; an agent with `permissionMode: acceptEdits` doesn't get it. The load warnings name what was ignored, and the README gets a short "what orx reads from `.claude/`" table.
 - **Instructions from a cloned repo.** `.claude/` content in a repo someone else wrote becomes instructions the model follows, and `` !`cmd` `` proposes commands. Nothing it causes skips the gate, which is the same line phase 1 drew for `.orx/commands`.
 - **Chat files grow** with subagent transcripts. They're local and each is bounded by its step cap; if files get unwieldy, transcripts can move to sidecar files without changing what's replayed.
-- **The `yaml` dependency** is a new parser on untrusted input. It's widely used and only sees frontmatter; `vanilla` drops it with the agent loaders.
+- **The `yaml` dependency** is a new parser on untrusted input. It's widely used and only sees frontmatter.
 
 ## Open questions
 

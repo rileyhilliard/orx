@@ -26,18 +26,18 @@ Layers are listed earliest first. "Rule" means a file in `.claude/rules/src/` th
 | Running the wrong test runner (vitest) or installing a removed one | `AGENTS.md`, `testing.md` rule | `guard-commands.ts` denies it with the right command | none needed: the command never runs |
 | Destroying work (`git reset --hard`, force push, `rm -rf /`) | none | `block-destructive.ts` denies it; `permissions.deny` repeats the worst shapes | `tests/hooks/` |
 | Importing `bun:*`, `@effect/platform-bun`, or `@opentui/*` outside `src/bin.ts` and `src/tui/` | `cli.md`, `tui.md` rules | `guard-boundaries.ts` denies the write; the Grit plugin flags it | `bun run lint` in CI (the Grit rule) |
-| Writing to stdout outside `Output` (a stray line breaks pipes and `orx mcp`) | `cli.md` rule | `guard-boundaries.ts` and the Grit plugin flag `console.*`, and `process.stdout`/`process.stderr` outside the few files that own them | `tests/cli-contract.test.ts` and e2e assert stdout is empty on errors; `tests/mcp.test.ts` checks every stdout line is JSON-RPC |
+| Writing to stdout outside `Output` (a stray line breaks pipes and `ask --json`) | `cli.md` rule | `guard-boundaries.ts` and the Grit plugin flag `console.*`, and `process.stdout`/`process.stderr` outside the few files that own them | `tests/cli-contract.test.ts` and e2e assert stdout is empty on errors, and `askEvents` fails a test on any `ask --json` line that isn't a declared `AskEvent` |
 | A new error without an exit code | `cli.md` rule | `tsc`: `exitCodeFor` and `retryableFor` switch exhaustively | `tests/units.test.ts` pins every code |
 | Hand-editing generated files (`dist/`, `coverage/`, `bun.lock`, recorded fixtures) | `AGENTS.md` conventions | `guard-generated.ts` denies it and names the regenerating command | regenerating overwrites a hand edit anyway |
 | Writing a secret into a file | `.env` is gitignored and `Read(./.env)` is denied; the config file schema rejects `apiKey` | `detect-secrets.ts` denies credential-shaped writes | `tests/config.test.ts` proves a key in the config file never reaches a request |
 | Installing Zod, `@effect/schema`, Ink, or the MCP SDK | `AGENTS.md` | `guard-commands.ts` denies the install | the Grit plugin flags the import |
 | A type error, including one in a caller of the edited file | none | `typecheck-on-write.ts` hands back `tsc` errors after each write | pre-push `typecheck`, CI |
-| A workspace tool that skips the approval gate or escapes the workspace (a mutating tool without `permit`, a path not through `Workspace.resolve`, a write without the stale-edit check, a file or shell tool served by `orx mcp`) | `agent-tools.md` rule | `tests/agent-tools.test.ts`, `tests/agent-write-tools.test.ts`, and `tests/agent-approval.test.ts` drive each tool against paths outside the root, symlinks, secret files, and denials; `tests/mcp.test.ts` pins `tools/list` to `currentTime` and `extractContact` | the `reviewer` agent checks the same invariants before a commit |
+| A workspace tool that skips the approval gate or escapes the workspace (a mutating tool without `permit`, a path not through `Workspace.resolve`, a write without the stale-edit check) | `agent-tools.md` rule | `tests/agent-tools.test.ts`, `tests/agent-write-tools.test.ts`, and `tests/agent-approval.test.ts` drive each tool against paths outside the root, symlinks, secret files, and denials | the `reviewer` agent checks the same invariants before a commit |
 | The TUI and the programs disagree (event shapes, errors) | `tui.md` rule | `tests/tui/closed-loop.test.tsx` renders `App` over the real bridge against the stub | e2e drives the binary's TUI in a PTY |
 | OpenTUI taking over signals or Ctrl+C | `tui.md` rule | `tests/tui/launch.test.ts` pins the renderer options | e2e checks Ctrl+C exits 0 and leaves the alternate screen |
 | A binary that builds but can't load its native library | `distribution.md` rule | `doctor --tui` in e2e | release.yml runs it on each OS and CPU before publishing |
 | Stub drift: OpenRouter's real stream format moves away from the hand-written stub | `openrouter.md` rule | `tests/openrouter-replay.test.ts` replays recorded OpenRouter bodies through the real provider, whole and in 7-byte pieces, and checks text, tokens, and cost against the recordings | `bun run record:openrouter` re-records them (manual, needs a key) |
-| A model regression: a model stops calling the tool, or extracts the wrong fields | none | `bun run eval --models a,b` through orx's own programs | manual only: needs a key and costs money |
+| A model regression: a model can't finish a coding task with orx's tools | none | `bun run eval --models a,b` runs `ask --agent` on the coding cases in a temp workspace | manual only: needs a key and costs money |
 | A convention no tool checks (thin commands, log once, decode at the boundary) | rules, `AGENTS.md` | the `reviewer` agent before a commit | `/feature` runs two code reviews before the PR |
 
 Guards deny; everything else advises. Lint and type errors arrive as context and never block a write, so the agent keeps moving and fixes them on its next edit.
@@ -54,16 +54,16 @@ sequenceDiagram
     participant C as core/chat.ts runTurn
     participant O as OpenRouter
 
-    U->>M: orx ask --json "time in Tokyo?"
+    U->>M: orx ask --agent --json "rename fmtPrice"
     M->>H: Command.runWith(cli)(argv)
-    Note over H: key check (exit 3), stdin (if piped),<br/>decode Prompt (exit 2), resolveModel (exit 2)
-    H->>C: sendMessage(chat, text, model)
+    Note over H: key check (exit 3), stdin (if piped),<br/>decode Prompt (exit 2), resolveToolModel (exit 2),<br/>prepareSession (workspace, prompt, tools)
+    H->>C: sendMessage(chat, text, model, { toolkit })
     C->>O: POST /chat/completions (stream)
     O-->>C: deltas, tool call, usage + cost
     C-->>H: text, tool-call events
     H-->>U: NDJSON on stdout
-    opt the model called currentTime
-        C->>C: run the tool (Effect AI toolkit)
+    opt the model called a tool (read, edit, bash, ...)
+        C->>C: Permissions decides (headless: --permission-mode), then the tool runs
         C->>O: next step with the tool result
         O-->>C: answer
     end
@@ -95,4 +95,4 @@ Run these from the repo root in your own terminal.
 
 - [`.claude/README.md`](../.claude/README.md): every hook, rule, and setting in detail.
 - [`AGENTS.md`](../AGENTS.md): the agent's map of the code, commands, and conventions.
-- [`docs/rfcs/0001-bootstrap-from-rra.md`](rfcs/0001-bootstrap-from-rra.md): why this repo is shaped the way it is.
+- [`docs/rfcs/RFC001-bootstrap-agent-harness/`](rfcs/RFC001-bootstrap-agent-harness/README.md): the coding agent's roadmap, phase by phase.

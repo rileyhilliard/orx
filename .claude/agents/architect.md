@@ -19,11 +19,11 @@ Read `AGENTS.md` and the rules in `.claude/rules/src/` that touch the area. The 
 
 - One binary, one process per invocation. Commands are thin: decode, run one program from `src/core/`, render through `Output`. No daemon, no shared state between runs except files in the data dir.
 - The platform boundary: only `src/bin.ts` and `src/tui/**` may use Bun or OpenTUI. Everything else is Effect services on abstract platform services: a platform-free core, given its platform in `src/bin.ts`.
-- The stdout contract: results on stdout, everything else on stderr, `--json` for machines, stable exit codes. `orx mcp` must write nothing but JSON-RPC to stdout.
+- The stdout contract: results on stdout, everything else on stderr, `--json` for machines, stable exit codes. `ask --json` must write nothing but `AskEvent`s to stdout.
 - Services are `Context.Service` classes composed into `AppLayer`. Swapping an implementation (JSON files to SQLite) means a new static layer on the same service.
 - Config is lazy: `--help`, `--version`, `doctor`, and `update` work with no key and a broken config file. The key never comes from a file.
 - The turn loop in `src/core/chat.ts` is hand-written (Effect AI has no step loop): retry only before the first part, save on every exit.
-- The agent's tools are behind an approval gate and inside a workspace (`agent-tools.md`): anything that changes files or runs a process asks `Permissions` through `permit`, every path resolves through `Workspace`, secret-shaped files ask or are skipped, and writes check `FileState` for stale reads. `orx mcp` has no one to approve anything, so it serves only `ChatTools` and `extractContact`, never file or shell tools.
+- The agent's tools are behind an approval gate and inside a workspace (`agent-tools.md`): anything that changes files or runs a process asks `Permissions` through `permit`, every path resolves through `Workspace`, secret-shaped files ask or are skipped, and writes check `FileState` for stale reads. orx has no MCP server; if one comes back, it must not serve `AgentTools`, since nothing there could answer an approval.
 - The TUI gets plain functions and async iterables from the bridge; components never import Effect. Effect owns signals and the exit code.
 - Four release targets, each binary embedding one native lib; `update` replaces the binary by rename, never in place.
 - Tests never touch the network.

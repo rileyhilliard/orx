@@ -26,7 +26,7 @@ Only the things that are easy to get wrong here. Effect-specific typing is in th
 
 ## Places strict mode still gives you `any`
 
-`JSON.parse`, `Response.json()`, and the `reason` in `promise.catch((e) => ...)` are `any`; only `try/catch` variables are `unknown`. Trust boundaries here are argv and stdin, the config file, chat files on disk, OpenRouter and GitHub responses, MCP requests, and model output: decode with an Effect Schema, or type the value as `unknown` first, never cast straight to the expected shape.
+`JSON.parse`, `Response.json()`, and the `reason` in `promise.catch((e) => ...)` are `any`; only `try/catch` variables are `unknown`. Trust boundaries here are argv and stdin, the config file, chat files on disk, OpenRouter and GitHub responses, and model output: decode with an Effect Schema, or type the value as `unknown` first, never cast straight to the expected shape.
 
 ## Narrowing that doesn't work
 
