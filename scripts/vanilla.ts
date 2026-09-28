@@ -45,6 +45,7 @@ const REMOVE = [
   ".claude/commands/add-tool.md",
   "docs/rfcs",
   "evals",
+  "plans",
   "scripts/lib/recording.ts",
   "scripts/lib/script-layer.ts",
   "scripts/record-openrouter.ts",
