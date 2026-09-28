@@ -222,6 +222,37 @@ describe("App", () => {
     mockInput.pressCtrlC();
     await waitFor(() => calls.quit === 1);
   });
+  it("ends a turn cleanly when the screen was torn down before the reply finished", async () => {
+    let finish: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const fake = fakeBridge([], {
+      send: () =>
+        (async function* () {
+          yield { type: "text", delta: "Hel" } satisfies UiEvent;
+          await released;
+          yield { type: "done", usage: "u" } satisfies UiEvent;
+        })(),
+    });
+    const view = await render(fake.bridge);
+    await view.mockInput.typeText("hi");
+    view.mockInput.pressEnter();
+    await waitForScreen(view, (f) => f.includes("Hel"), 2000);
+    // Quitting mid-reply destroys the renderer while the turn's loop is still running.
+    view.renderer.destroy();
+    setup = undefined;
+    const rejections: Array<unknown> = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+    expect(rejections).toEqual([]);
+  });
 });
 
 describe("slash commands", () => {

@@ -200,7 +200,8 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         current.current = undefined;
         setStreaming(false);
         setApproval(undefined);
-        input.current?.focus();
+        // The turn can end after the screen is gone (quit mid-reply); a destroyed input throws.
+        if (input.current && !input.current.isDestroyed) input.current.focus();
       }
     },
     [bridge, model, streaming, setDraft],
