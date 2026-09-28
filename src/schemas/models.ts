@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 
-/** One model from OpenRouter's list. Prices are USD per token, as OpenRouter reports them. */
+/**
+ * One model from OpenRouter's list. Prices are USD per token, as OpenRouter reports them, and
+ * null when the price varies per request (OpenRouter's -1, e.g. openrouter/auto).
+ */
 export const ModelInfo = Schema.Struct({
   id: Schema.String,
   /**
@@ -14,8 +17,10 @@ export const ModelInfo = Schema.Struct({
   contextLength: Schema.NullOr(Schema.Number),
   /** Whether OpenRouter lists `tools` among the model's supported parameters (tool calling). */
   supportsTools: Schema.Boolean,
-  promptPrice: Schema.Number,
-  completionPrice: Schema.Number,
+  promptPrice: Schema.NullOr(Schema.Number),
+  completionPrice: Schema.NullOr(Schema.Number),
+  /** The top provider's output cap in tokens, when OpenRouter reports one. */
+  maxCompletionTokens: Schema.NullOr(Schema.Number),
 }).annotate({ identifier: "ModelInfo" });
 export type ModelInfo = typeof ModelInfo.Type;
 

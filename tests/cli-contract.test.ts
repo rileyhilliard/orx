@@ -252,6 +252,29 @@ describe("orx models", () => {
     expect(list.models.map((m) => m.id)).toEqual(["acme/cheap-model"]);
   });
 
+  it("logs one warning with OpenRouter's status after the retries, not one per attempt", async () => {
+    stub.failModels = 10;
+    const run = await runCli(["models", "--json"], withStub());
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ available: false });
+    const fetches = run.logs.filter((r) => r.msg === "Models list fetch failed");
+    expect(fetches).toHaveLength(1);
+    expect(JSON.stringify(fetches[0])).toContain("HTTP 500");
+  });
+
+  it("shows a variable price (-1, as openrouter/auto has) as unknown, not negative", async () => {
+    const models = stub.models;
+    stub.models = [{ id: "openrouter/auto", name: "Auto Router", prompt: "-1", completion: "-1" }];
+    const json = await runCli(["models", "--json"], withStub());
+    const table = await runCli(["models"], withStub());
+    stub.models = models;
+    expect(JSON.parse(json.stdout).models).toMatchObject([
+      { id: "openrouter/auto", promptPrice: null, completionPrice: null },
+    ]);
+    expect(table.stdout).toMatch(/openrouter\/auto\s+128k\s+varies\s+varies/);
+  });
+
   it("rejects an unknown --model with exit 2 and a suggestion", async () => {
     const run = await runCli(["ask", "hi", "-m", "openai/gpt-tset"], withStub());
     expect(run.exitCode).toBe(2);
