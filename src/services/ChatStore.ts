@@ -2,14 +2,16 @@ import { join } from "node:path";
 import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { type ChatId, StoredChat } from "~/schemas";
 import { Paths } from "../config";
+import { PermissionDenied } from "../errors";
 
 export interface ChatStoreShape {
   readonly get: (id: ChatId) => Effect.Effect<Option.Option<StoredChat>>;
   /**
-   * Dies when the chat can't be written, with an error that names the data dir (permission
-   * denied) or the file. It runs as the turn's finalizer, which can't fail.
+   * Fails with `PermissionDenied`, naming the data dir, when the data dir's permissions refuse
+   * the write: the user can fix that. Any other write failure means a broken data dir and
+   * dies, naming the file.
    */
-  readonly save: (chat: StoredChat) => Effect.Effect<void>;
+  readonly save: (chat: StoredChat) => Effect.Effect<void, PermissionDenied>;
   /** Every saved chat, newest first. Unreadable files are skipped (and logged). */
   readonly list: Effect.Effect<ReadonlyArray<StoredChat>>;
 }
@@ -22,8 +24,9 @@ const newestFirst = (a: StoredChat, b: StoredChat) => b.updatedAt.localeCompare(
 /**
  * One JSON file per chat in `<data dir>/chats/`. Writes go to a temp file in the same
  * directory and are renamed over the old one, so Ctrl+C mid-write can't leave half a chat.
- * Two processes saving the same chat: the last write wins. A failed read or write is a
- * defect: it means the data dir is broken, and the log says which file.
+ * Two processes saving the same chat: the last write wins. A write the data dir's permissions
+ * refuse is `PermissionDenied`; any other failed read or write is a defect: it means the data
+ * dir is broken, and the log says which file.
  */
 const makeFileStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -57,14 +60,15 @@ const makeFileStore = Effect.gen(function* () {
         );
       }).pipe(
         Effect.catch((error) =>
-          Effect.die(
-            new Error(
-              error._tag === "PlatformError" && error.reason._tag === "PermissionDenied"
-                ? `Can't save chat ${chat.id}: ${dir} isn't writable (permission denied); fix its permissions or set ORX_DATA_DIR to a writable directory`
-                : `Saving chat ${chat.id} to ${fileFor(chat.id)} failed`,
-              { cause: error },
-            ),
-          ),
+          error._tag === "PlatformError" && error.reason._tag === "PermissionDenied"
+            ? Effect.fail(
+                new PermissionDenied({
+                  message: `Can't save chat ${chat.id}: ${dir} isn't writable (permission denied). Fix its permissions or set ORX_DATA_DIR to a writable directory.`,
+                }),
+              )
+            : Effect.die(
+                new Error(`Saving chat ${chat.id} to ${fileFor(chat.id)} failed`, { cause: error }),
+              ),
         ),
       ),
     list: Effect.gen(function* () {

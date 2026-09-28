@@ -2,7 +2,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { Prompt, Response } from "effect/unstable/ai";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { INTERRUPTED_RESULT, runTurn, sendMessage, stepPrompt, toPrompt } from "~/core/chat";
-import { elide, estimateTokens } from "~/core/context";
+import { ELIDE_ALL, elide, estimateTokens } from "~/core/context";
 import { chatToMarkdown } from "~/core/export";
 import { chatsTable } from "~/core/format";
 import { AssistantMessage, type ChatId, type ChatMessage } from "~/schemas";
@@ -241,15 +241,28 @@ describe("context elision", () => {
     );
 
   it("elides old tool outputs oldest first, sparing skills and the last two steps", () => {
-    const { prompt: out, elided } = elide(prompt, 0);
+    const { prompt: out, elided } = elide(prompt, ELIDE_ALL);
     expect(elided).toBe(2);
     expect(results(out).map((r) => r.result === big)).toEqual([false, true, false, true, true]);
     expect(results(out)[0]?.result).toBe("[read src/a.ts output elided, re-run if needed]");
   });
 
   it("stops once the estimate fits the budget", () => {
-    const { elided } = elide(prompt, estimateTokens(prompt) - 100);
+    const fits = estimateTokens(prompt) - 100;
+    const { elided } = elide(prompt, { limit: fits, target: fits });
     expect(elided).toBe(1);
+  });
+
+  it("elides past the limit down to the target, then keeps that set while under the limit", () => {
+    const total = estimateTokens(prompt);
+    const first = elide(prompt, { limit: total - 100, target: total - 3000 });
+    expect(first.elided).toBe(2);
+    // Under the limit with what's already elided: nothing more, the same prompt.
+    const again = elide(prompt, { limit: total - 100, target: 0 }, first.elision);
+    expect(again.elided).toBe(0);
+    expect(again.prompt).toEqual(first.prompt);
+    // Nothing previously elided and under the limit: nothing at all.
+    expect(elide(prompt, { limit: total, target: 0 }).elided).toBe(0);
   });
 
   it("elides an older message's @ attachments but never the latest message's", () => {
@@ -259,7 +272,7 @@ describe("context elision", () => {
       { role: "assistant", text: "ok", tools: [] },
       { role: "user", text: "and @b.ts", attachments: files("b.ts") },
     ];
-    const { prompt: out, elided } = elide(toPrompt("sys", history), 0);
+    const { prompt: out, elided } = elide(toPrompt("sys", history), ELIDE_ALL);
     expect(elided).toBe(1);
     const users = out.content.flatMap((m) =>
       m.role === "user" ? [m.content.map((part) => (part.type === "text" ? part.text : ""))] : [],

@@ -15,6 +15,8 @@ beforeAll(async () => {
 afterAll(() => stub.close());
 afterEach(() => {
   stub.failCompletions = undefined;
+  stub.steps = [];
+  stub.chatRequests.length = 0;
 });
 
 /** `orx ask --json` against a stub that fails every completion with `failure`: the error event. */
@@ -76,6 +78,33 @@ describe("OpenRouter's HTTP errors, as the user sees them", () => {
     expect(error.message).toMatch(/^No provider meets the routing settings/);
     expect(error.message).toContain("OPENROUTER_ZDR");
     expect(error.retryable).toBe(false);
+    // Not retryable, so not retried either.
+    expect(stub.chatRequests).toHaveLength(1);
+  });
+
+  it("408 is retried before any output, as its message says another try can fix it", async () => {
+    stub.failCompletions = { status: 408, times: 1 };
+    const run = await runCli(["ask", "hi"], { env: { OPENROUTER_BASE_URL: stub.baseUrl } });
+    expect(run.exitCode).toBe(0);
+    expect(stub.chatRequests).toHaveLength(2);
+  });
+
+  it("503 sent mid-stream reads like a 503 before the stream", async () => {
+    stub.steps = [{ text: "Partial", error: { code: 503, message: "No provider available" } }];
+    const run = await runCli(["ask", "hi", "--json"], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    expect(run.exitCode).toBe(4);
+    const last = ndjson(run.stdout).at(-1) as { error: { message: string; retryable: boolean } };
+    expect(last.error.message).toMatch(/^No provider meets the routing settings/);
+    expect(last.error.retryable).toBe(false);
+  });
+
+  it("503 sent mid-stream before any output isn't retried", async () => {
+    stub.steps = [{ error: { code: 503, message: "No provider available" } }];
+    const run = await runCli(["ask", "hi"], { env: { OPENROUTER_BASE_URL: stub.baseUrl } });
+    expect(run.exitCode).toBe(4);
+    expect(stub.chatRequests).toHaveLength(1);
   });
 
   it("404: no endpoint for the model under the routing settings; not retryable", async () => {
@@ -113,6 +142,16 @@ describe("toUpstreamError for failures that aren't the network's", () => {
     expect(error.message).toMatch(/the read tool/i);
     expect(error.message).toMatch(/not the network/);
     expect(error.retryable).toBe(false);
+  });
+
+  it("blames the model's output, not the network, for output that doesn't decode", () => {
+    // What Effect AI reports for a call to a tool the toolkit doesn't have, among others.
+    const error = toUpstreamError(
+      aiError(new AiError.InvalidOutputError({ description: "Expected ... at [0]" })),
+    );
+    expect(error.message).toMatch(/model's output/);
+    expect(error.message).toMatch(/not the network/);
+    expect(error.retryable).toBe(true);
   });
 
   it("uses the reason's own retryability for anything else", () => {

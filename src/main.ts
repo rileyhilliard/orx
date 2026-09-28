@@ -1,7 +1,7 @@
-import { Console, Effect } from "effect";
+import { Console, Effect, type Exit, Option } from "effect";
 import { Command } from "effect/unstable/cli";
 import { cli } from "./cli";
-import { exitCodeForOutcome, type Outcome, outcomeOf } from "./errors";
+import { defectOf, exitCodeForOutcome, type Outcome, outcomeOf } from "./errors";
 import { VERSION } from "./version";
 
 export interface MainIO {
@@ -60,9 +60,12 @@ export const main = ({ argv, stdout, stderr }: MainIO) => {
   return Effect.gen(function* () {
     const startedAt = performance.now();
     // Logged in onExit so a run interrupted by a signal still logs its line (exit 130).
-    const logRun = (outcome: Outcome) =>
+    const logRun = (exit: Exit.Exit<unknown, unknown>) =>
       Effect.gen(function* () {
-        if (outcome.kind === "defect") yield* Effect.logError("defect", outcome.cause);
+        const outcome = outcomeOf(exit);
+        // Also a defect beside the typed error that decided the exit code.
+        const defect = defectOf(exit);
+        if (Option.isSome(defect)) yield* Effect.logError("defect", defect.value);
         yield* Effect.logInfo("command").pipe(
           Effect.annotateLogs({
             command,
@@ -83,10 +86,7 @@ export const main = ({ argv, stdout, stderr }: MainIO) => {
       argv.includes("--wizard")
         ? run
         : run.pipe(Effect.provideService(Console.Console, holdingConsole))
-    ).pipe(
-      Effect.onExit((exit) => logRun(outcomeOf(exit))),
-      Effect.exit,
-    );
+    ).pipe(Effect.onExit(logRun), Effect.exit);
     const outcome = outcomeOf(exit);
     render(outcome);
     return exitCodeForOutcome(outcome);

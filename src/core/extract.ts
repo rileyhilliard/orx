@@ -7,7 +7,7 @@ import { InvalidModelOutput, type UpstreamUnavailable } from "../errors";
 import { Llm } from "../services/Llm";
 import { readOpenRouter } from "./chat";
 import { formatIssue } from "./input";
-import { timedOut, toUpstreamError } from "./upstream";
+import { isRetryableUpstream, timedOut, toUpstreamError } from "./upstream";
 
 export const EXTRACT_TIMEOUT = Duration.seconds(30);
 /** A rate limit asking for a longer wait than this isn't retried: the user gets it now. */
@@ -48,7 +48,7 @@ const shouldRetry = (error: AiError.AiError | UpstreamUnavailable) => {
   const retryAfter = retryAfterOf(error);
   return (
     !isOutputError(error) &&
-    toUpstreamError(error).retryable &&
+    isRetryableUpstream(error) &&
     (retryAfter === undefined || Duration.isLessThanOrEqualTo(retryAfter, EXTRACT_MAX_RETRY_AFTER))
   );
 };

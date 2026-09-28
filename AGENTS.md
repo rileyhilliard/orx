@@ -87,7 +87,7 @@ docs/               harness.md, rfcs/
 plans/              the coding agent's roadmap: README.md (phase map), one file per phase, follow-ups.md
 ```
 
-Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs one handler. A handler decodes its input, runs one program from `core/`, and renders the result through `Output`. Config loads on first use (`loadConfig`), so `--help`, `--version`, `doctor`, and `update` work with a broken config file. For a chat turn, `core/chat.ts` streams one model step at a time through Effect AI, runs tool calls, and re-prompts until the model stops or `MAX_TOOL_STEPS`; the stream's `onExit` logs one `llm call` line and saves the chat, including a partial reply marked `interrupted`.
+Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs one handler. A handler decodes its input, runs one program from `core/`, and renders the result through `Output`. Config loads on first use (`loadConfig`), so `--help`, `--version`, `doctor`, and `update` work with a broken config file. For a chat turn, `core/chat.ts` streams one model step at a time through Effect AI, runs tool calls, and re-prompts until the model stops or `MAX_TOOL_STEPS`; the finished chat is saved before the `finish` event, and the stream's `onExit` logs one `llm call` line and saves a partial reply marked `interrupted` when the turn didn't finish.
 
 ## Conventions
 

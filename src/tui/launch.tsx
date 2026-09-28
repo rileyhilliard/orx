@@ -1,15 +1,15 @@
 import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { Cause, Effect, Fiber, FileSystem, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, FileSystem, Option, Schema, Stream } from "effect";
 import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
-import { loadChat, newChat, sendMessage, type TurnEvent, type TurnToolkit } from "../core/chat";
+import { newChat, sendMessage, type TurnEvent, type TurnToolkit } from "../core/chat";
 import { expandSessionCommand } from "../core/commands";
 import { chatToMarkdown } from "../core/export";
 import { writeUserFile } from "../core/files";
 import { usageLine } from "../core/format";
 import { listModels } from "../core/models";
 import { expandSkill, loadSlash } from "../core/skills";
-import { isAppError, retryableFor, TuiUnavailable } from "../errors";
+import { defectOf, isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
 import { FileState } from "../services/file-state";
 import { Permissions } from "../services/permissions";
@@ -49,7 +49,6 @@ export interface SessionOptions<R, M = never> {
 type LaunchServices =
   | Stream.Services<ReturnType<typeof sendMessage<never>>>
   | Effect.Services<typeof listModels>
-  | Effect.Services<ReturnType<typeof loadChat>>
   | Effect.Services<ReturnType<typeof loadSlash>>
   | Effect.Services<ReturnType<typeof expandSessionCommand>>
   | Permissions
@@ -125,11 +124,15 @@ const toUiError = (cause: Cause.Cause<unknown>): UiError => {
     : { message: "Something went wrong inside orx; the log has the details.", retryable: true };
 };
 
-/** Whatever failed a turn, as the log line for a defect (a tagged error is shown, not logged). */
+/**
+ * Whatever failed a turn, as the log line for a defect: a tagged error alone is shown, not
+ * logged, but a defect beside one is logged too.
+ */
 const logDefect = (cause: Cause.Cause<unknown>) =>
-  isAppError(cause.reasons.find(Cause.isFailReason)?.error)
-    ? Effect.void
-    : Effect.logError("chat turn failed", cause);
+  Option.match(defectOf(Exit.failCause(cause)), {
+    onNone: () => Effect.void,
+    onSome: (defect) => Effect.logError("chat turn failed", defect),
+  });
 
 /**
  * The ChatBridge over the real programs, bound to the current services: what the components
@@ -217,6 +220,11 @@ export const makeBridge = <R = never, M = never>(
               toolkit: session.toolkit,
               systemPrompt: session.systemPrompt,
               ...(attachments === "" ? {} : { attachments }),
+              // The next turn's history: the chat as this one saved it, partial reply included.
+              onSaved: (saved) =>
+                Effect.sync(() => {
+                  chat = saved;
+                }),
             }),
           ),
         ).pipe(
@@ -226,19 +234,6 @@ export const makeBridge = <R = never, M = never>(
             const failed: UiEvent = { type: "error", error: toUiError(cause) };
             return Stream.unwrap(Effect.as(logDefect(cause), Stream.make(failed)));
           }),
-          Stream.ensuring(
-            loadChat(chat.id).pipe(
-              Effect.tap((saved) =>
-                Effect.sync(() => {
-                  chat = saved;
-                }),
-              ),
-              // The turn's own outcome is already shown; a failed reload keeps the old chat.
-              Effect.catchCause((cause) =>
-                Effect.logWarning("reloading the chat after a turn failed", cause),
-              ),
-            ),
-          ),
           Stream.toAsyncIterableWith(context),
           tracked,
         );

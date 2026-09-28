@@ -31,7 +31,7 @@ Everything outside `src/tui/` and `src/bin.ts` is plain Effect that runs on Node
 ## Errors and exit codes
 
 - Expected failures are `Schema.TaggedError` classes in `src/errors.ts`, each with a user-safe `message`. `exitCodeFor` and `retryableFor` switch exhaustively on the tag, so a new error needs a decision in both (and in the `AppError` union and `APP_ERROR_TAGS`). The codes are documented: 2 usage and input, 3 config, 4 upstream, 5 model output, 6 permission; 1 is a defect, 130 interrupted.
-- Anything else is a defect: `main` logs it once with `Effect.logError` and prints a generic message (exit 1). Don't catch and swallow defects earlier, and don't turn one into a tagged error to make it "handled". Platform errors that mean a broken data dir are defects (`Effect.orDie` in `ChatStore`); ones the user can fix are tagged (`PermissionDenied` in `update`).
+- Anything else is a defect: `main` logs it once with `Effect.logError` and prints a generic message (exit 1). Don't catch and swallow defects earlier, and don't turn one into a tagged error to make it "handled". Platform errors that mean a broken data dir are defects (`Effect.orDie` in `ChatStore`); ones the user can fix are tagged (`PermissionDenied` in `update` and `ChatStore.save`).
 - `Effect.catch` catches typed failures only; defects and interruption need `Effect.catchCause`. `Effect.promise` and a throw inside `Effect.sync` are defects: wrap third-party promises with `Effect.tryPromise({ try, catch })` and throwing code with `Effect.try`, mapping to a tagged error. Fail with `return yield* new SomeError({...})`.
 
 ## Retry, timeout, limits
