@@ -834,6 +834,11 @@ export interface SendOptions<R = ChatToolHandlers> {
   readonly systemPrompt?: string;
   /** The message's `@` attachments (`mentionAttachments`), saved beside its text. */
   readonly attachments?: string;
+  /**
+   * Called with the chat as it was just saved (a finished or a partial reply), so a caller
+   * that keeps the chat (the TUI) needn't read it back. Not called when nothing was saved.
+   */
+  readonly onSaved?: (chat: StoredChat) => Effect.Effect<void>;
 }
 
 /**
@@ -863,15 +868,18 @@ export const sendMessage = <R = ChatToolHandlers>(
         ...(options.toolkit ? { toolkit: options.toolkit } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         sessionId: chat.id,
-        onEnd: (reply) =>
-          reply.interrupted && reply.text === "" && reply.tools.length === 0
-            ? Effect.void
-            : store.save({
-                ...chat,
-                model: modelId,
-                updatedAt: now(),
-                messages: [...history, reply],
-              }),
+        onEnd: (reply) => {
+          if (reply.interrupted && reply.text === "" && reply.tools.length === 0) {
+            return Effect.void;
+          }
+          const saved: StoredChat = {
+            ...chat,
+            model: modelId,
+            updatedAt: now(),
+            messages: [...history, reply],
+          };
+          return Effect.andThen(store.save(saved), options.onSaved?.(saved) ?? Effect.void);
+        },
       });
     }),
   );

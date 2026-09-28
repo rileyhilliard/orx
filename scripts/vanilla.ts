@@ -107,6 +107,7 @@ const REMOVE = [
   "tests/script-layer.test.ts",
   "tests/slash.test.ts",
   "tests/tool-summary.test.ts",
+  "tests/tui/bridge.test.ts",
   "tests/tui/closed-loop-agent.test.tsx",
   "tests/turn-history.test.ts",
   "tests/turn-loop.test.ts",

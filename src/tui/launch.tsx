@@ -4,7 +4,6 @@ import { Cause, Effect, Exit, Fiber, FileSystem, Option, Schema, Stream } from "
 import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
 import {
   type ChatToolHandlers,
-  loadChat,
   newChat,
   sendMessage,
   type TurnEvent,
@@ -52,7 +51,6 @@ export interface SessionOptions<R, M = never> {
 type LaunchServices =
   | Stream.Services<ReturnType<typeof sendMessage<ChatToolHandlers>>>
   | Effect.Services<typeof listModels>
-  | Effect.Services<ReturnType<typeof loadChat>>
   | Effect.Services<ReturnType<typeof loadSlash>>
   | Effect.Services<ReturnType<typeof expandSessionCommand>>
   | FileSystem.FileSystem;
@@ -229,6 +227,11 @@ export const makeBridge = <R = never, M = never>(
             sendMessage<ChatToolHandlers | R>(chat, text, model, {
               ...turnOptions,
               ...(attachments === "" ? {} : { attachments }),
+              // The next turn's history: the chat as this one saved it, partial reply included.
+              onSaved: (saved) =>
+                Effect.sync(() => {
+                  chat = saved;
+                }),
             }),
           ),
         ).pipe(
@@ -238,19 +241,6 @@ export const makeBridge = <R = never, M = never>(
             const failed: UiEvent = { type: "error", error: toUiError(cause) };
             return Stream.unwrap(Effect.as(logDefect(cause), Stream.make(failed)));
           }),
-          Stream.ensuring(
-            loadChat(chat.id).pipe(
-              Effect.tap((saved) =>
-                Effect.sync(() => {
-                  chat = saved;
-                }),
-              ),
-              // The turn's own outcome is already shown; a failed reload keeps the old chat.
-              Effect.catchCause((cause) =>
-                Effect.logWarning("reloading the chat after a turn failed", cause),
-              ),
-            ),
-          ),
           Stream.toAsyncIterableWith(context),
           tracked,
         );
