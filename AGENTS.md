@@ -106,7 +106,7 @@ Flow: `bin.ts` provides the platform and runs `main`, which parses argv and runs
 ## Error handling
 
 - Expected failures are tagged errors; `outcomeOf` in `errors.ts` turns the run's Exit into an outcome, and `main.ts` prints `orx: <message>` (or the JSON body) to stderr. Anything else is a defect: logged once with `Effect.logError`, printed as a generic message, exit 1.
-- Model errors: `toUpstreamError` in `core/upstream.ts` maps each `AiError` reason to a message and `retryable` (a rejected key or request is not retryable; rate limits, 5xx, timeouts are). `ask --json` also emits an `error` event before exiting 4.
+- Model errors: `toUpstreamError` in `core/upstream.ts` maps each `AiError` reason to a message and `retryable` (a rejected key or request, missing credits, moderation, and no available provider (404/503) are not retryable; rate limits, other 5xx, and timeouts are). `ask --json` also emits an `error` event before exiting 4.
 - Never swallow an error. Handle it, or add context and pass it on. Log an error once, at the boundary that handles it.
 
 ## Debugging

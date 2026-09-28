@@ -36,7 +36,7 @@ Everything outside `src/tui/` and `src/bin.ts` is plain Effect that runs on Node
 
 ## Retry, timeout, limits
 
-- Non-streaming calls (models list, extract, releases) use `Effect.retry` with a jittered exponential `Schedule.max([exponential.jittered, recurs(2)])` and `Effect.timeoutOrElse`, retrying only what can succeed on retry (`UpstreamUnavailable` with `retryable`). The HTTP client has no retries of its own, so there is one retry layer.
+- Non-streaming calls (models list, extract, releases) use `Effect.retry` with a jittered exponential `Schedule.max([exponential.jittered, recurs(2)])` and `Effect.timeoutOrElse`, retrying only what can succeed on retry (`UpstreamUnavailable` with `retryable`; extract decides on the raw `AiError` and honors a short Retry-After, see `effect-ai.md`). Log a failure once, after the retries, not per attempt. The HTTP client has no retries of its own, so there is one retry layer.
 - The streaming chat turn is different: see `effect-ai.md` (retry only before the first part, and a stream-duration cap via `Stream.interruptWhen`).
 - Limits (`MAX_OUTPUT_TOKENS`, `MAX_TOOL_STEPS`, `MAX_STREAM_SECONDS`, prompt size in the `Prompt` schema) come from Config or schemas and are enforced before or during the call, never after.
 - Time comes from `Clock`, not `Date.now()`, in anything a test drives with `TestClock` (the tool's clock, the models cache TTL, the turn's timings). `newChat` timestamps use `Date` because nothing tests their exact value.
