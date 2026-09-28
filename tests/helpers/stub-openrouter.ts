@@ -27,7 +27,13 @@ export interface StubCompletion {
   text: string;
   model?: string;
   provider?: string;
-  usage?: { prompt_tokens: number; completion_tokens: number; cost?: number };
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    cost?: number;
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
 }
 
 /** A raw tool call as the model streams it: `arguments` is the JSON text the model sent. */
@@ -47,6 +53,14 @@ export interface StubStep {
   reasoningDetails?: unknown[];
   /** Wait this long before each chunk, with `text` sent a word per chunk (a slow model). */
   delayMs?: number;
+  /** The finish reason sent instead of `tool_calls` / `stop` (a cut-off or filtered reply). */
+  finishReason?: "stop" | "tool_calls" | "length" | "content_filter" | "error";
+  /**
+   * An error after the stream started, the way OpenRouter reports one mid-stream: after the
+   * text, a chunk with a top-level `error` and `finish_reason: "error"`, then the stream ends
+   * without a usage chunk.
+   */
+  error?: { code: number | string; message: string; errorType?: string };
 }
 
 export interface ReplayOptions {
@@ -304,18 +318,39 @@ export const startStubOpenRouter = async (port = 0): Promise<StubOpenRouter> => 
           choices: [{ index: 0, delta: { role: "assistant", ...fields }, finish_reason: null }],
         });
         const words = step.delayMs ? (step.text?.split(/(?<= )/) ?? []) : [step.text ?? ""];
+        const ending = step.error
+          ? [
+              {
+                ...base,
+                error: {
+                  code: step.error.code,
+                  message: step.error.message,
+                  ...(step.error.errorType
+                    ? { metadata: { error_type: step.error.errorType } }
+                    : {}),
+                },
+                choices: [{ index: 0, delta: { content: "" }, finish_reason: "error" }],
+              },
+            ]
+          : [
+              {
+                ...base,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {},
+                    finish_reason: step.finishReason ?? (calls.length > 0 ? "tool_calls" : "stop"),
+                  },
+                ],
+              },
+              { ...base, choices: [], usage: usageJson },
+            ];
         await writeChunks(
           [
             ...(step.reasoningDetails ? [delta({ reasoning_details: step.reasoningDetails })] : []),
             ...words.filter((word) => word !== "").map((word) => delta({ content: word })),
             ...(calls.length > 0 ? [delta({ tool_calls: calls })] : []),
-            {
-              ...base,
-              choices: [
-                { index: 0, delta: {}, finish_reason: calls.length > 0 ? "tool_calls" : "stop" },
-              ],
-            },
-            { ...base, choices: [], usage: usageJson },
+            ...ending,
           ],
           step.delayMs,
         );

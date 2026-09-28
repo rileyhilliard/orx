@@ -16,6 +16,12 @@ export const Usage = Schema.Struct({
   outputTokens: Schema.Number,
   /** USD, as reported by OpenRouter. Missing when the provider didn't report it. */
   cost: Schema.optional(Schema.Number),
+  /** Input tokens read from the provider's prompt cache. Missing when none were. */
+  cacheReadTokens: Schema.optional(Schema.Number),
+  /** Input tokens written to the provider's prompt cache. Missing when none were. */
+  cacheWriteTokens: Schema.optional(Schema.Number),
+  /** Output tokens spent on reasoning (counted in outputTokens). Missing when none were. */
+  reasoningTokens: Schema.optional(Schema.Number),
 });
 export type Usage = typeof Usage.Type;
 

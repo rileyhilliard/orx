@@ -6,6 +6,7 @@ import { decodeInput } from "../core/input";
 import { resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { BadInput, NotInteractive } from "../errors";
+import { Llm } from "../services/Llm";
 import { importTui } from "./load-tui";
 import { cwdFlag, modelFlag, newChatId } from "./shared";
 
@@ -53,6 +54,8 @@ export const runSession = ({
           "orx needs a terminal. For pipes and scripts, use `orx ask` (with --json for NDJSON).",
       });
     }
+    // No key or a broken config fails here, before the terminal UI takes the screen.
+    yield* (yield* Llm).ready;
     const session = yield* prepareSession(cwd, {
       mode: dangerouslySkipPermissions ? "yolo" : "default",
       headless: false,
