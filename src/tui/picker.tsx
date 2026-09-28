@@ -40,6 +40,7 @@ export const Picker = <T,>({
   load,
   toList,
   onPick,
+  rankItems = rank,
 }: {
   readonly title: string;
   readonly placeholder: string;
@@ -50,6 +51,11 @@ export const Picker = <T,>({
   /** Maps what `load` resolves to (kept out of `load` so the list shows in the same tick). */
   readonly toList: (loaded: T) => PickerList;
   readonly onPick: (value: string | undefined) => void;
+  /** How the query filters and orders the items (default: `rank`). */
+  readonly rankItems?: (
+    items: ReadonlyArray<PickerItem>,
+    query: string,
+  ) => ReadonlyArray<PickerItem>;
 }) => {
   const [items, setItems] = useState<ReadonlyArray<PickerItem> | undefined>(undefined);
   const [available, setAvailable] = useState(true);
@@ -66,7 +72,10 @@ export const Picker = <T,>({
     );
   }, [load, toList]);
 
-  const matches = useMemo(() => rank(items ?? [], query).slice(0, 200), [items, query]);
+  const matches = useMemo(
+    () => rankItems(items ?? [], query).slice(0, 200),
+    [items, query, rankItems],
+  );
 
   return (
     <box
@@ -88,7 +97,7 @@ export const Picker = <T,>({
         onChange={setQuery}
         onSubmit={(value) => {
           const typed = typeof value === "string" ? value : query;
-          onPick(rank(items ?? [], typed)[0]?.value);
+          onPick(rankItems(items ?? [], typed)[0]?.value);
         }}
       />
       {items === undefined && available ? (

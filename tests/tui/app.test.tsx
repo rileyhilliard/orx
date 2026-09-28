@@ -50,6 +50,9 @@ const fakeBridge = (events: ReadonlyArray<UiEvent>, overrides: Partial<ChatBridg
       calls.newChats += 1;
       return "1a2b3c4d-0000-4000-8000-000000000000";
     },
+    listFiles: async () => ["README.md", "docs/", "docs/readme-notes.txt", "src/app.tsx"],
+    attachFiles: async (text) =>
+      text.includes("@README.md") ? `${text}\n\n<file path="README.md">…</file>` : text,
     ...overrides,
   };
   return { bridge, calls };
@@ -262,5 +265,44 @@ describe("slash commands", () => {
 
     await run("quit");
     await waitFor(() => calls.quit === 1);
+  });
+});
+
+describe("the @ file picker", () => {
+  const screen = (setup: RenderSetup, predicate: (frame: string) => boolean) =>
+    waitForScreen(setup, predicate, 2000);
+
+  it("opens on @, filters by fuzzy match with basename hits first, and Esc closes it", async () => {
+    const setup = await render(fakeBridge([]).bridge);
+    await setup.mockInput.typeText("look at @");
+    const all = await screen(setup, (f) => f.includes("Files") && f.includes("src/app.tsx"));
+    expect(all).toContain("README.md");
+    await setup.mockInput.typeText("read");
+    const filtered = await screen(setup, (f) => !f.includes("src/app.tsx"));
+    expect(filtered.indexOf("▶ README.md")).toBeGreaterThan(-1);
+    expect(filtered).toContain("docs/readme-notes.txt");
+    setup.mockInput.pressEscape();
+    await screen(setup, (f) => !f.includes("Files"));
+  });
+
+  it("inserts the picked path at the @, and the model gets the attachment", async () => {
+    const { bridge, calls } = fakeBridge([{ type: "done", usage: "u" }]);
+    const setup = await render(bridge);
+    await setup.mockInput.typeText("look at @");
+    await screen(setup, (f) => f.includes("Files"));
+    await setup.mockInput.typeText("READ");
+    await screen(setup, (f) => f.includes("▶ README.md"));
+    setup.mockInput.pressEnter();
+    await screen(setup, (f) => !f.includes("Files") && f.includes("look at @README.md"));
+    await setup.mockInput.typeText("please");
+    setup.mockInput.pressEnter();
+    const frame = await screen(
+      setup,
+      (f) => calls.sent.length === 1 && f.includes("look at @README.md please"),
+    );
+    expect(calls.sent).toEqual([
+      ['look at @README.md please\n\n<file path="README.md">…</file>', "openai/gpt-test"],
+    ]);
+    expect(frame).not.toContain("<file");
   });
 });

@@ -66,6 +66,17 @@ export interface ChatBridge {
    * when no command or skill has that name.
    */
   readonly expandCommand: (name: string, args: string) => Promise<UiExpansion | undefined>;
+  /**
+   * Workspace files and directories (`dir/`), root-relative, for the `@` picker. Walked on the
+   * first call; later calls answer from the last walk and refresh it for the next one.
+   */
+  readonly listFiles: () => Promise<ReadonlyArray<string>>;
+  /**
+   * The message as the model should get it: `text` plus a `<file>` block (numbered lines) for
+   * each `@path` naming a workspace file, and a listing for each `@dir/`. Never rejects; with
+   * nothing to attach it resolves to `text`.
+   */
+  readonly attachFiles: (text: string) => Promise<string>;
   /** Starts a new, empty chat on the same model (`/clear`); resolves to its id. */
   readonly newChat: () => Promise<string>;
 }

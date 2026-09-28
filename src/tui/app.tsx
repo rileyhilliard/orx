@@ -2,6 +2,7 @@ import type { InputRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useCallback, useRef, useState } from "react";
 import { BUILTINS, isBuiltin, isMode, KEYS, MODES, type Mode, parseSlash } from "./commands";
+import { insertMention, opensMentionPicker, rankPaths } from "./mentions";
 import { MessageList } from "./message-list";
 import { ModelPicker } from "./model-picker";
 import { Picker, type PickerItem, type PickerList } from "./picker";
@@ -30,6 +31,12 @@ const applyEvent = (reply: UiMessage, event: UiEvent): UiMessage => {
   }
 };
 
+/** The file picker's ranking: fuzzy subsequence, basename hits first (mentions.ts). */
+const rankFiles = (items: ReadonlyArray<PickerItem>, query: string) => {
+  const byPath = new Map(items.map((item) => [item.value, item]));
+  return rankPaths([...byPath.keys()], query).flatMap((p) => byPath.get(p) ?? []);
+};
+
 /**
  * The chat screen. Keys: Enter sends, `/` opens the command list, Esc stops a reply (or closes
  * a list), Ctrl+P picks a model, Ctrl+E exports the chat as Markdown, Ctrl+C quits (stopping a
@@ -49,6 +56,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     if (input.current) input.current.value = text;
   }, []);
   const [commandList, setCommandList] = useState(false);
+  const [fileList, setFileList] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; lines: ReadonlyArray<string> }>();
   const [mode, setMode] = useState<Mode>("default");
   const [chatId, setChatId] = useState(bridge.chatId);
@@ -72,9 +80,11 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         { role: "user", text, tools: [] },
         { role: "assistant", text: "", tools: [] },
       ]);
-      const it = bridge.send(text, turnModel)[Symbol.asyncIterator]();
-      current.current = it;
       try {
+        // The chat shows what was typed; the model also gets the `@path` files' contents.
+        const withFiles = await bridge.attachFiles(text);
+        const it = bridge.send(withFiles, turnModel)[Symbol.asyncIterator]();
+        current.current = it;
         for (let next = await it.next(); !next.done; next = await it.next()) {
           const event = next.value;
           setMessages((ms) => {
@@ -162,6 +172,7 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
   const closeLists = () => {
     setPicking(false);
     setCommandList(false);
+    setFileList(false);
     input.current?.focus();
   };
 
@@ -176,11 +187,16 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
     return { items, available: true };
   }, [bridge]);
 
+  const loadFileItems = useCallback(async () => {
+    const paths = await bridge.listFiles();
+    return { items: paths.map((p) => ({ value: p, label: p })), available: true };
+  }, [bridge]);
+
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       stop().then(bridge.quit, bridge.quit);
     } else if (key.name === "escape") {
-      if (picking || commandList) closeLists();
+      if (picking || commandList || fileList) closeLists();
       else if (notice) setNotice(undefined);
       else stop().catch(() => setStatus("Couldn't stop the reply."));
     } else if (key.ctrl && key.name === "p" && !streaming) {
@@ -216,11 +232,12 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
         paddingLeft={1}
       >
         <input
-          focused={!picking && !commandList}
+          focused={!picking && !commandList && !fileList}
           ref={input}
           placeholder={streaming ? "Replying… Esc stops" : "Message"}
           onInput={(value) => {
             if (value === "/") setCommandList(true);
+            else if (opensMentionPicker(value)) setFileList(true);
           }}
           onSubmit={(value) => {
             if (typeof value === "string") submit(value);
@@ -260,6 +277,21 @@ export const App = ({ bridge }: { readonly bridge: ChatBridge }) => {
           toList={identity}
           onPick={(name) => {
             if (name) setDraft(`/${name} `);
+            closeLists();
+          }}
+        />
+      ) : null}
+      {fileList ? (
+        <Picker
+          title=" Files "
+          placeholder="Search files"
+          loadingText="Listing files…"
+          unavailableText="Couldn't list the workspace's files. Esc to close."
+          load={loadFileItems}
+          toList={identity}
+          rankItems={rankFiles}
+          onPick={(path) => {
+            if (path) setDraft(insertMention(input.current?.value ?? "", path));
             closeLists();
           }}
         />
