@@ -74,6 +74,8 @@ describe("orx ask --agent", () => {
     const edit = toolResults(run.stdout).find((r) => r.name === "edit");
     expect(edit?.isFailure).toBe(true);
     expect(JSON.stringify(edit?.output)).toContain("interactive");
+    // Bare `orx` is the interactive session; there is no `orx chat`.
+    expect(JSON.stringify(edit?.output)).toContain("(run orx, or pass");
   });
 
   it("reports a denied call as a permission-denied event before its tool-result", async () => {

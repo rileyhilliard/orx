@@ -92,7 +92,7 @@ export const isCompoundCommand = (command: string) => /[;&|$`<>\n\r]/.test(comma
 
 const PLAN_DENIAL = "plan mode: describe the change instead";
 const HEADLESS_DENIAL =
-  "needs an interactive session: the user wasn't asked (run orx chat, or pass --permission-mode acceptEdits or yolo)";
+  "needs an interactive session: the user wasn't asked (run orx, or pass --permission-mode acceptEdits or yolo)";
 
 type Verdict = PermissionResult | "ask";
 
