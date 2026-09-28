@@ -1,11 +1,12 @@
 import { Effect, Exit, Option, Schema, Stream } from "effect";
+import { Toolkit } from "effect/unstable/ai";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import type { AskEvent } from "~/schemas";
 import { Prompt, ToolFailure } from "~/schemas";
 import { newChat, sendMessage, type TurnEvent } from "../core/chat";
 import { noteLine, usageLine } from "../core/format";
 import { decodeInput } from "../core/input";
-import { resolveModel, resolveToolModel } from "../core/models";
+import { resolveChatModel, resolveToolModel } from "../core/models";
 import { prepareSession } from "../core/session";
 import { readPipedStdin } from "../core/stdin";
 import { BadInput, outcomeOf } from "../errors";
@@ -98,9 +99,10 @@ export const ask = Command.make(
       const text = yield* decodeInput(Prompt)(
         [words.join(" "), piped].filter((part) => part && part.trim() !== "").join("\n\n"),
       );
-      const modelId = yield* (agent ? resolveToolModel : resolveModel)(
-        Option.getOrUndefined(model),
-      );
+      const requested = Option.getOrUndefined(model);
+      const { modelId, tools } = agent
+        ? { modelId: yield* resolveToolModel(requested), tools: true }
+        : yield* resolveChatModel(requested);
       const chat = newChat(yield* newChatId, modelId);
       const emit = (event: AskEvent) => out.json(event);
 
@@ -163,7 +165,10 @@ export const ask = Command.make(
           systemPrompt: session.systemPrompt,
         }).pipe(Stream.runForEach(onEvent), Effect.provide(session.layer));
       } else {
-        yield* sendMessage(chat, text, modelId).pipe(Stream.runForEach(onEvent));
+        // A model that can't call tools gets none: with them, OpenRouter finds no endpoint.
+        yield* sendMessage(chat, text, modelId, tools ? {} : { toolkit: Toolkit.empty }).pipe(
+          Stream.runForEach(onEvent),
+        );
       }
     }).pipe(
       // Every failure after parsing ends --json output with one `error` event (AskEvent): an

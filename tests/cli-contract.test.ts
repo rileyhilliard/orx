@@ -120,6 +120,18 @@ describe("choosing a model", () => {
     expect(stub.chatRequests.at(-1)).toMatchObject({ model: "acme/cheap-model:nitro" });
   });
 
+  it("asks a model that can't call tools without them, so it still answers", async () => {
+    const models = stub.models;
+    stub.models = [...models, { id: "acme/no-tools", name: "Acme: No Tools", tools: false }];
+    const run = await runCli(["ask", "hi", "-m", "acme/no-tools", "--json"], withStub());
+    stub.models = models;
+    expect(run.exitCode).toBe(0);
+    expect(ndjson(run.stdout).filter((e) => e.type === "text").length).toBeGreaterThan(0);
+    const request = stub.chatRequests.at(-1) as { model: string; tools?: unknown };
+    expect(request.model).toBe("acme/no-tools");
+    expect(request).not.toHaveProperty("tools");
+  });
+
   it("passes a named model through, with a warning, when the models list is down", async () => {
     stub.failModels = 10;
     const run = await runCli(["ask", "hi", "-m", "acme/unlisted"], withStub());
