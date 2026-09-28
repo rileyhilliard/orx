@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Context, Effect, FileSystem, Layer, Option, type PlatformError } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, type PlatformError, Semaphore } from "effect";
 
 /** What a file looked like when the model last read it. */
 export interface FileStamp {
@@ -23,6 +23,13 @@ export interface FileStateShape {
    * its contents differ now (or it's gone). Write and edit refuse anything but "ok".
    */
   readonly checkFresh: (path: string) => Effect.Effect<Freshness>;
+  /**
+   * Runs `effect` holding `path`'s lock, so parallel writes and edits to one file serialize
+   * (diff, ask, recheck, write, record) instead of racing.
+   */
+  readonly withLock: (
+    path: string,
+  ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
 const hashOf = (content: Uint8Array) => createHash("sha256").update(content).digest("hex");
@@ -34,6 +41,7 @@ export const mtimeOf = (info: FileSystem.File.Info) =>
 const makeFileState = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const stamps = new Map<string, FileStamp>();
+  const locks = new Map<string, Semaphore.Semaphore>();
 
   return {
     record: (path, content) =>
@@ -56,6 +64,14 @@ const makeFileState = Effect.gen(function* () {
         const content = yield* Effect.option(fs.readFile(path));
         return Option.isSome(content) && hashOf(content.value) === stamp.hash ? "ok" : "stale";
       }),
+    withLock: (path) => (effect) => {
+      let lock = locks.get(path);
+      if (lock === undefined) {
+        lock = Semaphore.makeUnsafe(1);
+        locks.set(path, lock);
+      }
+      return Semaphore.withPermit(lock)(effect);
+    },
   } satisfies FileStateShape;
 });
 

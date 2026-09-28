@@ -21,6 +21,17 @@ export interface WorkspaceShape {
   readonly isSecretPath: (path: string) => boolean;
 }
 
+/** `.env*`, `*.pem`, `*.key`, `id_*`: a file name that likely holds credentials. */
+export const isSecretPath = (input: string): boolean => {
+  const name = input.split(/[\\/]/).at(-1) ?? "";
+  return (
+    name.startsWith(".env") ||
+    name.endsWith(".pem") ||
+    name.endsWith(".key") ||
+    name.startsWith("id_")
+  );
+};
+
 /** True when `child` is `parent` or under it. Both must be absolute and normalized. */
 const isWithin = (path: Path.Path, parent: string, child: string): boolean => {
   const rel = path.relative(parent, child);
@@ -81,15 +92,7 @@ const makeWorkspace = (root: string) =>
         ),
       display: (resolved) =>
         isWithin(path, root, resolved) ? path.relative(root, resolved) || "." : resolved,
-      isSecretPath: (input) => {
-        const name = path.basename(input);
-        return (
-          name.startsWith(".env") ||
-          name.endsWith(".pem") ||
-          name.endsWith(".key") ||
-          name.startsWith("id_")
-        );
-      },
+      isSecretPath,
     } satisfies WorkspaceShape;
   });
 

@@ -6,6 +6,7 @@ import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import type { GrepInput } from "~/schemas";
 import { FileState } from "~/services/file-state";
+import { Permissions } from "~/services/permissions";
 import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
 import { globFiles } from "~/tools/glob";
@@ -16,14 +17,16 @@ import { readFile } from "~/tools/read";
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-tools-")));
 
 const layerFor = (root: string) =>
-  Layer.mergeAll(Workspace.layerTest(root), FileState.layer).pipe(
-    Layer.provideMerge(NodeServices.layer),
-  );
+  Layer.mergeAll(
+    Workspace.layerTest(root),
+    FileState.layer,
+    Permissions.layerHeadless("default"),
+  ).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Runs `effect` against a workspace at `root`; a tool failure comes back as `{ failure }`. */
 const run = <A, E extends { message: string }>(
   root: string,
-  effect: Effect.Effect<A, E, Workspace | FileState | NodeServices.NodeServices>,
+  effect: Effect.Effect<A, E, Workspace | FileState | Permissions | NodeServices.NodeServices>,
 ) =>
   Effect.runPromise(
     effect.pipe(
@@ -100,7 +103,8 @@ describe("read", () => {
     );
     expect(failures[0]).toBe("nope.txt: no such file");
     expect(failures[1]).toContain("is a directory");
-    expect(failures[2]).toContain("credentials");
+    // A secret-shaped path asks; with no one to ask, that's a denial.
+    expect(failures[2]).toContain("Read .env: denied. read needs an interactive session");
     expect(failures[3]).toContain("outside the workspace");
   });
 });
@@ -240,7 +244,11 @@ describe("AgentTools", () => {
         const toolkit = yield* AgentTools;
         const ok = yield* Stream.runCollect(yield* toolkit.handle("read", { path: "a.txt" }));
         const bad = yield* Stream.runCollect(yield* toolkit.handle("read", { path: "/etc/hosts" }));
-        return [...ok, ...bad].map(({ isFailure, encodedResult }) => ({
+        // Models send null for a parameter they leave out; it counts as absent.
+        const nulls = yield* Stream.runCollect(
+          yield* toolkit.handle("read", { path: "a.txt", offset: null, limit: null }),
+        );
+        return [...ok, ...bad, ...nulls].map(({ isFailure, encodedResult }) => ({
           isFailure,
           encodedResult,
         }));
@@ -255,10 +263,19 @@ describe("AgentTools", () => {
           message: `/etc/hosts is outside the workspace (${root})`,
         },
       },
+      { isFailure: false, encodedResult: "     1\thello" },
     ]);
   });
 
-  it("offers read, glob, grep, and currentTime", () => {
-    expect(Object.keys(AgentTools.tools).sort()).toEqual(["currentTime", "glob", "grep", "read"]);
+  it("offers the file tools, bash, and currentTime", () => {
+    expect(Object.keys(AgentTools.tools).sort()).toEqual([
+      "bash",
+      "currentTime",
+      "edit",
+      "glob",
+      "grep",
+      "read",
+      "write",
+    ]);
   });
 });

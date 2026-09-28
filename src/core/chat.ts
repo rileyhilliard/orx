@@ -6,6 +6,7 @@ import { isAppError, NotFound, UpstreamUnavailable } from "../errors";
 import { ChatStore } from "../services/ChatStore";
 import { Llm } from "../services/Llm";
 import { OpenRouterModels } from "../services/OpenRouterModels";
+import { type ApprovalEvent, Permissions } from "../services/permissions";
 import { ChatTools, type ChatToolsLive } from "../tools";
 import { budgetFor, canElide, elide, withCacheBreakpoints } from "./context";
 import { isContextLengthError, timedOut, toUpstreamError } from "./upstream";
@@ -52,7 +53,8 @@ export type TurnEvent =
       readonly isFailure: boolean;
     }
   | { readonly type: "note"; readonly message: string }
-  | { readonly type: "finish"; readonly reply: AssistantMessage };
+  | { readonly type: "finish"; readonly reply: AssistantMessage }
+  | ApprovalEvent;
 
 /** An assistant message worth sending: some text, or a tool call. Providers reject empty ones. */
 const isEmptyAssistant = (message: Prompt.Message) =>
@@ -533,6 +535,25 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
           if (options.onEnd) yield* options.onEnd(reply);
         });
 
+      // A tool waiting on the user's approval (Permissions, when the session has it) shows up
+      // here as `approval-request`; a cancellation only for a request this turn showed.
+      const permissions = yield* Effect.serviceOption(Permissions);
+      const shown = new Set<string>();
+      const approvals: Stream.Stream<TurnEvent> = Option.match(permissions, {
+        onNone: () => Stream.empty,
+        onSome: (p) =>
+          p.events.pipe(
+            Stream.filter((event) => {
+              if (event.type === "approval-request") shown.add(event.id);
+              return shown.has(event.id);
+            }),
+          ),
+      });
+      const cancelApprovals = Option.match(permissions, {
+        onNone: () => Effect.void,
+        onSome: (p) => Effect.asVoid(p.cancelAll),
+      });
+
       return loop(toPrompt(options.systemPrompt ?? config.systemPrompt, options.history), 0).pipe(
         Stream.tap((event) =>
           event.type === "text"
@@ -544,8 +565,14 @@ export const runTurn = <R = ChatToolHandlers>(options: TurnOptions<R>) =>
               : Effect.void,
         ),
         Stream.mapError(toUpstreamError),
+        Stream.merge(approvals, { haltStrategy: "left" }),
         Stream.interruptWhen(watchdog),
-        Stream.onExit((exit) => Effect.flatMap(Ref.get(finished), (done) => finalize(exit, done))),
+        Stream.onExit((exit) =>
+          Effect.andThen(
+            cancelApprovals,
+            Effect.flatMap(Ref.get(finished), (done) => finalize(exit, done)),
+          ),
+        ),
       );
     }),
   );

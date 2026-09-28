@@ -4,6 +4,7 @@ import { ReadInput, ToolFailure } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
 import { BINARY_SNIFF_BYTES, READ_DEFAULT_LINES, READ_MAX_LINE_CHARS } from "./limits";
+import { permit } from "./permit";
 
 export const Read = Tool.make("read", {
   description: [
@@ -40,11 +41,8 @@ export const readFile = ({ path: input, offset = 1, limit = READ_DEFAULT_LINES }
     const fileState = yield* FileState;
     const path = yield* workspace.resolveReadable(input);
     const shown = workspace.display(path);
-    if (workspace.isSecretPath(path)) {
-      return yield* new ToolFailure({
-        message: `${shown} looks like it holds credentials, so orx doesn't read it. Ask the user to share what you need from it.`,
-      });
-    }
+    // Allowed, except a credential-shaped file, which asks the user first.
+    yield* permit({ tool: "read", summary: `Read ${shown}`, path: shown });
     const failed = (message: string) => new ToolFailure({ message: `${shown}: ${message}` });
     const info = yield* fs
       .stat(path)

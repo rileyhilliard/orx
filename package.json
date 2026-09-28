@@ -36,6 +36,7 @@
     "@effect/platform-bun": "4.0.0-rc.117",
     "@opentui/core": "0.5.12",
     "@opentui/react": "0.5.12",
+    "diff": "^9.0.0",
     "effect": "4.0.0-rc.117",
     "ignore": "^7.0.10",
     "picomatch": "^4.0.7",

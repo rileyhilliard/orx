@@ -285,6 +285,22 @@ export class AppConfig extends Context.Service<AppConfig, AppConfigService>()("o
 /** The settings, loaded on first use. */
 export const loadConfig = Effect.flatMap(AppConfig, (config) => config.load);
 
+/**
+ * The environment for the agent's `bash` commands: this process's, without orx's own settings
+ * and secrets (`OPENROUTER_*`, `ORX_*`), plus settings that keep git and pagers from waiting
+ * on a terminal nobody is looking at.
+ */
+export const agentShellEnv = (
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string> => {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined || /^(OPENROUTER_|ORX_)/.test(name)) continue;
+    env[name] = value;
+  }
+  return { ...env, GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0", PAGER: "cat" };
+};
+
 const logLevels: Record<"debug" | "info" | "warn" | "error", LogLevel.LogLevel> = {
   debug: "Debug",
   info: "Info",

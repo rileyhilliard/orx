@@ -16,3 +16,10 @@ export const GREP_DEFAULT_HEAD_LIMIT = 100;
 export const GREP_MAX_FILE_BYTES = 5 * 1024 * 1024;
 /** `grep` cuts a matching line longer than this many characters in `content` mode. */
 export const GREP_MAX_LINE_CHARS = 500;
+
+/** `bash` kills a command after this long unless the model passes `timeout_ms`. */
+export const BASH_DEFAULT_TIMEOUT_MS = 120_000;
+/** The most `timeout_ms` may ask for. */
+export const BASH_MAX_TIMEOUT_MS = 600_000;
+/** `bash` keeps at most this many characters of output: the first and last halves. */
+export const BASH_MAX_OUTPUT_CHARS = 30_000;
