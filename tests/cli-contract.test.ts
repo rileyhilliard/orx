@@ -63,6 +63,24 @@ describe("stdout contract and exit codes", () => {
     expect(ndjson(empty.stdout)).toMatchObject([{ type: "error", error: { tag: "BadInput" } }]);
   });
 
+  it("ends --json output with an InternalError event when orx itself fails", async () => {
+    // A data dir that is a file: saving the chat fails, which is a bug-class failure (exit 1).
+    const dataDir = join(tempRoot(), "not-a-dir");
+    writeFileSync(dataDir, "");
+    const run = await runCli(["ask", "hi", "--json"], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl, ORX_DATA_DIR: dataDir },
+    });
+    expect(run.exitCode).toBe(1);
+    expect(ndjson(run.stdout).at(-1)).toEqual({
+      type: "error",
+      error: {
+        tag: "InternalError",
+        message: expect.stringContaining("Something went wrong inside orx"),
+        retryable: true,
+      },
+    });
+  });
+
   it("exits 2 on an empty prompt", async () => {
     const run = await runCli(["ask"], withStub());
     expect(run.exitCode).toBe(2);

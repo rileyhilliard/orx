@@ -98,6 +98,21 @@ describe("orx ask --agent", () => {
     expect(events[deniedAt + 1]).toMatchObject({ type: "tool-result", id: editCall?.id });
   });
 
+  it("notes a failed or denied tool call on stderr in text mode", async () => {
+    const dir = workspace();
+    stub.toolCalls = [
+      { name: "read", arguments: JSON.stringify({ path: "nope.txt" }) },
+      ...readThenEdit(dir),
+    ];
+    const run = await runCli(["ask", "fix it", "--agent", "--cwd", dir], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).not.toContain("✗");
+    expect(run.stderr).toContain("✗ read: nope.txt: no such file");
+    expect(run.stderr).toContain("✗ edit: Edit math.js: denied. edit needs an interactive session");
+  });
+
   it("refuses --cwd and --permission-mode without --agent", async () => {
     const env = { OPENROUTER_BASE_URL: stub.baseUrl };
     const cwd = await runCli(["ask", "hi", "--cwd", workspace()], { env });
