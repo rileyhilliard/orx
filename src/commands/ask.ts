@@ -26,9 +26,9 @@ const agent = Flag.Boolean("agent").pipe(
 
 const permissionMode = Flag.Literals("permission-mode", PERMISSION_MODES).pipe(
   Flag.withDescription(
-    "With --agent: what runs without asking. Nobody can be asked here, so `default` denies every write, edit, and command",
+    "With --agent: what runs without asking. Nobody can be asked here, so `default` (the default) denies every write, edit, and command",
   ),
-  Flag.withDefault("default"),
+  Flag.optional,
 );
 
 const decodeToolFailure = Schema.decodeUnknownOption(ToolFailure);
@@ -89,7 +89,8 @@ export const ask = Command.make(
       if (!agent && Option.isSome(cwd)) {
         return yield* new BadInput({ message: "--cwd needs --agent" });
       }
-      if (!agent && permissionMode !== "default") {
+      // Checked before the default applies, so naming any mode without --agent is refused.
+      if (!agent && Option.isSome(permissionMode)) {
         return yield* new BadInput({ message: "--permission-mode needs --agent" });
       }
       yield* (yield* Llm).ready;
@@ -153,7 +154,10 @@ export const ask = Command.make(
       };
 
       if (agent) {
-        const session = yield* prepareSession(cwd, { mode: permissionMode, headless: true });
+        const session = yield* prepareSession(cwd, {
+          mode: Option.getOrElse(permissionMode, () => "default" as const),
+          headless: true,
+        });
         yield* sendMessage(chat, text, modelId, {
           toolkit: session.toolkit,
           systemPrompt: session.systemPrompt,

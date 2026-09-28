@@ -139,6 +139,10 @@ describe("orx ask --agent", () => {
     const mode = await runCli(["ask", "hi", "--permission-mode", "yolo"], { env });
     expect(mode.exitCode).toBe(2);
     expect(mode.stderr).toContain("--permission-mode needs --agent");
+    // Naming the default mode is still a mode without --agent.
+    const explicitDefault = await runCli(["ask", "hi", "--permission-mode", "default"], { env });
+    expect(explicitDefault.exitCode).toBe(2);
+    expect(explicitDefault.stderr).toContain("--permission-mode needs --agent");
     expect(stub.chatRequests).toHaveLength(0);
   });
 
