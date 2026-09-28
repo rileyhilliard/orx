@@ -13,9 +13,6 @@ import { loadSkills } from "./skills";
 /** The agent's tools: the file and shell tools plus `skill`. */
 export const SessionTools = Toolkit.merge(AgentTools, SkillTools);
 
-/** What a turn with SessionTools needs: their handlers. */
-export type SessionToolHandlers = Effect.Services<typeof SessionTools>;
-
 /**
  * Everything a coding session needs, built once: the workspace root (`--cwd`, or the cwd),
  * the system prompt with memory and skill descriptions, and the layer with the tools'

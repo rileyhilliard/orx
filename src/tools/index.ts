@@ -14,7 +14,7 @@ export const CurrentTime = Tool.make("currentTime", {
   failureMode: "return",
 });
 
-/** The tools the chat model can call (`orx ask`, `orx chat`). `orx mcp` serves the same ones. */
+/** The tools the chat model can call (`orx ask`). `orx mcp` serves the same ones. */
 export const ChatTools = Toolkit.make(CurrentTime);
 
 export const ChatToolsLive = ChatTools.toLayer({

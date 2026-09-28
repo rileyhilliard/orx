@@ -1,4 +1,4 @@
-import { Cause, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
 import type { AiError } from "effect/unstable/ai";
 import { UpstreamUnavailable } from "../errors";
 
@@ -123,9 +123,3 @@ export const toUpstreamError = (error: AiError.AiError): UpstreamUnavailable => 
 
 export const timedOut = (what: string) =>
   new UpstreamUnavailable({ message: `${what} took too long.`, retryable: true });
-
-/** For defects surfaced as causes (used by the TUI bridge and evals). */
-export const describeCause = (cause: Cause.Cause<unknown>): string => {
-  const error = Cause.squash(cause);
-  return error instanceof Error ? error.message : String(error);
-};

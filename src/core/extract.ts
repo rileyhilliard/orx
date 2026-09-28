@@ -80,12 +80,13 @@ export const extractContact = (text: string, modelId?: string) =>
     }).pipe(
       Effect.provideService(LanguageModel.LanguageModel, model),
       OpenRouterLanguageModel.withConfigOverride({ strictJsonSchema: true }),
-      Effect.tapError((error) => Effect.logWarning("Extract model call failed", String(error))),
       Effect.timeoutOrElse({
         duration: EXTRACT_TIMEOUT,
         orElse: () => Effect.fail(timedOut("The model call")),
       }),
       Effect.retry({ schedule: extractRetrySchedule, while: shouldRetry }),
+      // Once, after the retries (effect-services.md).
+      Effect.tapError((error) => Effect.logWarning("Extract model call failed", String(error))),
       Effect.mapError((error): UpstreamUnavailable | InvalidModelOutput =>
         !AiError.isAiError(error)
           ? error
