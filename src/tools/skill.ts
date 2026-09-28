@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { type Skill, skillToolResult } from "../core/skills";
+import { catchToolDefect } from "./permit";
 
 /**
  * Loads a skill's instructions into the conversation. The system prompt lists the skills'
@@ -24,14 +25,15 @@ export const SkillTools = Toolkit.make(SkillTool);
 /** The `skill` handler over the skills loaded for this session. */
 export const skillToolLayer = (skills: ReadonlyArray<Skill>) =>
   SkillTools.toLayer({
-    skill: ({ name }) => {
-      const skill = skills.find((s) => s.name === name);
-      if (skill) return Effect.succeed(skillToolResult(skill));
-      const names = skills.map((s) => s.name).join(", ");
-      return Effect.fail(
-        names === ""
-          ? `Unknown skill "${name}": no skills are installed.`
-          : `Unknown skill "${name}". Skills: ${names}.`,
-      );
-    },
+    skill: ({ name }) =>
+      Effect.suspend(() => {
+        const skill = skills.find((s) => s.name === name);
+        if (skill) return Effect.succeed(skillToolResult(skill));
+        const names = skills.map((s) => s.name).join(", ");
+        return Effect.fail(
+          names === ""
+            ? `Unknown skill "${name}": no skills are installed.`
+            : `Unknown skill "${name}". Skills: ${names}.`,
+        );
+      }).pipe(catchToolDefect("skill", (message) => message)),
   });

@@ -1,11 +1,10 @@
 import { Effect, Fiber, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { Tool } from "effect/unstable/ai";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import picomatch from "picomatch";
 import { GrepInput, type GrepOutputMode, ToolFailure } from "~/schemas";
 import { mtimeOf } from "../services/file-state";
 import { isSecretPath, Workspace } from "../services/workspace";
-import { newestFirst, type WalkEntry, walkFiles } from "./glob";
+import { compileGlob, newestFirst, type WalkEntry, walkFiles } from "./glob";
 import {
   BINARY_SNIFF_BYTES,
   GREP_DEFAULT_HEAD_LIMIT,
@@ -165,7 +164,7 @@ const jsGrep = (root: string, target: string, input: GrepInput, collector: Colle
     const matchesGlob =
       input.glob === undefined
         ? () => true
-        : picomatch(input.glob, { dot: true, basename: !input.glob.includes("/") });
+        : yield* compileGlob(input.glob, { dot: true, basename: !input.glob.includes("/") });
     for (const file of files) {
       if (!matchesGlob(path.relative(target, file.path) || path.basename(file.path))) continue;
       // A symlink's name can hide what it points at (notes.txt -> .env).

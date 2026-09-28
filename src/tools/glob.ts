@@ -110,6 +110,16 @@ export const walkFiles = (root: string, start: string) =>
     return files;
   });
 
+/** A picomatch matcher; a pattern it rejects (it throws) is a ToolFailure the model can fix. */
+export const compileGlob = (pattern: string, options: picomatch.PicomatchOptions) =>
+  Effect.try({
+    try: () => picomatch(pattern, options),
+    catch: (error) =>
+      new ToolFailure({
+        message: `invalid glob: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  });
+
 export const newestFirst = (a: WalkEntry, b: WalkEntry) =>
   b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path);
 
@@ -130,7 +140,7 @@ export const globFiles = ({ pattern, path: input }: GlobInput) =>
     if (info.type !== "Directory") {
       return yield* new ToolFailure({ message: `${workspace.display(start)} is not a directory` });
     }
-    const isMatch = picomatch(pattern, { dot: true });
+    const isMatch = yield* compileGlob(pattern, { dot: true });
     const matches = (yield* walkFiles(workspace.root, start))
       .filter((entry) => isMatch(path.relative(start, entry.path)))
       .sort(newestFirst);

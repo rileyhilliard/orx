@@ -1,4 +1,4 @@
-import { Effect, FileSystem } from "effect";
+import { Cause, Effect, FileSystem } from "effect";
 import { ToolFailure } from "~/schemas";
 import { type PermissionRequest, Permissions } from "../services/permissions";
 import { Workspace } from "../services/workspace";
@@ -54,3 +54,22 @@ export const readUtf8 = (path: string, failed: (message: string) => ToolFailure)
       catch: () => failed("not UTF-8 text; write and edit only change UTF-8 files"),
     });
   });
+
+/**
+ * A defect in a tool handler (a bug in orx or in a library it calls) would end the whole turn.
+ * Instead it's logged once, with the tool's name, and goes back to the model as a failure it
+ * can route around. Interruption still passes through.
+ */
+export const catchToolDefect =
+  <E>(name: string, fail: (message: string) => E) =>
+  <A, E0, R>(effect: Effect.Effect<A, E0, R>): Effect.Effect<A, E | E0, R> =>
+    effect.pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logError(`${name} tool failed unexpectedly`, Cause.die(defect)).pipe(
+          Effect.annotateLogs({ tool: name }),
+          Effect.andThen(
+            Effect.fail(fail(`${name} failed unexpectedly; try a different approach`)),
+          ),
+        ),
+      ),
+    );
