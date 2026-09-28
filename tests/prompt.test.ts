@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Logger, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { Paths } from "~/config";
@@ -113,6 +113,30 @@ describe("loadMemory", () => {
     expect(await memoryFor(root, join(base, "config"))).toEqual([
       `Contents of ${join(root, "AGENTS.md")}:\n\nroot`,
     ]);
+  });
+
+  it("warns about a memory file it can't read, and stays quiet about a missing one", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, ".git"));
+    mkdirSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, "CLAUDE.md"), "fallback");
+    const warnings: Array<string> = [];
+    const memory = await Effect.runPromise(
+      loadMemory(root).pipe(
+        Effect.provide(pathsFor(join(root, "config"))),
+        Effect.provide(NodeServices.layer),
+        Effect.provide(
+          Logger.layer([
+            Logger.make(({ logLevel, message }) => {
+              if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+            }),
+          ]),
+        ),
+      ),
+    );
+    expect(memory).toEqual([`Contents of ${join(root, "CLAUDE.md")}:\n\nfallback`]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(join(root, "AGENTS.md"));
   });
 
   it("caps memory at 32 KiB with a truncation note", async () => {

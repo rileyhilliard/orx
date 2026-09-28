@@ -137,6 +137,17 @@ describe("orx ask --agent", () => {
     expect(stub.chatRequests).toHaveLength(0);
   });
 
+  it("warns when it can't check that the model calls tools", async () => {
+    stub.failModels = 10;
+    const run = await runCli(["ask", "hi", "--agent", "--cwd", workspace()], {
+      env: { OPENROUTER_BASE_URL: stub.baseUrl },
+    });
+    stub.failModels = 0;
+    expect(run.exitCode).toBe(0);
+    const warnings = run.logs.filter((r) => r.level === "warn" && /tool calling/.test(r.msg));
+    expect(warnings).toHaveLength(1);
+  });
+
   it("gives plain ask no workspace tools", async () => {
     const run = await runCli(["ask", "hi", "--json"], {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
