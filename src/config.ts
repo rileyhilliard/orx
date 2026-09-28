@@ -165,6 +165,8 @@ export const appConfig: Config.Config<AppConfigShape> = Config.all({
 
 /** Where orx keeps its files. Can't fail: every path has a default. */
 export interface PathsShape {
+  /** $HOME, or none when unset. The agent refuses to use it as its workspace root. */
+  readonly home: Option.Option<string>;
   readonly configFile: string;
   readonly dataDir: string;
   /** Also append JSON log lines here. `bun run orx` sets it to logs/orx.jsonl. */
@@ -172,26 +174,30 @@ export interface PathsShape {
 }
 
 export const pathsConfig: Config.Config<PathsShape> = Config.all({
-  home: stringOr("HOME", "."),
+  home: optionalString("HOME"),
   xdgConfig: optionalString("XDG_CONFIG_HOME"),
   xdgData: optionalString("XDG_DATA_HOME"),
   dataDir: optionalString("ORX_DATA_DIR"),
   logFile: optionalString("ORX_LOG_FILE"),
 }).pipe(
-  Config.map(({ home, xdgConfig, xdgData, dataDir, logFile }) => ({
-    configFile: join(
-      Option.getOrElse(xdgConfig, () => join(home, ".config")),
-      "orx",
-      "config.json",
-    ),
-    dataDir: Option.getOrElse(dataDir, () =>
-      join(
-        Option.getOrElse(xdgData, () => join(home, ".local", "share")),
+  Config.map(({ home, xdgConfig, xdgData, dataDir, logFile }) => {
+    const homeDir = Option.getOrElse(home, () => ".");
+    return {
+      home,
+      configFile: join(
+        Option.getOrElse(xdgConfig, () => join(homeDir, ".config")),
         "orx",
+        "config.json",
       ),
-    ),
-    logFile,
-  })),
+      dataDir: Option.getOrElse(dataDir, () =>
+        join(
+          Option.getOrElse(xdgData, () => join(homeDir, ".local", "share")),
+          "orx",
+        ),
+      ),
+      logFile,
+    };
+  }),
 );
 
 export class Paths extends Context.Service<Paths, PathsShape>()("orx/Paths") {
