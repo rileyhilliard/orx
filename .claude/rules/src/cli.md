@@ -19,7 +19,7 @@ paths:
 - Shared flags live in `src/commands/shared.ts` (`jsonFlag`, `modelFlag`). Reuse them so `--json` and `--model`/`-m` mean the same thing everywhere.
 - A command that talks to the model calls `resolveModel(requested)` (an unknown id is `UnknownModel`, exit 2; `OPENROUTER_MODEL` applies only when no model was given). Config is loaded inside the program that needs it (`loadConfig`), never at the top of `main`: `--help`, `--version`, `doctor`, and `update` must work with no key and a broken config file.
 - Piped input: `readPipedStdin` returns `undefined` at a terminal, so a command never blocks on a keyboard it didn't ask for. bare `orx` needs a TTY on stdin and stdout and fails with `NotInteractive` (exit 2) pointing at `orx ask` otherwise.
-- Interactive-only code (the TUI) is loaded through `importTui` (`src/commands/load-tui.ts`, a dynamic `import("../tui/launch")`) inside the handler, so tests and every other command never load OpenTUI.
+- Interactive-only code (the TUI) is loaded through `importTui` (`src/commands/load-tui.ts`, a dynamic `import("../tui/launch")`) inside the handler, so every other command never loads OpenTUI. It goes through the `TuiLoader` service, which `src/bin.ts` provides like `Host`; `runCli` provides one that fails with `TuiUnavailable` unless a test passes `tui: "real"`, so no test starts a renderer in the test process.
 
 ## Platform boundary
 
