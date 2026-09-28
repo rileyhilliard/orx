@@ -48,15 +48,15 @@ const REMOVE = [
   "scripts/lib/recording.ts",
   "scripts/lib/script-layer.ts",
   "scripts/record-openrouter.ts",
-  "src/commands/session.ts",
   "src/commands/chats.ts",
   "src/commands/export.ts",
   "src/commands/extract.ts",
   "src/commands/mcp.ts",
   "src/commands/models.ts",
+  "src/commands/session.ts",
   "src/core/chat.ts",
-  "src/core/context.ts",
   "src/core/commands.ts",
+  "src/core/context.ts",
   "src/core/export.ts",
   "src/core/extract.ts",
   "src/core/files.ts",
@@ -83,11 +83,11 @@ const REMOVE = [
   "src/tui/mentions.ts",
   "src/tui/message-list.tsx",
   "src/tui/model-picker.tsx",
+  "src/tui/picker.tsx",
   "src/tui/tool-summary.ts",
   "tests/agent-approval.test.ts",
   "tests/agent-tools.test.ts",
   "tests/agent-write-tools.test.ts",
-  "src/tui/picker.tsx",
   "tests/ask-agent.test.ts",
   "tests/chat-turn.test.ts",
   "tests/evals.test.ts",
@@ -98,17 +98,19 @@ const REMOVE = [
   "tests/permissions.test.ts",
   "tests/prompt.test.ts",
   "tests/recording.test.ts",
-  "tests/turn-history.test.ts",
   "tests/script-layer.test.ts",
-  "tests/workspace.test.ts",
   "tests/slash.test.ts",
   "tests/tool-summary.test.ts",
+  "tests/turn-history.test.ts",
+  "tests/workspace.test.ts",
 ];
 
 /** The vanilla machinery itself, gone from the result. */
 const MACHINERY = ["scripts/vanilla.ts", "template", ".github/workflows/vanilla.yml"];
 /** package.json scripts for removed features, and this one. */
 const DROP_SCRIPTS = ["eval", "record:openrouter", "vanilla"];
+/** Dependencies only removed code imports (the agent's file tools). */
+const DROP_DEPENDENCIES = ["diff", "ignore", "picomatch", "@types/picomatch"];
 
 /** An expected failure: printed as one line, exit 1. Thrown, so cleanup and undo hints still run. */
 class VanillaError extends Error {}
@@ -263,8 +265,19 @@ const makeVanilla = (cwd: string, branch: string, check: boolean) => {
   for (const file of walk(template)) cpSync(file, join(cwd, relative(template, file)));
 
   const pkgPath = join(cwd, "package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts: Record<string, string> };
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+    scripts: Record<string, string>;
+    dependencies: Record<string, string>;
+    devDependencies: Record<string, string>;
+  };
   for (const script of DROP_SCRIPTS) delete pkg.scripts[script];
+  for (const dep of DROP_DEPENDENCIES) {
+    if (!(dep in pkg.dependencies) && !(dep in pkg.devDependencies)) {
+      fail(`package.json no longer depends on ${dep}; update scripts/vanilla.ts`);
+    }
+    delete pkg.dependencies[dep];
+    delete pkg.devDependencies[dep];
+  }
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   dropEntry(cwd, "tsconfig.json", ', "template"');
   dropEntry(cwd, "biome.json", ', "!template"');
