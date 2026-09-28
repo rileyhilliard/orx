@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -34,7 +34,7 @@ const readThenEdit = (dir: string) => [
 ];
 
 const toolResults = (stdout: string) =>
-  ndjson(stdout).filter((e) => e.type === "tool-result") as Array<{
+  askEvents(stdout).filter((e) => e.type === "tool-result") as Array<{
     name: string;
     isFailure: boolean;
     output: unknown;
@@ -85,7 +85,7 @@ describe("orx ask --agent", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl },
     });
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout) as Array<{ type: string; id?: string; name?: string }>;
+    const events = askEvents(run.stdout) as Array<{ type: string; id?: string; name?: string }>;
     const denied = events.filter((e) => e.type === "permission-denied");
     const editCall = events.find((e) => e.type === "tool-call" && e.name === "edit");
     expect(denied).toEqual([

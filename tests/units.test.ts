@@ -5,6 +5,8 @@ import { modelsTable, usageLine } from "~/core/format";
 import { searchModels } from "~/core/models";
 import { checksumFor } from "~/core/update";
 import {
+  APP_ERROR_TAGS,
+  type AppError,
   BadInput,
   exitCodeFor,
   InvalidConfig,
@@ -14,6 +16,7 @@ import {
   NotInteractive,
   PermissionDenied,
   retryableFor,
+  TuiUnavailable,
   UnknownModel,
   UpstreamUnavailable,
 } from "~/errors";
@@ -21,19 +24,25 @@ import type { ChatId, ModelInfo, StoredChat } from "~/schemas";
 
 describe("exit codes", () => {
   it("maps every error to its documented code", () => {
-    const cases = [
-      [new BadInput({ message: "" }), 2, false],
-      [new NotFound({ message: "" }), 2, false],
-      [new UnknownModel({ message: "", model: "x" }), 2, false],
-      [new NotInteractive({ message: "" }), 2, false],
-      [new NotConfigured({ message: "" }), 3, false],
-      [new InvalidConfig({ message: "" }), 3, false],
-      [new UpstreamUnavailable({ message: "", retryable: true }), 4, true],
-      [new UpstreamUnavailable({ message: "", retryable: false }), 4, false],
-      [new InvalidModelOutput({ message: "" }), 5, true],
-      [new PermissionDenied({ message: "" }), 6, false],
-    ] as const;
-    for (const [error, code, retryable] of cases) {
+    // Keyed by tag, so tsc fails when an AppError has no row; the key check below fails at
+    // runtime when APP_ERROR_TAGS and this table disagree.
+    const table: Record<AppError["_tag"], ReadonlyArray<readonly [AppError, number, boolean]>> = {
+      BadInput: [[new BadInput({ message: "" }), 2, false]],
+      NotFound: [[new NotFound({ message: "" }), 2, false]],
+      UnknownModel: [[new UnknownModel({ message: "", model: "x" }), 2, false]],
+      NotInteractive: [[new NotInteractive({ message: "" }), 2, false]],
+      NotConfigured: [[new NotConfigured({ message: "" }), 3, false]],
+      InvalidConfig: [[new InvalidConfig({ message: "" }), 3, false]],
+      TuiUnavailable: [[new TuiUnavailable({ message: "" }), 3, false]],
+      UpstreamUnavailable: [
+        [new UpstreamUnavailable({ message: "", retryable: true }), 4, true],
+        [new UpstreamUnavailable({ message: "", retryable: false }), 4, false],
+      ],
+      InvalidModelOutput: [[new InvalidModelOutput({ message: "" }), 5, true]],
+      PermissionDenied: [[new PermissionDenied({ message: "" }), 6, false]],
+    };
+    expect(Object.keys(table).sort()).toEqual([...APP_ERROR_TAGS].sort());
+    for (const [error, code, retryable] of Object.values(table).flat()) {
       expect([error._tag, exitCodeFor(error), retryableFor(error)]).toEqual([
         error._tag,
         code,

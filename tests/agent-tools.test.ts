@@ -219,6 +219,11 @@ describe("glob", () => {
 });
 
 const rgInstalled = await Effect.runPromise(hasRipgrep.pipe(Effect.provide(NodeServices.layer)));
+// Locally the rg tests skip without rg; in CI (ci.yml and release.yml install it) a missing rg fails,
+// or the rg path of grep would go untested without anyone noticing.
+if (process.env.CI && !rgInstalled) {
+  throw new Error("ripgrep (rg) isn't on PATH; CI must install it to test grep's rg path");
+}
 
 const grepFixture = () => {
   const root = tempDir();

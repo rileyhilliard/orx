@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ndjson, runCli, tempRoot } from "./helpers/cli";
+import { askEvents, runCli, tempRoot } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -56,11 +56,11 @@ describe("stdout contract and exit codes", () => {
   it("ends --json output with one error event for any failure after parsing", async () => {
     const unknown = await runCli(["ask", "hi", "-m", "nope/x", "--json"], withStub());
     expect(unknown.exitCode).toBe(2);
-    expect(ndjson(unknown.stdout)).toMatchObject([
+    expect(askEvents(unknown.stdout)).toMatchObject([
       { type: "error", error: { tag: "UnknownModel", retryable: false } },
     ]);
     const empty = await runCli(["ask", "--json"], withStub());
-    expect(ndjson(empty.stdout)).toMatchObject([{ type: "error", error: { tag: "BadInput" } }]);
+    expect(askEvents(empty.stdout)).toMatchObject([{ type: "error", error: { tag: "BadInput" } }]);
   });
 
   it("ends --json output with an InternalError event when orx itself fails", async () => {
@@ -71,7 +71,7 @@ describe("stdout contract and exit codes", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl, ORX_DATA_DIR: dataDir },
     });
     expect(run.exitCode).toBe(1);
-    expect(ndjson(run.stdout).at(-1)).toEqual({
+    expect(askEvents(run.stdout).at(-1)).toEqual({
       type: "error",
       error: {
         tag: "InternalError",
@@ -160,7 +160,7 @@ describe("orx ask", () => {
   it("emits NDJSON events ending in done with --json", async () => {
     const run = await runCli(["ask", "hi", "--json"], withStub());
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.map((e) => e.type)).toEqual(["text", "done"]);
     expect(events.at(-1)).toMatchObject({
       type: "done",
@@ -173,7 +173,7 @@ describe("orx ask", () => {
     stub.replay(["tool.1", "tool.2"]);
     const run = await runCli(["ask", "what time is it in Tokyo", "--json"], withStub());
     expect(run.exitCode).toBe(0);
-    const types = ndjson(run.stdout).map((e) => e.type);
+    const types = askEvents(run.stdout).map((e) => e.type);
     expect(types).toContain("tool-call");
     expect(types).toContain("tool-result");
     expect(types.at(-1)).toBe("done");
@@ -184,7 +184,7 @@ describe("orx ask", () => {
     const run = await runCli(["ask", "hi", "--json"], withStub());
     stub.failCompletions = undefined;
     expect(run.exitCode).toBe(4);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.at(-1)).toMatchObject({
       type: "error",
       error: { tag: "UpstreamUnavailable", retryable: true },
@@ -204,7 +204,7 @@ describe("orx ask", () => {
 
   it("saves the exchange, which chats and export read back", async () => {
     const first = await runCli(["ask", "remember", "me", "--json"], withStub());
-    const done = ndjson(first.stdout).at(-1) as { chatId: string };
+    const done = askEvents(first.stdout).at(-1) as { chatId: string };
     const listed = await runCli(["chats", "--json"], { ...withStub(), root: first.root });
     expect((JSON.parse(listed.stdout) as Array<{ id: string }>).map((c) => c.id)).toEqual([
       done.chatId,
@@ -217,7 +217,7 @@ describe("orx ask", () => {
 
   it("names the path when -o can't be written: 2 for a missing directory, 6 when denied", async () => {
     const first = await runCli(["ask", "hi", "--json"], withStub());
-    const { chatId } = ndjson(first.stdout).at(-1) as { chatId: string };
+    const { chatId } = askEvents(first.stdout).at(-1) as { chatId: string };
     const missing = await runCli(["export", chatId, "-o", join(first.root, "nope", "x.md")], {
       root: first.root,
     });
@@ -247,7 +247,7 @@ describe("orx ask", () => {
       // The save runs in the turn's finalizer, which can't fail with a typed error, so this
       // is a defect (exit 1) whose log line says what to fix.
       expect(run.exitCode).toBe(1);
-      expect(ndjson(run.stdout).at(-1)).toMatchObject({
+      expect(askEvents(run.stdout).at(-1)).toMatchObject({
         type: "error",
         error: { tag: "InternalError" },
       });
@@ -354,7 +354,32 @@ describe("orx (the session)", () => {
       stdoutIsTerminal: true,
     });
     expect(chosen.stderr).not.toContain("ran in");
-    expect(chosen.exitCode).not.toBe(2);
+    expect(chosen.exitCode).toBe(3);
+    expect(chosen.stdout).toBe("");
+    expect(chosen.stderr).toMatch(/orx: The terminal UI couldn't (load|start)/);
+  });
+});
+
+describe("orx doctor --tui", () => {
+  // vitest runs on Node, where OpenTUI's native FFI isn't available, so this path is certain.
+  it("reports the TUI failure, then exits 3 with a TuiUnavailable error on stderr", async () => {
+    const run = await runCli(["doctor", "--tui", "--json"]);
+    expect(run.exitCode).toBe(3);
+    // The report still reaches stdout, so a bug report has both it and the exit code.
+    expect(JSON.parse(run.stdout)).toMatchObject({
+      tui: {
+        nativeLib: false,
+        renderer: null,
+        error: expect.stringMatching(/The terminal UI couldn't (load|start)/),
+      },
+    });
+    expect(JSON.parse(run.stderr)).toEqual({
+      error: {
+        tag: "TuiUnavailable",
+        message: expect.stringMatching(/^The terminal UI couldn't (load|start)/),
+        retryable: false,
+      },
+    });
   });
 });
 

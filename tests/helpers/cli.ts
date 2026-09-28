@@ -9,6 +9,7 @@ import {
   Layer,
   Logger,
   References,
+  Schema,
   Sink,
   Stdio,
   Stream,
@@ -17,6 +18,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { type LogRecord, toEntry, toRecord } from "~/logging";
 import { main } from "~/main";
 import { AppLayer } from "~/runtime";
+import { AskEvent } from "~/schemas";
 import { Host, type HostShape } from "~/services/Host";
 import { UNREACHABLE } from "../isolation";
 
@@ -156,3 +158,12 @@ export const ndjson = (stdout: string) =>
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+const decodeAskEvent = Schema.decodeUnknownSync(AskEvent);
+
+/**
+ * `orx ask --json` stdout, each line decoded with the public AskEvent schema. A field the
+ * schema doesn't declare fails the test: scripts get exactly what AskEvent documents.
+ */
+export const askEvents = (stdout: string): Array<AskEvent> =>
+  ndjson(stdout).map((line) => decodeAskEvent(line, { onExcessProperty: "error" }));

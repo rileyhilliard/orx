@@ -74,7 +74,8 @@ export type AppError =
   | PermissionDenied
   | TuiUnavailable;
 
-const APP_ERROR_TAGS: ReadonlySet<string> = new Set<AppError["_tag"]>([
+/** Every AppError tag. Exported so tests/units.test.ts can check its exit code table is complete. */
+export const APP_ERROR_TAGS: ReadonlySet<string> = new Set<AppError["_tag"]>([
   "NotConfigured",
   "InvalidConfig",
   "BadInput",
@@ -151,8 +152,9 @@ export class BrokenPipe extends Error {
 
 /**
  * What a finished run means for the process: its exit code, and what to tell the user.
- * `help` is a ShowHelp without errors (`orx` with no subcommand): the help already went to
- * stdout, so there's nothing more to say. Parse errors exit 2 like BadInput; defects exit 1.
+ * `help` is a ShowHelp without errors, which the CLI raises for a command with no handler of its
+ * own (none in orx today: bare `orx` starts the session, and `--help` ends as `ok`): the help
+ * already went to stdout, so there's nothing more to say. Parse errors exit 2 like BadInput; defects exit 1.
  */
 export type Outcome =
   | { readonly kind: "ok" }

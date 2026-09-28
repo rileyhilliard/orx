@@ -7,7 +7,7 @@ import { runTurn } from "~/core/chat";
 import { resolveToolModel } from "~/core/models";
 import type { AssistantMessage } from "~/schemas";
 import { runScript, type ScriptServices } from "../scripts/lib/script-layer";
-import { ndjson, runCli } from "./helpers/cli";
+import { askEvents, runCli } from "./helpers/cli";
 import { type StubOpenRouter, startStubOpenRouter } from "./helpers/stub-openrouter";
 
 let stub: StubOpenRouter;
@@ -33,7 +33,7 @@ describe("a chat turn", () => {
     });
     stub.completion = { ...stub.completion, text: "Hello from the stub." };
     expect(run.exitCode).toBe(4);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(
       events
         .filter((e) => e.type === "text")
@@ -67,7 +67,7 @@ describe("a chat turn", () => {
     stub.completion = { ...stub.completion, text: "Hello from the stub." };
     expect(run.exitCode).toBe(4);
     expect(stub.chatRequests).toHaveLength(1);
-    const text = ndjson(run.stdout).filter((e) => e.type === "text");
+    const text = askEvents(run.stdout).filter((e) => e.type === "text");
     expect(text.map((e) => e.delta).join("")).toBe("one two ");
   });
 
@@ -90,11 +90,11 @@ describe("a chat turn", () => {
     stub.replay([]);
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(2);
-    const events = ndjson(run.stdout);
-    expect(events.at(-2)).toMatchObject({ type: "note" });
-    expect(String(events.at(-2)?.message)).toContain(
-      "Stopped after 2 model steps (MAX_TOOL_STEPS)",
-    );
+    const events = askEvents(run.stdout);
+    expect(events.at(-2)).toMatchObject({
+      type: "note",
+      message: expect.stringContaining("Stopped after 2 model steps (MAX_TOOL_STEPS)"),
+    });
     expect(events.at(-1)).toMatchObject({ type: "done", finishReason: "tool-calls" });
   });
 
@@ -107,7 +107,7 @@ describe("a chat turn", () => {
     expect(run.exitCode).toBe(0);
     // The third identical call still runs; the model isn't prompted a fourth time.
     expect(stub.chatRequests).toHaveLength(3);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.filter((e) => e.type === "tool-result")).toHaveLength(3);
     expect(events.at(-2)).toMatchObject({
       type: "note",
@@ -125,7 +125,7 @@ describe("a chat turn", () => {
     });
     expect(run.exitCode).toBe(0);
     expect(stub.chatRequests).toHaveLength(5);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.some((e) => e.type === "note")).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: "done", finishReason: "stop" });
   });
@@ -137,7 +137,7 @@ describe("a chat turn", () => {
       env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_STREAM_SECONDS: "1" },
     });
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(
       events
         .filter((e) => e.type === "text")
@@ -155,7 +155,7 @@ describe("a chat turn", () => {
       { env: { OPENROUTER_BASE_URL: stub.baseUrl, MAX_STREAM_SECONDS: "1" } },
     );
     expect(run.exitCode).toBe(0);
-    const events = ndjson(run.stdout);
+    const events = askEvents(run.stdout);
     expect(events.find((e) => e.type === "tool-result")).toMatchObject({
       name: "bash",
       isFailure: false,
@@ -174,7 +174,7 @@ describe("a chat turn", () => {
     const toolMessage = second.messages.find((m) => m.role === "tool");
     expect(JSON.stringify(toolMessage?.content)).toContain("ToolParameterValidationError");
     // Usage and cost are summed over both steps.
-    expect(ndjson(run.stdout).at(-1)).toMatchObject({
+    expect(askEvents(run.stdout).at(-1)).toMatchObject({
       type: "done",
       finishReason: "stop",
       usage: { inputTokens: 24, outputTokens: 10, cost: 0.00084 },
