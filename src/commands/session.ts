@@ -38,6 +38,7 @@ export const runSession = ({
   resume,
   model,
   cwd,
+  dangerouslySkipPermissions,
 }: {
   readonly resume: Option.Option<string>;
   readonly model: Option.Option<string>;
@@ -52,7 +53,10 @@ export const runSession = ({
           "orx needs a terminal. For pipes and scripts, use `orx ask` (with --json for NDJSON).",
       });
     }
-    const session = yield* prepareSession(cwd);
+    const session = yield* prepareSession(cwd, {
+      mode: dangerouslySkipPermissions ? "yolo" : "default",
+      headless: false,
+    });
     const requested = Option.getOrUndefined(model);
     const initial = Option.isSome(resume)
       ? yield* decodeInput(ChatId)(resume.value).pipe(Effect.flatMap(loadChat))

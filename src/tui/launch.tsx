@@ -1,6 +1,6 @@
 import { type CliRendererConfig, createCliRenderer, resolveRenderLib } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { Cause, Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Fiber, FileSystem, Option, Schema, Stream } from "effect";
 import { ChatId, type ChatMessage, type StoredChat } from "~/schemas";
 import {
   type ChatToolHandlers,
@@ -18,7 +18,9 @@ import { listModels } from "../core/models";
 import { expandSkill, loadSlash } from "../core/skills";
 import { isAppError, retryableFor, TuiUnavailable } from "../errors";
 import { TerminalLogging } from "../logging";
+import { Permissions } from "../services/permissions";
 import { App } from "./app";
+import { summarizeTool } from "./tool-summary";
 import type { ChatBridge, UiError, UiEvent, UiMessage } from "./types";
 
 /**
@@ -33,11 +35,16 @@ export const RENDERER_OPTIONS = {
   consoleMode: "disabled",
 } satisfies CliRendererConfig;
 
-/** A coding session's root, tools, and system prompt (see `prepareSession`). */
-export interface SessionOptions<R> {
+/**
+ * A coding session's root, tools, and system prompt (see `prepareSession`), and the `@` file
+ * mention programs, which need the session's Workspace and FileState (M).
+ */
+export interface SessionOptions<R, M = never> {
   readonly root: string;
   readonly toolkit: TurnToolkit<R>;
   readonly systemPrompt: string;
+  readonly listFiles: Effect.Effect<ReadonlyArray<string>, never, M>;
+  readonly attachFiles: (text: string) => Effect.Effect<string, never, M>;
 }
 
 /** What a turn, the models list, and export need (whatever sendMessage requires, and more). */
@@ -62,7 +69,11 @@ const toUiMessage = (message: ChatMessage): UiMessage =>
         usage: usageLine(message),
       };
 
+/** Each tool call's input until its result arrives, for the result's summary line. */
+const inputs = new Map<string, unknown>();
+
 const toUiEvent = (event: TurnEvent): ReadonlyArray<UiEvent> => {
+  if (event.type === "tool-call") inputs.set(event.id, event.input);
   switch (event.type) {
     case "text":
       return [{ type: "text", delta: event.delta }];
@@ -78,10 +89,24 @@ const toUiEvent = (event: TurnEvent): ReadonlyArray<UiEvent> => {
           },
         },
       ];
-    case "tool-result":
-      return [{ type: "tool-result", id: event.id, isFailure: event.isFailure }];
+    case "tool-result": {
+      const summary = summarizeTool(
+        event.name,
+        inputs.get(event.id),
+        event.output,
+        event.isFailure,
+      );
+      inputs.delete(event.id);
+      return [{ type: "tool-result", id: event.id, isFailure: event.isFailure, ...summary }];
+    }
     case "note":
       return [{ type: "note", message: event.message }];
+    case "approval-request": {
+      const { type: _, ...request } = event;
+      return [{ type: "approval", request }];
+    }
+    case "approval-cancelled":
+      return [{ type: "approval-cancelled", id: event.id }];
     case "finish":
       return [{ type: "done", usage: usageLine(event.reply) }];
   }
@@ -109,19 +134,21 @@ const logDefect = (cause: Cause.Cause<unknown>) =>
  * skills load from (`<root>/.orx/`), and turns use its tools and system prompt. Without one,
  * turns use the plain chat tools and commands load from the cwd.
  */
-export const makeBridge = <R = never>(
+export const makeBridge = <R = never, M = never>(
   initial: StoredChat,
   quit: () => void,
-  session?: SessionOptions<R>,
+  session?: SessionOptions<R, M>,
 ) =>
   Effect.gen(function* () {
-    const context = yield* Effect.context<LaunchServices | R>();
+    const context = yield* Effect.context<LaunchServices | R | M>();
     const root = session?.root ?? process.cwd();
     const turnOptions = session
       ? { toolkit: session.toolkit, systemPrompt: session.systemPrompt }
       : {};
     const fs = yield* FileSystem.FileSystem;
     const run = Effect.runPromiseWith(context);
+    // The session's approval gate; without one (plain chat) nothing ever asks.
+    const permissions = yield* Effect.serviceOption(Permissions);
     let chat = initial;
     // Commands and skills load once per session; the loader logs its warnings.
     const slash = yield* Effect.cached(
@@ -135,6 +162,18 @@ export const makeBridge = <R = never>(
         ),
       ),
     );
+    // The `@` picker's file list: the last walk answers at once, and each open refreshes it.
+    let files: Promise<ReadonlyArray<string>> | undefined;
+    const walkFiles = () =>
+      session
+        ? run(
+            session.listFiles.pipe(
+              Effect.catchCause((cause) =>
+                Effect.as(Effect.logError("listing workspace files failed", cause), []),
+              ),
+            ),
+          )
+        : Promise.resolve([]);
     // The turns' iterators run on their own fibers, outside launchChat's scope.
     const active = new Set<AsyncIterator<UiEvent>>();
     const tracked = (iterable: AsyncIterable<UiEvent>): AsyncIterable<UiEvent> => ({
@@ -235,6 +274,39 @@ export const makeBridge = <R = never>(
             return skill ? { text: expandSkill(skill, args) } : undefined;
           }),
         ),
+      listFiles: () => {
+        const last = files;
+        const next = walkFiles();
+        files = next;
+        return last ?? next;
+      },
+      attachFiles: (text) =>
+        session
+          ? run(
+              session
+                .attachFiles(text)
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logError("attaching @ files failed", cause), text),
+                  ),
+                ),
+            )
+          : Promise.resolve(text),
+      answer: (id, decision) =>
+        Option.isSome(permissions)
+          ? run(permissions.value.answer(id, decision))
+          : Promise.resolve(),
+      setMode: (mode) =>
+        Option.isSome(permissions) ? run(permissions.value.setMode(mode)) : Promise.resolve(),
+      watchMode: (onMode) => {
+        if (Option.isNone(permissions)) return () => {};
+        const fiber = Effect.runForkWith(context)(
+          permissions.value.modeChanges.pipe(
+            Stream.runForEach((mode) => Effect.sync(() => onMode(mode))),
+          ),
+        );
+        return () => void run(Fiber.interrupt(fiber));
+      },
       newChat: () =>
         run(
           Effect.sync(() => {
@@ -261,7 +333,10 @@ const createRenderer = Effect.tryPromise({
  * destroyed (and the terminal restored) however this ends, including interruption by SIGINT.
  * While it runs, logs go only to the log file: the TUI owns the terminal.
  */
-export const launchChat = <R = never>(initial: StoredChat, session?: SessionOptions<R>) =>
+export const launchChat = <R = never, M = never>(
+  initial: StoredChat,
+  session?: SessionOptions<R, M>,
+) =>
   Effect.gen(function* () {
     let quit: () => void = () => {};
     const quitting = new Promise<void>((resolve) => {

@@ -2,9 +2,11 @@ import { Effect, Layer, Option } from "effect";
 import { Toolkit } from "effect/unstable/ai";
 import { DEFAULT_SYSTEM_PROMPT, loadConfig } from "../config";
 import { FileState } from "../services/file-state";
+import { type PermissionMode, Permissions } from "../services/permissions";
 import { Workspace } from "../services/workspace";
 import { AgentTools, AgentToolsLive } from "../tools/agent";
 import { SkillTools, skillToolLayer } from "../tools/skill";
+import { attachMentions, listWorkspaceFiles } from "./mentions";
 import { buildSystemPrompt, gatherEnv, loadMemory } from "./prompt";
 import { loadSkills } from "./skills";
 
@@ -17,10 +19,16 @@ export type SessionToolHandlers = Effect.Services<typeof SessionTools>;
 /**
  * Everything a coding session needs, built once: the workspace root (`--cwd`, or the cwd),
  * the system prompt with memory and skill descriptions, and the layer with the tools'
- * handlers and the per-session Workspace and FileState. Skill directories become extra
+ * handlers and the per-session Workspace, FileState, and Permissions. Skill directories become extra
  * read-only roots, so `read` can open a skill's supporting files.
  */
-export const prepareSession = (cwd: Option.Option<string>) =>
+export const prepareSession = (
+  cwd: Option.Option<string>,
+  permissions: { readonly mode: PermissionMode; readonly headless: boolean } = {
+    mode: "default",
+    headless: false,
+  },
+) =>
   Effect.gen(function* () {
     const root = yield* Workspace.resolveRoot(Option.getOrUndefined(cwd), Option.isSome(cwd));
     const config = yield* loadConfig;
@@ -32,7 +40,14 @@ export const prepareSession = (cwd: Option.Option<string>) =>
       memory: yield* loadMemory(root),
       skills: skills.map((s) => ({ name: s.name, description: s.description })),
     });
-    const state = Layer.mergeAll(Workspace.layer(root), FileState.layer);
+    const state = Layer.mergeAll(
+      Workspace.layer(root),
+      FileState.layer,
+      // Headless (`ask --agent`), anything that would ask is denied instead.
+      permissions.headless
+        ? Permissions.layerHeadless(permissions.mode)
+        : Permissions.layer(permissions.mode),
+    );
     const readRoots = Layer.effectDiscard(
       Effect.gen(function* () {
         const ws = yield* Workspace;
@@ -44,5 +59,13 @@ export const prepareSession = (cwd: Option.Option<string>) =>
     const layer = Layer.mergeAll(AgentToolsLive, skillToolLayer(skills), readRoots).pipe(
       Layer.provideMerge(state),
     );
-    return { root, systemPrompt, toolkit: SessionTools, layer } as const;
+    return {
+      root,
+      systemPrompt,
+      toolkit: SessionTools,
+      layer,
+      // The `@` file picker's list and the attachments sent with a message.
+      listFiles: listWorkspaceFiles,
+      attachFiles: attachMentions,
+    } as const;
   });
