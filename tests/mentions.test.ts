@@ -141,6 +141,25 @@ describe("the @ picker's ranking and insertion", () => {
     expect(rankPaths(paths, "")).toEqual(paths);
   });
 
+  it("ranks a contiguous match anywhere above a subsequence scattered across segments", () => {
+    const repo = [
+      "template/vanilla/.claude/hooks/",
+      "template/vanilla/src/core/ask.ts",
+      "tests/fixtures/openrouter/",
+      "src/packages/index.ts",
+      "template/vanilla/package.json",
+      "scripts/pick.ts",
+      "package.json",
+    ];
+    expect(rankPaths(repo, "pack")).toEqual([
+      "package.json",
+      "template/vanilla/package.json",
+      "src/packages/index.ts",
+      "template/vanilla/.claude/hooks/",
+      "template/vanilla/src/core/ask.ts",
+    ]);
+  });
+
   it("opens on an @ that starts a word, and replaces it with the picked path", () => {
     expect(opensMentionPicker("@")).toBe(true);
     expect(opensMentionPicker("fix @")).toBe(true);

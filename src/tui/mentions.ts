@@ -10,35 +10,57 @@ export const insertMention = (draft: string, path: string) => {
   return draft === "" || /\s$/.test(draft) ? draft + mention : `${draft} ${mention}`;
 };
 
-const isSubsequence = (query: string, text: string) => {
+/**
+ * How many contiguous runs `query` splits into when matched left to right as a subsequence of
+ * `text`, or undefined when it doesn't match. Fewer runs is a tighter match.
+ */
+const subsequenceRuns = (query: string, text: string) => {
   let i = 0;
-  for (const char of text) if (char === query[i]) i++;
-  return i === query.length;
+  let runs = 0;
+  let previous = -2;
+  for (const [at, char] of [...text].entries()) {
+    if (i === query.length) break;
+    if (char !== query[i]) continue;
+    if (at !== previous + 1) runs++;
+    previous = at;
+    i++;
+  }
+  return i === query.length ? runs : undefined;
 };
 
 const basename = (path: string) => path.replace(/\/$/, "").split("/").at(-1) ?? path;
 
 /**
- * Paths matching `query` as a fuzzy subsequence (case-insensitive), best first: the basename
- * containing the query, then the basename matching it as a subsequence, then the whole path;
- * shorter paths first within each. An empty query keeps the list as it is.
+ * Paths matching `query` (case-insensitive), best first. Tiers: the basename contains the query
+ * (starting with it first), the path contains it, the basename matches it as a subsequence, then
+ * the whole path does. Subsequence matches in fewer contiguous runs rank higher, so `pack` puts
+ * `x/package.json` well above `template/vanilla/.claude/hooks/`. Shorter paths break ties. An
+ * empty query keeps the list as it is.
  */
 export const rankPaths = (paths: ReadonlyArray<string>, query: string): ReadonlyArray<string> => {
   const q = query.trim().toLowerCase();
   if (q === "") return paths;
-  const tierOf = (path: string) => {
+  const scoreOf = (path: string): readonly [number, number] | undefined => {
     const lower = path.toLowerCase();
     const base = basename(lower);
-    if (base.includes(q)) return 0;
-    if (isSubsequence(q, base)) return 1;
-    if (isSubsequence(q, lower)) return 2;
-    return undefined;
+    if (base.includes(q)) return [0, base.startsWith(q) ? 0 : 1];
+    if (lower.includes(q)) return [1, 0];
+    const baseRuns = subsequenceRuns(q, base);
+    if (baseRuns !== undefined) return [2, baseRuns];
+    const pathRuns = subsequenceRuns(q, lower);
+    return pathRuns === undefined ? undefined : [3, pathRuns];
   };
   return paths
     .flatMap((path) => {
-      const tier = tierOf(path);
-      return tier === undefined ? [] : [{ path, tier }];
+      const score = scoreOf(path);
+      return score === undefined ? [] : [{ path, score }];
     })
-    .sort((a, b) => a.tier - b.tier || a.path.length - b.path.length || (a.path < b.path ? -1 : 1))
+    .sort(
+      (a, b) =>
+        a.score[0] - b.score[0] ||
+        a.score[1] - b.score[1] ||
+        a.path.length - b.path.length ||
+        (a.path < b.path ? -1 : 1),
+    )
     .map((m) => m.path);
 };
