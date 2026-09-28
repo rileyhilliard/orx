@@ -1,9 +1,17 @@
-import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  truncateSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { Effect, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GrepInput } from "~/schemas";
 import { FileState } from "~/services/file-state";
 import { Permissions } from "~/services/permissions";
@@ -11,7 +19,7 @@ import { Workspace } from "~/services/workspace";
 import { AgentTools, AgentToolsLive } from "~/tools/agent";
 import { globFiles } from "~/tools/glob";
 import { grepFiles, hasRipgrep } from "~/tools/grep";
-import { GLOB_MAX_RESULTS } from "~/tools/limits";
+import { GLOB_MAX_RESULTS, READ_MAX_FILE_BYTES } from "~/tools/limits";
 import { readFile } from "~/tools/read";
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "orx-tools-")));
@@ -92,6 +100,15 @@ describe("read", () => {
     );
   });
 
+  it("refuses a file over the size cap instead of loading it", async () => {
+    const root = tempDir();
+    writeFileSync(join(root, "huge.log"), "");
+    truncateSync(join(root, "huge.log"), READ_MAX_FILE_BYTES + 1);
+    expect((await run(root, readFile({ path: "huge.log" }))).failure).toMatch(
+      /^huge\.log: is \d+ bytes, more than read takes .*use grep/,
+    );
+  });
+
   it("fails for a missing file, a directory, a secret-shaped path, and a path outside", async () => {
     const root = tempDir();
     mkdirSync(join(root, "src"));
@@ -165,6 +182,17 @@ describe("glob", () => {
     expect((await run(root, globFiles({ pattern: "*", path: "/" }))).failure).toContain(
       "outside the workspace",
     );
+  });
+
+  it("skips a file symlink that leads outside the workspace", async () => {
+    const outside = tempDir();
+    writeFileSync(join(outside, "secret.txt"), "x");
+    const root = tempDir();
+    writeFileSync(join(root, "a.txt"), "x");
+    symlinkSync(join(outside, "secret.txt"), join(root, "escape.txt"));
+    symlinkSync("a.txt", join(root, "alias.txt"));
+    const all = await run(root, globFiles({ pattern: "*.txt" }));
+    expect(all.value?.split("\n").sort()).toEqual(["a.txt", "alias.txt"]);
   });
 });
 
@@ -251,6 +279,23 @@ describe.each([
     expect((await grep(root, { pattern: "needle", path: "src" })).value).toBe("src/a.ts\nsrc/b.md");
   });
 
+  it.skipIf(skip)(
+    "doesn't follow a file symlink outside the workspace or into a secret",
+    async () => {
+      const outside = tempDir();
+      writeFileSync(join(outside, "leak.txt"), "needle outside\n");
+      const root = tempDir();
+      writeFileSync(join(root, "a.txt"), "needle\n");
+      writeFileSync(join(root, ".env"), "needle=hunter2\n");
+      symlinkSync(join(outside, "leak.txt"), join(root, "escape.txt"));
+      symlinkSync(".env", join(root, "notes.txt"));
+      const content = await grep(root, { pattern: "needle", output_mode: "content" });
+      expect(content.value).not.toContain("outside");
+      expect(content.value).not.toContain("hunter2");
+      expect(content.value?.split("\n")[0]).toBe("a.txt:1:needle");
+    },
+  );
+
   it.skipIf(skip)("searches one file, reports no matches, and fails on a bad regex", async () => {
     const root = grepFixture();
     expect((await grep(root, { pattern: "needle", path: "src/b.md" })).value).toBe("src/b.md");
@@ -259,6 +304,23 @@ describe.each([
     expect((await grep(root, { pattern: "x", path: "../" })).failure).toContain(
       "outside the workspace",
     );
+  });
+});
+
+describe("grep with rg", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.skipIf(!rgInstalled)("ignores RIPGREP_CONFIG_PATH, which could turn on --follow", async () => {
+    const outside = tempDir();
+    writeFileSync(join(outside, "leak.txt"), "needle outside\n");
+    writeFileSync(join(outside, "ripgreprc"), "--follow\n");
+    const root = tempDir();
+    writeFileSync(join(root, "a.txt"), "needle\n");
+    symlinkSync(join(outside, "leak.txt"), join(root, "escape.txt"));
+    vi.stubEnv("RIPGREP_CONFIG_PATH", join(outside, "ripgreprc"));
+    expect((await run(root, grepFiles({ pattern: "needle" }, true))).value).toBe("a.txt");
   });
 });
 

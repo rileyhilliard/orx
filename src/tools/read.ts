@@ -3,7 +3,12 @@ import { Tool } from "effect/unstable/ai";
 import { ReadInput, ToolFailure } from "~/schemas";
 import { FileState } from "../services/file-state";
 import { Workspace } from "../services/workspace";
-import { BINARY_SNIFF_BYTES, READ_DEFAULT_LINES, READ_MAX_LINE_CHARS } from "./limits";
+import {
+  BINARY_SNIFF_BYTES,
+  READ_DEFAULT_LINES,
+  READ_MAX_FILE_BYTES,
+  READ_MAX_LINE_CHARS,
+} from "./limits";
 import { permit } from "./permit";
 
 export const Read = Tool.make("read", {
@@ -52,6 +57,11 @@ export const readFile = ({ path: input, offset = 1, limit = READ_DEFAULT_LINES }
         ),
       );
     if (info.type === "Directory") return yield* failed("is a directory; use glob to list it");
+    if (Number(info.size) > READ_MAX_FILE_BYTES) {
+      return yield* failed(
+        `is ${Number(info.size)} bytes, more than read takes (${READ_MAX_FILE_BYTES}); use grep to find the lines you need`,
+      );
+    }
     const bytes = yield* fs.readFile(path).pipe(Effect.mapError((e) => failed(e.reason._tag)));
     if (isBinary(bytes)) return `(${shown} is a binary file, ${bytes.length} bytes; not shown)`;
     yield* fileState.record(path, bytes).pipe(Effect.mapError((e) => failed(e.reason._tag)));

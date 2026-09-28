@@ -91,7 +91,9 @@ const ripgrep = (root: string, target: string, input: GrepInput, collector: Coll
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const path = yield* Path.Path;
-    const scope = ["--hidden", "--no-require-git", "--glob", "!.git"];
+    // --no-config: a RIPGREP_CONFIG_PATH file could add --follow and reach outside the root.
+    // Without --follow, rg skips symlinks it meets while walking.
+    const scope = ["--no-config", "--hidden", "--no-require-git", "--glob", "!.git"];
     if (input.glob !== undefined) scope.push("--glob", input.glob);
     const relative = path.relative(root, target) || ".";
     // The files in scope, to count the secret-shaped ones the search below leaves out.
@@ -157,7 +159,7 @@ const jsGrep = (root: string, target: string, input: GrepInput, collector: Colle
     const info = yield* Effect.option(fs.stat(target));
     const files: ReadonlyArray<WalkEntry> =
       Option.isSome(info) && info.value.type === "File"
-        ? [{ path: target, mtimeMs: 0, size: Number(info.value.size) }]
+        ? [{ path: target, realPath: target, mtimeMs: 0, size: Number(info.value.size) }]
         : yield* walkFiles(root, target);
     // Like rg --glob: a pattern without a slash matches the file name at any depth.
     const matchesGlob =
@@ -166,7 +168,8 @@ const jsGrep = (root: string, target: string, input: GrepInput, collector: Colle
         : picomatch(input.glob, { dot: true, basename: !input.glob.includes("/") });
     for (const file of files) {
       if (!matchesGlob(path.relative(target, file.path) || path.basename(file.path))) continue;
-      if (isSecretPath(file.path)) {
+      // A symlink's name can hide what it points at (notes.txt -> .env).
+      if (isSecretPath(file.path) || isSecretPath(file.realPath)) {
         collector.skipSecrets(1);
         continue;
       }
@@ -229,7 +232,7 @@ export const grepFiles = (input: GrepInput, useRipgrep: boolean) =>
         fs.stat(file).pipe(
           Effect.map((info) => mtimeOf(info)),
           Effect.orElseSucceed(() => 0),
-          Effect.map((mtimeMs): WalkEntry => ({ path: file, mtimeMs, size: 0 })),
+          Effect.map((mtimeMs): WalkEntry => ({ path: file, realPath: file, mtimeMs, size: 0 })),
         ),
       );
       files.splice(0, files.length, ...stamped.sort(newestFirst).map((entry) => entry.path));

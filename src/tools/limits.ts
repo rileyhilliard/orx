@@ -4,6 +4,8 @@
 export const READ_DEFAULT_LINES = 2000;
 /** `read` cuts a line longer than this many characters. */
 export const READ_MAX_LINE_CHARS = 2000;
+/** `read` refuses a file larger than this: it loads the whole file to number its lines. */
+export const READ_MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** A file with a NUL byte in its first this-many bytes is treated as binary. */
 export const BINARY_SNIFF_BYTES = 8000;
 

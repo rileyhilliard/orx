@@ -21,8 +21,10 @@ export const Glob = Tool.make("glob", {
 });
 
 export interface WalkEntry {
-  /** Absolute path. */
+  /** Absolute path, as found under the walk's start. */
   readonly path: string;
+  /** The file's real path (different from `path` when a symlink is on the way). */
+  readonly realPath: string;
   readonly mtimeMs: number;
   readonly size: number;
 }
@@ -35,9 +37,9 @@ interface IgnoreRule {
 
 /**
  * Every file under `start` (a resolved path inside `root`), skipping `.git` and whatever the
- * `.gitignore` files from `root` down say. Directories reached through a symlink are walked only
- * when they resolve inside `root`, and each real directory once. Unreadable entries are skipped:
- * a search lists what it can see.
+ * `.gitignore` files from `root` down say. Symlinks are followed only when they resolve inside
+ * `root` (files and directories alike), and each real directory is walked once. Unreadable
+ * entries are skipped: a search lists what it can see.
  */
 export const walkFiles = (root: string, start: string) =>
   Effect.gen(function* () {
@@ -93,8 +95,11 @@ export const walkFiles = (root: string, start: string) =>
               yield* visit(file, realDir.value, rules);
             }
           } else if (info.value.type === "File" && !isIgnored(rules, file, false)) {
+            const realFile = yield* Effect.option(fs.realPath(file));
+            if (Option.isNone(realFile) || !within(realFile.value)) continue;
             files.push({
               path: file,
+              realPath: realFile.value,
               mtimeMs: mtimeOf(info.value),
               size: Number(info.value.size),
             });
