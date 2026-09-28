@@ -16,7 +16,7 @@ paths:
 
 - `src/tui/launch.tsx` is the only TUI file that imports `effect`. `makeBridge` captures `Effect.context()` and hands components a `UiBridge` (`src/tui/types.ts`): plain data (`model`), promises (`ask(prompt)`, run with `Effect.runPromiseWith(context)`), and `quit`. Errors arrive already mapped to `{ message, retryable }`: `ask` never rejects, it resolves to an `error` reply. Components never import `effect`, `~/core`, or `~/services` (the `guard-boundaries` hook and the Grit rule deny `effect` imports under `src/tui/` outside `launch.tsx`).
 - Something new a component needs goes on `UiBridge` as a plain function, built in `launch.tsx` from an Effect program. Keep the types in `types.ts` free of Effect types. A streaming reply would be an async iterable built with `Stream.toAsyncIterableWith(context)`; stopping it is `iterator.return()`, which the stream sees as a `Success` exit, not an interruption (`effect-ai.md`).
-- `commands/ui.ts` and `commands/doctor.ts` (for `--tui`) load the bridge through `importTui` in `commands/load-tui.ts`, a dynamic `import("../tui/launch")` that turns a load failure into `TuiUnavailable`, so no other command, and no vitest test, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every vitest file that imports the command tree. The `guard-boundaries` hook and the Grit rule deny one (type-only imports included, so shared types live outside `src/tui/`).
+- `commands/ui.ts` and `commands/doctor.ts` (for `--tui`) load the bridge through `importTui` in `commands/load-tui.ts`, a dynamic `import("../tui/launch")` that turns a load failure into `TuiUnavailable`, so no other command, and no test outside `tests/tui/`, loads OpenTUI. Keep it that way: a static import of anything under `src/tui/` from outside it would load OpenTUI on every run and into every test file that imports the command tree. The `guard-boundaries` hook and the Grit rule deny one (type-only imports included, so shared types live outside `src/tui/`).
 
 ## Terminal and signal ownership
 
@@ -35,7 +35,7 @@ paths:
 
 ## Tests
 
-- TUI tests are `bun test` only (`bun run test:tui`, or `bun test ./tests/tui/<file>`): `testRender` from `@opentui/react/test-utils` needs Bun, and vitest excludes `tests/tui/`. `tests/tui/setup.ts` (bunfig preload) isolates the env the way vitest's setup does.
+- TUI tests run with the rest (`bun run test`), or alone with `bun run test:tui` or `bun test ./tests/tui/<file>`. They share one process with the unit tests, after the same preload (`tests/setup.ts`), so destroy every renderer a test creates.
 - Render with `render(<App bridge={fake} />, { width, height })` from `tests/tui/render.ts` (`testRender` with React's act warnings off), drive with `mockInput` (`typeText`, `pressEnter`, `pressKey`, `pressCtrlC`), and assert on `captureCharFrame()`. A fake `UiBridge` is a plain object with an `ask` that returns a promise; no Effect needed. `closed-loop.test.tsx` builds the real bridge over the stub OpenRouter.
 - Wait with `waitForScreen(setup, predicate)` from `tests/tui/render.ts`, which renders until the frame matches or a deadline passes. `waitForFrame` stops as soon as the renderer has nothing scheduled, before React commits a state update that arrives from a promise, even a fake bridge's.
 - Destroy the renderer after each test (`renderer.destroy()`), or its process handlers and raw-mode stdin leak into the next one.

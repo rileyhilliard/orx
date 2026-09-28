@@ -8,7 +8,7 @@ import { type StubReleases, sha256, startStubReleases } from "../tests/helpers/s
 
 // The compiled binary (`bun run e2e` builds dist/orx first), run the way users run it: as a
 // process, with a clean env, against the stub OpenRouter and stub releases. Behavior belongs in
-// vitest; this checks what only the real binary can show (the stdout contract through Bun's
+// tests/; this checks what only the real binary can show (the stdout contract through Bun's
 // real stdio, the TUI in a real terminal, the embedded native library, install.sh).
 
 const ROOT = join(import.meta.dir, "..");

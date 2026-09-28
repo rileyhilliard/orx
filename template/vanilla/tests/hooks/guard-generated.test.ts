@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "bun:test";
 import { denyReason, makeFixture, REPO, runHook, write } from "../helpers/hooks";
 
 const run = (filePath: string, env?: Record<string, string>) =>

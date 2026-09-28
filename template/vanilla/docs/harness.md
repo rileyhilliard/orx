@@ -23,9 +23,9 @@ Layers are listed earliest first. "Rule" means a file in `.claude/rules/src/` th
 
 | Mistake | Prevention | Blocked or flagged | Backstop |
 | --- | --- | --- | --- |
-| Running the wrong test runner (bare `bun test`, vitest on `tests/tui`) | `AGENTS.md`, `testing.md` rule | `guard-commands.ts` denies it with the right command | none needed: the command never runs |
+| Running the wrong test runner (vitest) or installing a removed one | `AGENTS.md`, `testing.md` rule | `guard-commands.ts` denies it with the right command | none needed: the command never runs |
 | Destroying work (`git reset --hard`, force push, `rm -rf /`) | none | `block-destructive.ts` denies it; `permissions.deny` repeats the worst shapes | `tests/hooks/` |
-| Importing `bun:*`, `@effect/platform-bun`, or `@opentui/*` outside `src/bin.ts` and `src/tui/` | `cli.md`, `tui.md` rules | `guard-boundaries.ts` denies the write; the Grit plugin flags it | vitest fails to load the module on Node, then CI |
+| Importing `bun:*`, `@effect/platform-bun`, or `@opentui/*` outside `src/bin.ts` and `src/tui/` | `cli.md`, `tui.md` rules | `guard-boundaries.ts` denies the write; the Grit plugin flags it | `bun run lint` in CI (the Grit rule) |
 | Writing to stdout outside `Output` (a stray line breaks pipes and `--json`) | `cli.md` rule | `guard-boundaries.ts` and the Grit plugin flag `console.*`, and `process.stdout`/`process.stderr` outside the few files that own them | `tests/cli-contract.test.ts` and e2e assert stdout is empty on errors and holds one JSON object with `--json` |
 | A new error without an exit code | `cli.md` rule | `tsc`: `exitCodeFor` and `retryableFor` switch exhaustively | `tests/units.test.ts` pins every code |
 | Hand-editing generated files (`dist/`, `coverage/`, `bun.lock`) | `AGENTS.md` conventions | `guard-generated.ts` denies it and names the regenerating command | regenerating overwrites a hand edit anyway |
@@ -72,7 +72,7 @@ sequenceDiagram
 
 Run these from the repo root in your own terminal.
 
-1. A hook denies a command (30 seconds): `echo '{"tool_name":"Bash","tool_input":{"command":"bun test"}}' | bun .claude/hooks/guard-commands.ts` prints a deny with the right command. `bun run test:unit tests/hooks` runs every hook test.
+1. A hook denies a command (30 seconds): `echo '{"tool_name":"Bash","tool_input":{"command":"npx vitest"}}' | bun .claude/hooks/guard-commands.ts` prints a deny with the right command. `bun test ./tests/hooks` runs every hook test.
 2. The boundary plugin flags a platform import (30 seconds): add `import "bun:ffi";` to `src/core/ask.ts`, run `bun run lint`, and remove it.
 3. Drive the CLI with no key (1 minute): `eval "$(bun run --silent stub)"`, then `bun run orx -- ask "hi"`, `bun run orx -- ask --bogus --json; echo $?` (stdout empty, exit 2), and `jq -c 'select(.msg=="command")' logs/orx.jsonl`.
 4. See the TUI as an agent does (30 seconds): `bun run tui:capture -- ui --keys "hi<enter>" --wait-for "in /"`.

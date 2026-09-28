@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { usageLine } from "~/core/format";
 import { checksumFor } from "~/core/update";
 import {

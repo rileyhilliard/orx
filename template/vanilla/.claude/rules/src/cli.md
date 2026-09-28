@@ -19,11 +19,11 @@ paths:
 - Shared flags live in `src/commands/shared.ts` (`jsonFlag`, `modelFlag`). Reuse them so `--json` and `--model`/`-m` mean the same thing everywhere.
 - A command that talks to the model takes `modelFlag`; `OPENROUTER_MODEL` (`config.defaultModel`) applies only when no model was given. Ids aren't checked against a list: OpenRouter rejects an unknown one (exit 4, not retryable). Yield `(yield* Llm).ready` before reading stdin, so a missing key fails (exit 3) before the command waits on a pipe. Config is loaded inside the program that needs it (`loadConfig`), never at the top of `main`: `--help`, `--version`, `doctor`, and `update` must work with no key and a broken config file.
 - Piped input: `readPipedStdin` returns `undefined` at a terminal, so a command never blocks on a keyboard it didn't ask for. `orx ui` needs a TTY on stdin and stdout and fails with `NotInteractive` (exit 2) pointing at `orx ask` otherwise.
-- Interactive-only code (the TUI) is loaded through `importTui` (`src/commands/load-tui.ts`, a dynamic `import("../tui/launch")`) inside the handler, so vitest and every other command never load OpenTUI.
+- Interactive-only code (the TUI) is loaded through `importTui` (`src/commands/load-tui.ts`, a dynamic `import("../tui/launch")`) inside the handler, so tests and every other command never load OpenTUI.
 
 ## Platform boundary
 
-vitest runs everything except `tests/tui/` on Node, so only `src/bin.ts` and `src/tui/**` may use `bun`, `bun:*`, the `Bun` global, `@effect/platform-bun`, or `@opentui/*`. Everything else uses Effect's `FileSystem`, `Path`, `Stdio`, `Terminal`, and `HttpClient`, provided by `BunServices` in `bin.ts` and `NodeServices` in tests. `process.env` is read only in `src/config.ts` (and `bin.ts`, which deletes `DEV` so `@opentui/react` never loads its devtools for a user with `DEV=true`). The `guard-boundaries` hook denies these before the write and `biome-plugins/boundaries.grit` fails lint on them. If a rule is wrong for a case, change both, don't route around them.
+The core is platform-free and gets its platform from `bin.ts`: only `src/bin.ts` and `src/tui/**` may use `bun`, `bun:*`, the `Bun` global, `@effect/platform-bun`, or `@opentui/*`. Everything else uses Effect's `FileSystem`, `Path`, `Stdio`, `Terminal`, and `HttpClient`, provided by `BunServices` in `bin.ts` (and in `tests/helpers/cli.ts`, with a test `Stdio`). `process.env` is read only in `src/config.ts` (and `bin.ts`, which deletes `DEV` so `@opentui/react` never loads its devtools for a user with `DEV=true`). The `guard-boundaries` hook denies these before the write and `biome-plugins/boundaries.grit` fails lint on them. If a rule is wrong for a case, change both, don't route around them.
 
 ## stdout contract
 
@@ -45,4 +45,4 @@ stdout carries results only; `orx ... | jq` and every script reading `--json` de
 
 ## Tests
 
-Every command gets argv-level tests through `runCli` (`tests/helpers/cli.ts`), which runs the same `main` and `AppLayer` on Node with stdin, stdout, stderr, and logs captured. Assert the exit code, that stdout holds only the result (and is empty on failure), the `--json` shape, and the stderr message. `tests/cli-contract.test.ts` holds the cross-command contract (bad flag, `--json` errors, help to stdout, exit codes).
+Every command gets argv-level tests through `runCli` (`tests/helpers/cli.ts`), which runs the same `main` and `AppLayer` on `BunServices` with stdin, stdout, stderr, and logs captured. Assert the exit code, that stdout holds only the result (and is empty on failure), the `--json` shape, and the stderr message. `tests/cli-contract.test.ts` holds the cross-command contract (bad flag, `--json` errors, help to stdout, exit codes).

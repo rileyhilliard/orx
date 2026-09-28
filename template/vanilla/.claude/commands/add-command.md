@@ -16,7 +16,7 @@ If the request is ambiguous (what goes in, what comes out on stdout and with `--
    - success: stdout holds exactly the result, as text and with `--json`; exit 0
    - each tagged error: its exit code, the message on stderr, stdout empty, and `{"error":{tag,message,retryable}}` on stderr with `--json`
    - a usage error (missing argument, bad flag): exit 2, stdout empty
-   - the program with `it.effect` if it has time-based or retry behavior
+   - the program with `runTest` (`tests/helpers/effect.ts`, the TestClock) if it has time-based or retry behavior
    - the stub OpenRouter or stub releases for any HTTP it does, so no test touches the network
 5. **Docs**: the command and its exit codes in the README Commands section, the architecture map in `AGENTS.md` if a new file or directory appeared.
 6. `/check`, then run it for real: `bun run stub`, export its env, `bun run orx -- <name> ...` with and without `--json`, and read `logs/orx.jsonl` for its `command` line. If only the compiled binary could break it, add one step to `e2e/`.

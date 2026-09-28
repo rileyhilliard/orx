@@ -11,12 +11,12 @@ paths:
 
 # Services, config, errors (Effect)
 
-Everything outside `src/tui/` and `src/bin.ts` is plain Effect that runs on Node (vitest) and on Bun (the binary) unchanged. The Effect version and when to load the `effect` skill are in `effect.md`.
+Everything outside `src/tui/` and `src/bin.ts` is plain Effect with no platform of its own: `src/bin.ts` provides it, and tests provide the same `BunServices`. The Effect version and when to load the `effect` skill are in `effect.md`.
 
 ## Services and layers
 
 - A service is a `Context.Service` class in `src/services/` with id `"orx/<Name>"` and its layers as statics: `static readonly layer` for the app, plus a test variant named by what differs (`X.layerMemory`, say) only where a test needs one. The model has no test layer: tests point the real `Llm.layer` at the stub OpenRouter (`testing.md`). Add it to `AppLayer` in `src/runtime.ts`.
-- `AppLayer` never builds platform services. `FileSystem`, `Path`, `Stdio`, `Terminal`, `ChildProcessSpawner`, `HttpClient`, and `Host` come from outside: `BunServices.layer` + `FetchHttpClient.layer` in `src/bin.ts`, `NodeServices.layer` + `Stdio.layerTest` in `tests/helpers/cli.ts`. A service that needs the platform yields the abstract service (`yield* FileSystem.FileSystem`), never a Bun or Node API.
+- `AppLayer` never builds platform services. `FileSystem`, `Path`, `Stdio`, `Terminal`, `ChildProcessSpawner`, `HttpClient`, and `Host` come from outside: `BunServices.layer` + `FetchHttpClient.layer` in `src/bin.ts`, `BunServices.layer` + `Stdio.layerTest` in `tests/helpers/cli.ts`. A service that needs the platform yields the abstract service (`yield* FileSystem.FileSystem`), never a Bun or Node API.
 - One process, one run: there is no hot reload and no `globalThis` state. A layer is built once per invocation. Caches (the OpenRouter client from `Effect.cached` in `Llm`) live inside the layer's closure.
 - Services depend on other services through the context (`yield* OtherService`), never by providing another service's layer inside a constructor. Yield dependencies in the layer constructor, not in each method, so methods return `Effect<A, E, never>`.
 - Building a layer must not read config that can fail. `AppConfig.load` is lazy and cached: a service yields `AppConfig` in its constructor and runs `load` inside the method that needs settings. That's what keeps `--help`, `--version`, `doctor`, and `update` working with a broken config file.

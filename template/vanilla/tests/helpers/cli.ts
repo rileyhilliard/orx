@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+import { BunServices } from "@effect/platform-bun";
 import {
   ConfigProvider,
   Effect,
@@ -51,7 +51,7 @@ export interface RunResult {
 export const tempRoot = () => mkdtempSync(join(tmpdir(), "orx-run-"));
 
 /**
- * Runs orx exactly as src/bin.ts does (the same `main` and AppLayer), on Node, with stdin,
+ * Runs orx exactly as src/bin.ts does (the same `main`, AppLayer, and BunServices), with stdin,
  * stdout, stderr, and logs captured. The model and releases are whatever OPENROUTER_BASE_URL
  * and ORX_RELEASES_URL point at: a stub, or (by default) nothing reachable.
  */
@@ -102,7 +102,7 @@ export const runCli = async (
     stdoutIsTerminal: Effect.succeed(options.stdoutIsTerminal ?? false),
   });
   const platform = Layer.mergeAll(
-    Layer.merge(NodeServices.layer, stdio),
+    Layer.merge(BunServices.layer, stdio),
     FetchHttpClient.layer,
     Host.layer({
       execPath: join(root, "bin", "orx"),
