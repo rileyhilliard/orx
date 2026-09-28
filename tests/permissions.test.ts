@@ -37,6 +37,11 @@ describe("permission rules", () => {
       "AGENTS.md",
       "CLAUDE.md",
       ".orx/commands/deploy.md",
+      ".orx/skills/release/SKILL.md",
+      // Case-insensitive file systems (macOS, Windows) treat these as the protected paths.
+      ".GIT/config",
+      "Package.json",
+      ".ORX/Commands/deploy.md",
     ]) {
       expect(isProtectedPath(path), path).toBe(true);
       expect(decide("acceptEdits", edit(path), none), path).toBe("ask");
@@ -66,7 +71,17 @@ describe("permission rules", () => {
   });
 
   it("treats chaining, pipes, substitution, and redirects as compound", () => {
-    for (const command of ["a; b", "a && b", "a | b", "echo $HOME", "echo `x`", "a > f", "a < f"]) {
+    for (const command of [
+      "a; b",
+      "a && b",
+      "a | b",
+      "echo $HOME",
+      "echo `x`",
+      "a > f",
+      "a < f",
+      "ls\nrm -rf dist",
+      "ls\rrm -rf dist",
+    ]) {
       expect(isCompoundCommand(command), command).toBe(true);
     }
     expect(isCompoundCommand("bun run test -- tests/a.test.ts")).toBe(false);
@@ -152,6 +167,56 @@ describe("Permissions", () => {
       compoundOffered: false,
       askedAgain: "approval-request",
     });
+  });
+
+  it("offers 'always' only where it would allow what it says", async () => {
+    const offered = (request: PermissionRequest) =>
+      Effect.runPromise(
+        askAndAnswer(request, "yes").pipe(
+          Effect.map(({ event }) => event.type === "approval-request" && event.canAlways),
+        ),
+      );
+    expect(await offered(edit("src/a.ts"))).toBe(true);
+    // A secret read asks every time; "always" there would allow nothing more.
+    expect(await offered(read(".env"))).toBe(false);
+    // "always" on an edit switches to acceptEdits, which still asks for these.
+    expect(await offered(edit(".env"))).toBe(false);
+    expect(await offered(edit("package.json"))).toBe(false);
+  });
+
+  it("decides a queued request again once the earlier answer is in", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const permissions = yield* Permissions;
+        const first = yield* Effect.forkChild(permissions.check(edit("a.ts")));
+        const second = yield* Effect.forkChild(permissions.check(edit("b.ts")));
+        const [asked] = yield* Stream.runCollect(Stream.take(permissions.events, 1));
+        if (asked?.type !== "approval-request") throw new Error("expected a request");
+        yield* permissions.answer(asked.id, "always");
+        // Only the first was answered: the second is allowed without a panel of its own.
+        return {
+          asked: asked.summary,
+          results: [yield* Fiber.join(first), yield* Fiber.join(second)],
+        };
+      }).pipe(Effect.provide(Permissions.layer("default"))),
+    );
+    expect(outcome).toEqual({ asked: "Edit a.ts", results: ["allow", "allow"] });
+  });
+
+  it("denies a queued request when the mode switched to plan meanwhile", async () => {
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const permissions = yield* Permissions;
+        const first = yield* Effect.forkChild(permissions.check(edit("a.ts")));
+        const second = yield* Effect.forkChild(permissions.check(edit("b.ts")));
+        const [asked] = yield* Stream.runCollect(Stream.take(permissions.events, 1));
+        if (asked?.type !== "approval-request") throw new Error("expected a request");
+        yield* permissions.setMode("plan");
+        yield* permissions.answer(asked.id, "yes");
+        return [yield* Fiber.join(first), yield* Fiber.join(second)];
+      }).pipe(Effect.provide(Permissions.layer("default"))),
+    );
+    expect(results).toEqual(["allow", { deny: "plan mode: describe the change instead" }]);
   });
 
   it("cancelAll denies open requests and publishes their cancellation", async () => {

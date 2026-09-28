@@ -70,17 +70,25 @@ export interface PermissionsShape {
   readonly cancelAll: Effect.Effect<ReadonlyArray<string>>;
 }
 
-/** Paths a later approved command would run, so even acceptEdits asks before writing them. */
+/**
+ * Paths a later approved command would run or load, so even acceptEdits asks before writing
+ * them. Compared case-insensitively: on macOS and Windows, `.GIT/config` is `.git/config`.
+ */
 export const isProtectedPath = (relative: string): boolean => {
-  const parts = relative.split(/[\\/]/);
+  const parts = relative.toLowerCase().split(/[\\/]/);
   const name = parts.at(-1) ?? "";
   if (parts.includes(".git")) return true;
-  if (["package.json", "lefthook.yml", "AGENTS.md", "CLAUDE.md"].includes(name)) return true;
-  return parts.some((part, i) => part === ".orx" && parts[i + 1] === "commands");
+  if (["package.json", "lefthook.yml", "agents.md", "claude.md"].includes(name)) return true;
+  return parts.some(
+    (part, i) => part === ".orx" && (parts[i + 1] === "commands" || parts[i + 1] === "skills"),
+  );
 };
 
-/** "always" isn't offered for a command that chains, pipes, substitutes, or redirects. */
-export const isCompoundCommand = (command: string) => /[;&|$`<>]/.test(command);
+/**
+ * "always" isn't offered for a command that chains, pipes, substitutes, or redirects, or runs
+ * a second line.
+ */
+export const isCompoundCommand = (command: string) => /[;&|$`<>\n\r]/.test(command);
 
 const PLAN_DENIAL = "plan mode: describe the change instead";
 const HEADLESS_DENIAL =
@@ -116,8 +124,24 @@ export const decide = (
   }
 };
 
-const canAlwaysFor = (request: PermissionRequest) =>
-  request.tool !== "bash" || (request.command !== undefined && !isCompoundCommand(request.command));
+/**
+ * Whether "always" is on offer. Not for a read (it would allow nothing more), a compound
+ * command, or a secret or protected path: "always" on an edit switches to acceptEdits, which
+ * would still ask for those, so the answer would promise more than it does.
+ */
+const canAlwaysFor = (request: PermissionRequest) => {
+  if (request.path !== undefined && (isSecretPath(request.path) || isProtectedPath(request.path))) {
+    return false;
+  }
+  switch (request.tool) {
+    case "read":
+      return false;
+    case "bash":
+      return request.command !== undefined && !isCompoundCommand(request.command);
+    default:
+      return true;
+  }
+};
 
 const make = (initial: PermissionMode, interactive: boolean) =>
   Effect.gen(function* () {
@@ -128,6 +152,9 @@ const make = (initial: PermissionMode, interactive: boolean) =>
     // One approval panel at a time: parallel tool calls wait their turn to ask.
     const asking = yield* Semaphore.make(1);
     let nextId = 0;
+
+    const verdictFor = (request: PermissionRequest) =>
+      Effect.map(SubscriptionRef.get(modeRef), (mode) => decide(mode, request, allowedCommands));
 
     const ask = (request: PermissionRequest) =>
       Effect.gen(function* () {
@@ -162,7 +189,7 @@ const make = (initial: PermissionMode, interactive: boolean) =>
           }
         }
         return "allow" as const;
-      }).pipe(Semaphore.withPermit(asking));
+      });
 
     return {
       mode: SubscriptionRef.get(modeRef),
@@ -170,10 +197,15 @@ const make = (initial: PermissionMode, interactive: boolean) =>
       modeChanges: SubscriptionRef.changes(modeRef),
       check: (request) =>
         Effect.gen(function* () {
-          const verdict = decide(yield* SubscriptionRef.get(modeRef), request, allowedCommands);
+          const verdict = yield* verdictFor(request);
           if (verdict !== "ask") return verdict;
           if (!interactive) return { deny: `${request.tool} ${HEADLESS_DENIAL}` };
-          return yield* ask(request);
+          // While this call waited for the panel, an earlier answer ("always") or a mode switch
+          // may have settled it: decide again before asking.
+          return yield* Effect.gen(function* () {
+            const now = yield* verdictFor(request);
+            return now === "ask" ? yield* ask(request) : now;
+          }).pipe(Semaphore.withPermit(asking));
         }),
       events: Stream.fromQueue(queue),
       answer: (id, decision) =>
