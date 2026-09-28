@@ -1,7 +1,11 @@
 // evals/score.ts and the case checks, on plain data. The runner (evals/run.ts) calls the real
 // API, so it's exercised only by a manual `bun run eval`.
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cases, type Outcome } from "../evals/cases";
+import { type CodingCase, cases, type Outcome } from "../evals/cases";
 import {
   type CaseRun,
   formatModelSummaries,
@@ -205,5 +209,67 @@ describe("case checks", () => {
       'wrong phone ("555"), company ("Navy")',
     );
     expect(check(outcome())).toBe("no contact returned");
+  });
+});
+
+describe("the rename-across-files coding case", () => {
+  const rename = caseById("rename-across-files") as CodingCase;
+  const renamed = Object.fromEntries(
+    Object.entries(rename.files).map(([path, text]) => [
+      path,
+      text.replaceAll("fmtPrice", "formatPrice"),
+    ]),
+  );
+  const workspace = (
+    files: Record<string, string>,
+    test: { exitCode: number; output: string } = { exitCode: 0, output: "" },
+  ) => outcome({ workspace: { files, test } });
+
+  it("passes when every file is renamed and the test passes", () => {
+    expect(rename.check(workspace(renamed))).toBeUndefined();
+  });
+
+  it("names the files that still use the old name", () => {
+    expect(
+      rename.check(workspace({ ...renamed, "README.md": rename.files["README.md"] ?? "" })),
+    ).toBe("fmtPrice still in README.md");
+  });
+
+  it("fails a rename that dropped a call site instead of renaming it", () => {
+    const dropped = { ...renamed, "src/receipt.ts": "export const receipt = () => '';\n" };
+    expect(rename.check(workspace(dropped))).toBe("formatPrice missing from src/receipt.ts");
+  });
+
+  it("fails when files were added or removed", () => {
+    const { "src/cart.ts": _, ...withoutCart } = renamed;
+    expect(rename.check(workspace({ ...withoutCart, "src/new.ts": "" }))).toBe(
+      "added src/new.ts, removed src/cart.ts",
+    );
+  });
+
+  it("fails with the test's first line of output when it exits non-zero", () => {
+    expect(
+      rename.check(workspace(renamed, { exitCode: 1, output: 'got ["$12.50"]\nmore\n' })),
+    ).toBe('the test exited 1: got ["$12.50"]');
+  });
+
+  it("fails without a workspace (the turn never ran)", () => {
+    expect(rename.check(outcome())).toBe("no workspace recorded");
+  });
+
+  // The case's own fixture: its test must fail on the files as given and pass once renamed,
+  // or the eval measures nothing.
+  const runTest = (files: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), "orx-eval-case-"));
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, dirname(path)), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+    return spawnSync("bun", ["-e", rename.test], { cwd: dir, encoding: "utf8" }).status;
+  };
+
+  it("has a test that fails before the rename and passes after it", () => {
+    expect(runTest(rename.files)).not.toBe(0);
+    expect(runTest(renamed)).toBe(0);
   });
 });
