@@ -88,6 +88,7 @@ const REMOVE = [
   "tests/agent-tools.test.ts",
   "tests/agent-write-tools.test.ts",
   "src/tui/picker.tsx",
+  "tests/ask-agent.test.ts",
   "tests/chat-turn.test.ts",
   "tests/evals.test.ts",
   "tests/fixtures",
